@@ -34,7 +34,7 @@ jobs:
       - name: Bundle standalone web build
         run: |
           mkdir -p dist
-          npx --yes w4 bundle zig-out/bin/cart.wasm \
+          npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm \
             --html dist/index.html \
             --title "panelpon4" \
             --description "A Panel de Pon-style match-3 for WASM-4"

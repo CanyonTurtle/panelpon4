@@ -20,10 +20,12 @@ zig build
 
 ## Running
 
-Install the WASM-4 CLI (requires Node/npm) and run the cart:
+Install the WASM-4 CLI (requires Node/npm) and run the cart. The npm package is called `wasm4`
+(it provides a `w4` command), so on a machine without it already resolved, use `-p wasm4` to be
+explicit about which package to fetch:
 
 ```sh
-npx w4 run zig-out/bin/cart.wasm
+npx --yes -p wasm4 w4 run zig-out/bin/cart.wasm
 ```
 
 This serves the cart at `http://localhost:4444` and opens it in your browser, with hot-reload on rebuild.
@@ -33,7 +35,7 @@ This serves the cart at `http://localhost:4444` and opens it in your browser, wi
 To produce a single self-contained HTML file (playable offline, no server needed):
 
 ```sh
-npx w4 bundle zig-out/bin/cart.wasm --html web/panelpon4.html --title "panelpon4"
+npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm --html web/panelpon4.html --title "panelpon4"
 ```
 
 ## How to play
