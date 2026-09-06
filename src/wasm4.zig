@@ -24,6 +24,10 @@ pub const BUTTON_RIGHT: u8 = 32;
 pub const BUTTON_UP: u8 = 64;
 pub const BUTTON_DOWN: u8 = 128;
 
+pub const MOUSE_LEFT: u8 = 1;
+pub const MOUSE_RIGHT: u8 = 2;
+pub const MOUSE_MIDDLE: u8 = 4;
+
 pub const SYSTEM_PRESERVE_FRAMEBUFFER: u8 = 1;
 pub const SYSTEM_HIDE_GAMEPAD_OVERLAY: u8 = 2;
 

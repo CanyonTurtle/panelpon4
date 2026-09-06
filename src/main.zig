@@ -180,6 +180,13 @@ var prev_gamepad: u8 = 0;
 var held_dir: u8 = 0;
 var das_counter: u8 = 0;
 
+// Touch/mouse drag-to-swap state: while a touch is held, dragging across a
+// column boundary immediately performs that swap (rather than requiring a
+// separate "move cursor" then "confirm swap" step, since a drag gesture
+// already expresses both at once).
+var touch_down: bool = false;
+var touch_col: u8 = 0;
+
 // ---------------------------------------------------------------------
 // RNG
 // ---------------------------------------------------------------------
@@ -360,8 +367,65 @@ fn updateCursorMovement(gp: u8) void {
     }
 }
 
+// Drag-to-swap: touching (or clicking) sets the cursor to the touched tile
+// without swapping yet, but once a touch is held and dragged across a column
+// boundary, each boundary crossed immediately performs that swap -- a drag
+// gesture already expresses both "move here" and "swap" in one motion, so it
+// shouldn't need a separate confirm step the way the gamepad does.
+fn updateTouch() void {
+    const buttons = w4.MOUSE_BUTTONS.*;
+    if (buttons & w4.MOUSE_LEFT == 0) {
+        touch_down = false;
+        return;
+    }
+
+    const mx = w4.MOUSE_X.*;
+    const my = w4.MOUSE_Y.*;
+    const board_w = @as(i32, COLS) * TILE;
+    const board_h = @as(i32, VISIBLE_ROWS) * TILE;
+    if (mx < BOARD_X or mx >= BOARD_X + board_w or my < BOARD_Y or my >= BOARD_Y + board_h) {
+        // Outside the board: while dragging, just hold position rather than
+        // snapping to a clamped edge, so wandering slightly off the board
+        // and back doesn't jump the cursor around.
+        return;
+    }
+
+    const col: u8 = @intCast(@divTrunc(@as(i32, mx) - BOARD_X, TILE));
+    var row_signed = @divTrunc(@as(i32, my) - BOARD_Y + @as(i32, @intCast(scroll_px)), TILE);
+    if (row_signed < 0) row_signed = 0;
+    if (row_signed > VISIBLE_ROWS - 1) row_signed = VISIBLE_ROWS - 1;
+    const row: u8 = @intCast(row_signed);
+
+    if (!touch_down) {
+        touch_down = true;
+        touch_col = col;
+        cursor_row = row;
+        cursor_col = if (col >= COLS - 1) COLS - 2 else col;
+        return;
+    }
+
+    cursor_row = row;
+    while (touch_col < col) {
+        cursor_col = touch_col;
+        trySwap();
+        touch_col += 1;
+    }
+    while (touch_col > col) {
+        cursor_col = touch_col - 1;
+        trySwap();
+        touch_col -= 1;
+    }
+}
+
 fn swappable(s: CellState) bool {
-    return s == .empty or s == .normal;
+    // .swapping is included because it's purely a cosmetic slide animation --
+    // the underlying data exchange already happened instantly in trySwap --
+    // so grabbing a cell mid-animation just restarts its slide rather than
+    // leaving any inconsistent state. This matters for a fast multi-column
+    // drag: chaining several swaps within one frame would otherwise have
+    // every other one silently rejected, since each pair of adjacent swaps
+    // shares a cell that the first swap just put in .swapping.
+    return s == .empty or s == .normal or s == .swapping;
 }
 
 fn trySwap() void {
@@ -1046,6 +1110,7 @@ export fn update() void {
     if (!game_over) {
         updateCursorMovement(gp);
         if (justPressed(gp, w4.BUTTON_1)) trySwap();
+        updateTouch();
         simulate();
         if (!boardBusy()) chain = 0;
         updateRise();
