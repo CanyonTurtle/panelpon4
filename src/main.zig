@@ -148,9 +148,14 @@ const Cell = struct {
     // True on an empty cell that was just vacated by a pop, and on any
     // (formerly normal) block that falls through such a cell -- propagated
     // upward through however many blocks fall as part of the same cascade.
-    // A match that includes a chainable cell is a genuine chain continuation
-    // (something fell into place because of an earlier break); a match made
-    // of only ordinary settled blocks is not, even if it happens while some
+    // While falling, a cell can only *gain* chainable, never lose it: at
+    // each step it's the OR of its own status and the cell it's moving into
+    // (see the gravity loop), so a block passing through an ordinary gap on
+    // its way down to a further pop-vacated one still ends up chainable
+    // instead of getting reset by the ordinary gap in between. A match that
+    // includes a chainable cell is a genuine chain continuation (something
+    // fell into place because of an earlier break); a match made of only
+    // ordinary settled blocks is not, even if it happens while some
     // unrelated cascade elsewhere is still busy. Reverts to false the moment
     // a block settles back to .normal without being part of a match -- see
     // checkMatches.
@@ -453,18 +458,21 @@ fn simulate() void {
             const below = cellAt(r, c);
             const above = cellAt(r - 1, c);
             if (below.state == .empty and above.state == .normal) {
-                // Whether this fall is a chain continuation depends on
-                // whether the gap it's filling came from a pop -- carried by
-                // the gap's own chainable flag -- not on the falling block's
-                // own (should-be-false) one. Propagated to the cell it
+                // Chainable can only be gained while falling, never lost: it's
+                // the OR of the falling block's own status and the gap it's
+                // filling. Using only one or the other is wrong -- e.g. a
+                // block passing through an ordinary (non-chainable) gap on
+                // its way down to a *further* pop-vacated gap must still
+                // pick up chainable there, not get permanently reset to
+                // false by the intermediate gap. Propagated to the cell it
                 // vacates too, so a block further up the column inherits it
                 // when it falls through in a later frame.
-                const gap_chainable = below.chainable;
+                const new_chainable = below.chainable or above.chainable;
                 below.* = above.*;
                 below.state = .falling;
                 below.fall_off = TILE;
-                below.chainable = gap_chainable;
-                above.* = Cell{ .chainable = gap_chainable };
+                below.chainable = new_chainable;
+                above.* = Cell{ .chainable = new_chainable };
             }
 
             const cur = cellAt(r, c);
@@ -474,10 +482,11 @@ fn simulate() void {
                     cur.fall_off = 0;
                     if (r < ROWS - 1 and cellAt(r + 1, c).state == .empty) {
                         const next = cellAt(r + 1, c);
-                        const cur_chainable = cur.chainable;
+                        const new_chainable = cur.chainable or next.chainable;
                         next.* = cur.*;
                         next.fall_off = TILE;
-                        cur.* = Cell{ .chainable = cur_chainable };
+                        next.chainable = new_chainable;
+                        cur.* = Cell{ .chainable = new_chainable };
                     } else {
                         // Match-checking happens once the landing bounce
                         // finishes and the cell becomes .normal again (see
