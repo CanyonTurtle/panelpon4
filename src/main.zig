@@ -145,20 +145,18 @@ const Cell = struct {
     // hits 0, so the pop animation is staggered but the logical disappearance
     // -- and the gravity it triggers -- happens for the whole match at once.
     pop_group_end: i16 = 0,
-    // True on an empty cell that was just vacated by a pop, and on any
-    // (formerly normal) block that falls through such a cell -- propagated
-    // upward through however many blocks fall as part of the same cascade.
-    // While falling, a cell can only *gain* chainable, never lose it: at
-    // each step it's the OR of its own status and the cell it's moving into
-    // (see the gravity loop), so a block passing through an ordinary gap on
-    // its way down to a further pop-vacated one still ends up chainable
-    // instead of getting reset by the ordinary gap in between. A match that
-    // includes a chainable cell is a genuine chain continuation (something
-    // fell into place because of an earlier break); a match made of only
-    // ordinary settled blocks is not, even if it happens while some
-    // unrelated cascade elsewhere is still busy. Reverts to false the moment
-    // a block settles back to .normal without being part of a match -- see
-    // checkMatches.
+    // Marked true, all at once, on the whole contiguous stack of settled
+    // blocks directly above a pop the instant it finishes clearing (see
+    // simulate) -- not tracked through gravity as things actually fall,
+    // which only invites confusion from intermediate empty gaps a block
+    // might pass through on its way down. It then simply rides along
+    // whenever this cell's data is moved by gravity (a plain struct copy),
+    // however many frames that takes. A match that includes a chainable
+    // cell is a genuine chain continuation (something shifted because of an
+    // earlier break); a match made of only ordinary settled blocks is not,
+    // even if it happens while some unrelated cascade elsewhere is still
+    // busy. Reverts to false the moment a block settles back to .normal
+    // without being part of a match -- see checkMatches.
     chainable: bool = false,
 };
 
@@ -411,6 +409,15 @@ fn boardBusy() bool {
 
 fn simulate() void {
     var settled = false;
+    // Cells that completed a .swapping/.landing -> .normal transition this
+    // frame. Passed to checkMatches so it only reconsiders *those* cells'
+    // chainable status (see the cleanup there) -- a block marked chainable
+    // below but still waiting its turn to actually start falling (see the
+    // "mark the stack above" step) must not have its flag wiped out by some
+    // unrelated settle event elsewhere on the board in the meantime.
+    var just_settled: [ROWS][COLS]bool = std.mem.zeroes([ROWS][COLS]bool);
+    // Cells that finished popping (cleared to empty) this frame.
+    var just_cleared: [ROWS][COLS]bool = std.mem.zeroes([ROWS][COLS]bool);
 
     // Progress swap / pop / landing timers.
     for (0..ROWS) |lr| {
@@ -423,6 +430,7 @@ fn simulate() void {
                         cell.state = .normal;
                         cell.swap_dir = 0;
                         settled = true;
+                        just_settled[lr][c] = true;
                     }
                 },
                 .popping => {
@@ -432,10 +440,8 @@ fn simulate() void {
                     }
                     cell.pop_group_end -= 1;
                     if (cell.pop_group_end <= 0) {
-                        // Mark the vacated cell so whatever falls into it
-                        // (see the gravity loop below) is recognized as a
-                        // genuine chain continuation.
-                        cell.* = Cell{ .chainable = true };
+                        cell.* = Cell{};
+                        just_cleared[lr][c] = true;
                     }
                 },
                 .landing => {
@@ -443,10 +449,38 @@ fn simulate() void {
                     if (cell.timer <= 0) {
                         cell.state = .normal;
                         settled = true;
+                        just_settled[lr][c] = true;
                     }
                 },
                 else => {},
             }
+        }
+    }
+
+    // Mark the stack of settled blocks directly above each just-cleared pop
+    // as chainable, right at the moment the pop finishes -- not by tracking
+    // the flag through gravity as things fall, which only invites confusion
+    // from intermediate empty gaps. A later match involving one of these
+    // blocks (however many frames it takes gravity to actually get to them)
+    // is recognized as a genuine continuation of this break.
+    for (0..COLS) |ci| {
+        const c: u8 = @intCast(ci);
+        var top_cleared: ?u8 = null;
+        for (0..ROWS) |lr| {
+            if (just_cleared[lr][c]) {
+                top_cleared = @intCast(lr);
+                break;
+            }
+        }
+        const tc = top_cleared orelse continue;
+        if (tc == 0) continue;
+        var r: u8 = tc - 1;
+        while (true) {
+            const cell = cellAt(r, c);
+            if (cell.state != .normal) break;
+            cell.chainable = true;
+            if (r == 0) break;
+            r -= 1;
         }
     }
 
@@ -458,21 +492,10 @@ fn simulate() void {
             const below = cellAt(r, c);
             const above = cellAt(r - 1, c);
             if (below.state == .empty and above.state == .normal) {
-                // Chainable can only be gained while falling, never lost: it's
-                // the OR of the falling block's own status and the gap it's
-                // filling. Using only one or the other is wrong -- e.g. a
-                // block passing through an ordinary (non-chainable) gap on
-                // its way down to a *further* pop-vacated gap must still
-                // pick up chainable there, not get permanently reset to
-                // false by the intermediate gap. Propagated to the cell it
-                // vacates too, so a block further up the column inherits it
-                // when it falls through in a later frame.
-                const new_chainable = below.chainable or above.chainable;
                 below.* = above.*;
                 below.state = .falling;
                 below.fall_off = TILE;
-                below.chainable = new_chainable;
-                above.* = Cell{ .chainable = new_chainable };
+                above.* = Cell{};
             }
 
             const cur = cellAt(r, c);
@@ -482,11 +505,9 @@ fn simulate() void {
                     cur.fall_off = 0;
                     if (r < ROWS - 1 and cellAt(r + 1, c).state == .empty) {
                         const next = cellAt(r + 1, c);
-                        const new_chainable = cur.chainable or next.chainable;
                         next.* = cur.*;
                         next.fall_off = TILE;
-                        next.chainable = new_chainable;
-                        cur.* = Cell{ .chainable = new_chainable };
+                        cur.* = Cell{};
                     } else {
                         // Match-checking happens once the landing bounce
                         // finishes and the cell becomes .normal again (see
@@ -502,11 +523,11 @@ fn simulate() void {
     }
 
     if (settled) {
-        _ = checkMatches();
+        _ = checkMatches(just_settled);
     }
 }
 
-fn checkMatches() bool {
+fn checkMatches(just_settled: [ROWS][COLS]bool) bool {
     var settled_color: [ROWS][COLS]i16 = undefined;
     var settled_chainable: [ROWS][COLS]bool = undefined;
     for (0..ROWS) |lr| {
@@ -557,12 +578,16 @@ fn checkMatches() bool {
     }
 
     if (!any) {
-        // These cells settled without matching, so their chain status is
-        // spent -- a later, unrelated match involving them shouldn't be
-        // credited as a chain continuation.
+        // Cells that just settled (this frame) without matching have spent
+        // their chain status -- a later, unrelated match involving them
+        // shouldn't be credited as a chain continuation. Cells marked
+        // chainable earlier but still waiting their own turn to fall are
+        // untouched (see just_settled on simulate).
         for (0..ROWS) |lr| {
             for (0..COLS) |c| {
-                if (settled_chainable[lr][c]) cellAt(@intCast(lr), @intCast(c)).chainable = false;
+                if (just_settled[lr][c] and settled_chainable[lr][c]) {
+                    cellAt(@intCast(lr), @intCast(c)).chainable = false;
+                }
             }
         }
         return false;
@@ -664,12 +689,14 @@ fn checkMatches() bool {
         }
     }
 
-    // Any settled cell that had chainable set but wasn't part of a match
-    // (e.g. it fell but landed somewhere that didn't complete a match) has
-    // spent its chain status now that it's back to being an ordinary block.
+    // Any cell that just settled (this frame) with chainable set but wasn't
+    // part of a match (e.g. it fell but landed somewhere that didn't
+    // complete a match) has spent its chain status now that it's back to
+    // being an ordinary block. Cells marked chainable but still waiting
+    // their own turn to fall are untouched.
     for (0..ROWS) |lr| {
         for (0..COLS) |c| {
-            if (settled_chainable[lr][c] and !matched[lr][c]) {
+            if (just_settled[lr][c] and settled_chainable[lr][c] and !matched[lr][c]) {
                 cellAt(@intCast(lr), @intCast(c)).chainable = false;
             }
         }
