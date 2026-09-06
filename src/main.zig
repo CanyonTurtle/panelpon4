@@ -398,14 +398,17 @@ fn updateTouch() void {
 
     if (!touch_down) {
         touch_down = true;
-        touch_col = col;
         cursor_row = row;
         cursor_col = if (col >= COLS - 1) COLS - 2 else col;
         // The very first touch already swaps -- a plain tap (no drag at
         // all) should still do something, not require a swipe to act.
-        // Dragging further from here swaps again for each column crossed,
-        // same as always.
         trySwap();
+        // The swap just moved the touched content to the other side of the
+        // pair, so track it there (matching what the drag loop below does
+        // for its own swaps) -- otherwise a swipe immediately following the
+        // tap would re-swap this same pair on its first step and undo it,
+        // instead of continuing on to the next column.
+        touch_col = if (col >= COLS - 1) col - 1 else col + 1;
         return;
     }
 
