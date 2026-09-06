@@ -758,6 +758,29 @@ fn drawColorRect(x: i32, y: i32, w: i32, h: i32, color: u8) void {
     }
 }
 
+// Traces a 1px rectangle outline as a checkerboard dither of two hues,
+// pixel by pixel (an outline can't be dithered via a single rect() call the
+// way a fill can, since its DRAW_COLORS border nibble is one solid color).
+fn drawDitheredRectOutline(x: i32, y: i32, w: i32, h: i32, hues: [2]u8) void {
+    if (w <= 0 or h <= 0) return;
+    var i: i32 = 0;
+    while (i < w) : (i += 1) {
+        plotDithered(x + i, y, hues);
+        plotDithered(x + i, y + h - 1, hues);
+    }
+    var j: i32 = 0;
+    while (j < h) : (j += 1) {
+        plotDithered(x, y + j, hues);
+        plotDithered(x + w - 1, y + j, hues);
+    }
+}
+
+fn plotDithered(x: i32, y: i32, hues: [2]u8) void {
+    const hue = if (@mod(x + y, 2) == 0) hues[0] else hues[1];
+    w4.DRAW_COLORS.* = HUE_DRAWCOLOR[hue];
+    w4.Rect(x, y, 1, 1);
+}
+
 fn drawHueSquareCentered(x: i32, y: i32, color: u8, size: i32) void {
     if (size <= 0) return;
     const off = @divTrunc(TILE - size, 2);
@@ -918,6 +941,7 @@ const CURSOR_PULSE_PERIOD: i32 = 30;
 const CURSOR_PULSE_AMOUNT: i32 = 2;
 
 const CURSOR_PUSH: i32 = 1;
+const CURSOR_DITHER_HUES = [2]u8{ 0, 2 }; // red + yellow
 
 fn drawCursor() void {
     if (game_over) return;
@@ -947,10 +971,13 @@ fn drawCursor() void {
     const w = TILE * 2 + push_left + push_right;
     const h = TILE + push_top + push_bottom;
 
-    w4.DRAW_COLORS.* = DC_BG << 4; // transparent fill, background-colored border
-    w4.Rect(x, y, @intCast(w), @intCast(h));
+    // A background-colored outline reads as invisible against the (also
+    // dark) background whenever the cursor sits over empty board space, so
+    // it's drawn as a 1px checkerboard dither of red and yellow instead --
+    // both bright, and never the same as the background either way.
+    drawDitheredRectOutline(x, y, w, h, CURSOR_DITHER_HUES);
     if (w > 2 and h > 2) {
-        w4.Rect(x + 1, y + 1, @intCast(w - 2), @intCast(h - 2));
+        drawDitheredRectOutline(x + 1, y + 1, w - 2, h - 2, CURSOR_DITHER_HUES);
     }
 }
 
