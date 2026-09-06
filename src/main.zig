@@ -180,12 +180,17 @@ var prev_gamepad: u8 = 0;
 var held_dir: u8 = 0;
 var das_counter: u8 = 0;
 
-// Touch/mouse drag-to-swap state: while a touch is held, dragging across a
-// column boundary immediately performs that swap (rather than requiring a
-// separate "move cursor" then "confirm swap" step, since a drag gesture
-// already expresses both at once).
-var touch_down: bool = false;
-var touch_col: u8 = 0;
+// Touch/mouse state: a touch never teleports the cursor or swaps directly
+// under the finger -- see updateTouch -- so all it needs to track is whether
+// a press is ongoing and whether it has already spent its one swap. Touch
+// gets its own held_dir/das_counter (distinct from the gamepad's above) so
+// that a frame with no gamepad input doesn't reset touch's DAS timing, and
+// vice versa -- each input method's "how long has this direction been held"
+// state is independent.
+var touch_active: bool = false;
+var touch_swapped_this_press: bool = false;
+var touch_held_dir: u8 = 0;
+var touch_das_counter: u8 = 0;
 
 // ---------------------------------------------------------------------
 // RNG
@@ -339,6 +344,32 @@ fn moveCursor(dir: u8) void {
     }
 }
 
+// Shared DAS (delayed auto-shift) logic: given a single direction (or 0) held
+// this frame, and pointers to that input method's own held_dir/das_counter,
+// moves the cursor at most once per frame with the standard first-move-then-
+// repeat timing. Kept generic over which held_dir/das_counter it touches so
+// the gamepad and touch can each hold a direction across frames without
+// clobbering each other's timing.
+fn stepDas(cur_dir: u8, held: *u8, counter: *u8) void {
+    if (cur_dir == 0) {
+        held.* = 0;
+        counter.* = 0;
+        return;
+    }
+    if (cur_dir != held.*) {
+        held.* = cur_dir;
+        counter.* = MOVE_DAS_FIRST;
+        moveCursor(cur_dir);
+    } else {
+        if (counter.* == 0) {
+            counter.* = MOVE_DAS_REPEAT;
+            moveCursor(cur_dir);
+        } else {
+            counter.* -= 1;
+        }
+    }
+}
+
 fn updateCursorMovement(gp: u8) void {
     const dirs = [_]u8{ w4.BUTTON_LEFT, w4.BUTTON_RIGHT, w4.BUTTON_UP, w4.BUTTON_DOWN };
     var cur_dir: u8 = 0;
@@ -348,35 +379,30 @@ fn updateCursorMovement(gp: u8) void {
             break;
         }
     }
-    if (cur_dir == 0) {
-        held_dir = 0;
-        das_counter = 0;
-        return;
-    }
-    if (cur_dir != held_dir) {
-        held_dir = cur_dir;
-        das_counter = MOVE_DAS_FIRST;
-        moveCursor(cur_dir);
-    } else {
-        if (das_counter == 0) {
-            das_counter = MOVE_DAS_REPEAT;
-            moveCursor(cur_dir);
-        } else {
-            das_counter -= 1;
-        }
-    }
+    stepDas(cur_dir, &held_dir, &das_counter);
 }
 
-// Drag-to-swap: touching (or clicking) sets the cursor to the touched tile
-// without swapping yet, but once a touch is held and dragged across a column
-// boundary, each boundary crossed immediately performs that swap -- a drag
-// gesture already expresses both "move here" and "swap" in one motion, so it
-// shouldn't need a separate confirm step the way the gamepad does.
+// Touch acts as a virtual joystick relative to the *current* cursor, not a
+// direct pointer: it never teleports the cursor to the touched tile. Touching
+// one of the cursor's own two tiles swaps (once per press, no matter how
+// long it's held or how the touch wanders while still on those tiles);
+// touching anywhere else moves the cursor one step toward it, through the
+// same moveCursor/DAS repeat the gamepad directions use. This keeps touch no
+// more capable than the physical controls -- reaching a distant swap still
+// takes the same number of discrete steps as walking the cursor there with
+// the d-pad -- and requires deliberately positioning the cursor rather than
+// dragging it straight to the target.
 fn updateTouch() void {
-    const buttons = w4.MOUSE_BUTTONS.*;
-    if (buttons & w4.MOUSE_LEFT == 0) {
-        touch_down = false;
+    const held = w4.MOUSE_BUTTONS.* & w4.MOUSE_LEFT != 0;
+    if (!held) {
+        touch_active = false;
+        touch_swapped_this_press = false;
+        stepDas(0, &touch_held_dir, &touch_das_counter);
         return;
+    }
+    if (!touch_active) {
+        touch_active = true;
+        touch_swapped_this_press = false;
     }
 
     const mx = w4.MOUSE_X.*;
@@ -384,9 +410,7 @@ fn updateTouch() void {
     const board_w = @as(i32, COLS) * TILE;
     const board_h = @as(i32, VISIBLE_ROWS) * TILE;
     if (mx < BOARD_X or mx >= BOARD_X + board_w or my < BOARD_Y or my >= BOARD_Y + board_h) {
-        // Outside the board: while dragging, just hold position rather than
-        // snapping to a clamped edge, so wandering slightly off the board
-        // and back doesn't jump the cursor around.
+        stepDas(0, &touch_held_dir, &touch_das_counter); // off the board: hold steady, no move or swap
         return;
     }
 
@@ -396,44 +420,29 @@ fn updateTouch() void {
     if (row_signed > VISIBLE_ROWS - 1) row_signed = VISIBLE_ROWS - 1;
     const row: u8 = @intCast(row_signed);
 
-    if (!touch_down) {
-        touch_down = true;
-        cursor_row = row;
-        cursor_col = if (col >= COLS - 1) COLS - 2 else col;
-        // The very first touch already swaps -- a plain tap (no drag at
-        // all) should still do something, not require a swipe to act.
-        trySwap();
-        // The swap just moved the touched content to the other side of the
-        // pair, so track it there (matching what the drag loop below does
-        // for its own swaps) -- otherwise a swipe immediately following the
-        // tap would re-swap this same pair on its first step and undo it,
-        // instead of continuing on to the next column.
-        touch_col = if (col >= COLS - 1) col - 1 else col + 1;
+    const col_in_span = col == cursor_col or col == cursor_col + 1;
+    if (row == cursor_row and col_in_span) {
+        if (!touch_swapped_this_press) {
+            trySwap();
+            touch_swapped_this_press = true;
+        }
+        stepDas(0, &touch_held_dir, &touch_das_counter);
         return;
     }
 
-    cursor_row = row;
-    while (touch_col < col) {
-        cursor_col = touch_col;
-        trySwap();
-        touch_col += 1;
-    }
-    while (touch_col > col) {
-        cursor_col = touch_col - 1;
-        trySwap();
-        touch_col -= 1;
-    }
+    const dir: u8 = if (row < cursor_row)
+        w4.BUTTON_UP
+    else if (row > cursor_row)
+        w4.BUTTON_DOWN
+    else if (col < cursor_col)
+        w4.BUTTON_LEFT
+    else
+        w4.BUTTON_RIGHT;
+    stepDas(dir, &touch_held_dir, &touch_das_counter);
 }
 
 fn swappable(s: CellState) bool {
-    // .swapping is included because it's purely a cosmetic slide animation --
-    // the underlying data exchange already happened instantly in trySwap --
-    // so grabbing a cell mid-animation just restarts its slide rather than
-    // leaving any inconsistent state. This matters for a fast multi-column
-    // drag: chaining several swaps within one frame would otherwise have
-    // every other one silently rejected, since each pair of adjacent swaps
-    // shares a cell that the first swap just put in .swapping.
-    return s == .empty or s == .normal or s == .swapping;
+    return s == .empty or s == .normal;
 }
 
 fn trySwap() void {
