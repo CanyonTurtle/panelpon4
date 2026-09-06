@@ -373,7 +373,11 @@ fn trySwap() void {
         b.timer = SWAP_FRAMES;
         b.swap_dir = -1; // slides in from the left
     }
-    chain = 0;
+    // No chain reset here: chain only resets once the board is fully idle
+    // (see the boardBusy() check in update()). Resetting it on every swap
+    // would kill "skill chains" -- setting up another match while a previous
+    // one is still falling/popping should extend the same chain, not start
+    // a fresh one, as long as the board never actually went idle in between.
 }
 
 // ---------------------------------------------------------------------
