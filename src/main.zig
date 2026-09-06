@@ -145,6 +145,16 @@ const Cell = struct {
     // hits 0, so the pop animation is staggered but the logical disappearance
     // -- and the gravity it triggers -- happens for the whole match at once.
     pop_group_end: i16 = 0,
+    // True on an empty cell that was just vacated by a pop, and on any
+    // (formerly normal) block that falls through such a cell -- propagated
+    // upward through however many blocks fall as part of the same cascade.
+    // A match that includes a chainable cell is a genuine chain continuation
+    // (something fell into place because of an earlier break); a match made
+    // of only ordinary settled blocks is not, even if it happens while some
+    // unrelated cascade elsewhere is still busy. Reverts to false the moment
+    // a block settles back to .normal without being part of a match -- see
+    // checkMatches.
+    chainable: bool = false,
 };
 
 var grid: [ROWS][COLS]Cell = undefined;
@@ -417,7 +427,10 @@ fn simulate() void {
                     }
                     cell.pop_group_end -= 1;
                     if (cell.pop_group_end <= 0) {
-                        cell.* = Cell{};
+                        // Mark the vacated cell so whatever falls into it
+                        // (see the gravity loop below) is recognized as a
+                        // genuine chain continuation.
+                        cell.* = Cell{ .chainable = true };
                     }
                 },
                 .landing => {
@@ -440,10 +453,18 @@ fn simulate() void {
             const below = cellAt(r, c);
             const above = cellAt(r - 1, c);
             if (below.state == .empty and above.state == .normal) {
+                // Whether this fall is a chain continuation depends on
+                // whether the gap it's filling came from a pop -- carried by
+                // the gap's own chainable flag -- not on the falling block's
+                // own (should-be-false) one. Propagated to the cell it
+                // vacates too, so a block further up the column inherits it
+                // when it falls through in a later frame.
+                const gap_chainable = below.chainable;
                 below.* = above.*;
                 below.state = .falling;
                 below.fall_off = TILE;
-                above.* = Cell{};
+                below.chainable = gap_chainable;
+                above.* = Cell{ .chainable = gap_chainable };
             }
 
             const cur = cellAt(r, c);
@@ -453,9 +474,10 @@ fn simulate() void {
                     cur.fall_off = 0;
                     if (r < ROWS - 1 and cellAt(r + 1, c).state == .empty) {
                         const next = cellAt(r + 1, c);
+                        const cur_chainable = cur.chainable;
                         next.* = cur.*;
                         next.fall_off = TILE;
-                        cur.* = Cell{};
+                        cur.* = Cell{ .chainable = cur_chainable };
                     } else {
                         // Match-checking happens once the landing bounce
                         // finishes and the cell becomes .normal again (see
@@ -477,10 +499,12 @@ fn simulate() void {
 
 fn checkMatches() bool {
     var settled_color: [ROWS][COLS]i16 = undefined;
+    var settled_chainable: [ROWS][COLS]bool = undefined;
     for (0..ROWS) |lr| {
         for (0..COLS) |c| {
             const cell = cellAt(@intCast(lr), @intCast(c));
             settled_color[lr][c] = if (cell.state == .normal) @as(i16, cell.color) else -1;
+            settled_chainable[lr][c] = cell.state == .normal and cell.chainable;
         }
     }
 
@@ -523,7 +547,17 @@ fn checkMatches() bool {
         }
     }
 
-    if (!any) return false;
+    if (!any) {
+        // These cells settled without matching, so their chain status is
+        // spent -- a later, unrelated match involving them shouldn't be
+        // credited as a chain continuation.
+        for (0..ROWS) |lr| {
+            for (0..COLS) |c| {
+                if (settled_chainable[lr][c]) cellAt(@intCast(lr), @intCast(c)).chainable = false;
+            }
+        }
+        return false;
+    }
 
     // Matched blocks pop one after another rather than all at once (see
     // POP_STAGGER_FRAMES), but should all *disappear* together once their own
@@ -535,7 +569,6 @@ fn checkMatches() bool {
     var visited: [ROWS][COLS]bool = std.mem.zeroes([ROWS][COLS]bool);
     var stack: [ROWS * COLS][2]u8 = undefined;
     var members: [ROWS * COLS][2]u8 = undefined;
-    var total_count: u32 = 0;
 
     for (0..ROWS) |lr0| {
         for (0..COLS) |c0| {
@@ -592,6 +625,23 @@ fn checkMatches() bool {
                 members[oj] = key;
             }
 
+            // A connected group is a genuine chain continuation if any of its
+            // cells fell into place from an earlier break (chainable); a
+            // match made purely of ordinary settled blocks isn't, even if
+            // some unrelated cascade elsewhere is still busy right now. The
+            // very first match of a fresh combo (chain still 0) always
+            // counts, since there's nothing to "continue" yet.
+            var group_chainable = false;
+            for (0..member_count) |i| {
+                const pos = members[i];
+                if (settled_chainable[pos[0]][pos[1]]) group_chainable = true;
+            }
+            var multiplier: u8 = 1;
+            if (chain == 0 or group_chainable) {
+                chain += 1;
+                multiplier = chain;
+            }
+
             const group_end: i16 = POP_FRAMES + @as(i16, @intCast(member_count - 1)) * POP_STAGGER_FRAMES;
             for (0..member_count) |i| {
                 const pos = members[i];
@@ -600,13 +650,22 @@ fn checkMatches() bool {
                 cell.timer = POP_FRAMES + @as(i16, @intCast(i)) * POP_STAGGER_FRAMES;
                 cell.pop_group_end = group_end;
             }
-            total_count += @intCast(member_count);
+            score += @as(u32, @intCast(member_count)) * 10 * multiplier;
+            playPopSound(multiplier);
         }
     }
 
-    chain += 1;
-    score += total_count * 10 * chain;
-    playPopSound();
+    // Any settled cell that had chainable set but wasn't part of a match
+    // (e.g. it fell but landed somewhere that didn't complete a match) has
+    // spent its chain status now that it's back to being an ordinary block.
+    for (0..ROWS) |lr| {
+        for (0..COLS) |c| {
+            if (settled_chainable[lr][c] and !matched[lr][c]) {
+                cellAt(@intCast(lr), @intCast(c)).chainable = false;
+            }
+        }
+    }
+
     return true;
 }
 
@@ -614,8 +673,8 @@ fn checkMatches() bool {
 // Audio
 // ---------------------------------------------------------------------
 
-fn playPopSound() void {
-    const freq = 220 + @as(u32, chain) * 40;
+fn playPopSound(multiplier: u8) void {
+    const freq = 220 + @as(u32, multiplier) * 40;
     w4.Tone(freq, 8, 30, w4.TONE_PULSE1);
 }
 
