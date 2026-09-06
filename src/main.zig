@@ -401,6 +401,11 @@ fn updateTouch() void {
         touch_col = col;
         cursor_row = row;
         cursor_col = if (col >= COLS - 1) COLS - 2 else col;
+        // The very first touch already swaps -- a plain tap (no drag at
+        // all) should still do something, not require a swipe to act.
+        // Dragging further from here swaps again for each column crossed,
+        // same as always.
+        trySwap();
         return;
     }
 
