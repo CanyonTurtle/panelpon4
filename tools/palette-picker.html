@@ -1,0 +1,369 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>panelpon4 palette tuner</title>
+<style>
+  :root {
+    color-scheme: dark;
+  }
+  body {
+    margin: 0;
+    background: #1a1c2c;
+    color: #e8e8f0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: 24px 32px 64px;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 0 0 4px;
+  }
+  p.sub {
+    color: #9aa;
+    margin: 0 0 28px;
+    max-width: 640px;
+    line-height: 1.5;
+  }
+  .pickers {
+    display: flex;
+    gap: 28px;
+    margin-bottom: 36px;
+    flex-wrap: wrap;
+  }
+  .picker {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+  .picker label {
+    font-size: 13px;
+    color: #cdd;
+    font-weight: 600;
+  }
+  .picker input[type=color] {
+    width: 64px;
+    height: 44px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    cursor: pointer;
+    padding: 0;
+  }
+  .picker .hex {
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 12px;
+    color: #9aa;
+  }
+  .swatches {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    margin-bottom: 36px;
+  }
+  .swatch {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    width: 168px;
+  }
+  .swatch canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    width: 168px;
+    height: 168px;
+    border-radius: 4px;
+  }
+  .swatch .name {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .swatch .desc {
+    font-size: 11px;
+    color: #9aa;
+    text-align: center;
+    line-height: 1.4;
+  }
+  .blend-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+  }
+  .blend-row .chip {
+    width: 20px;
+    height: 20px;
+    border-radius: 3px;
+    flex: none;
+  }
+  .blend-row .label {
+    font-size: 10px;
+    color: #78899a;
+  }
+  h2 {
+    font-size: 15px;
+    margin: 0 0 10px;
+    color: #cdd;
+  }
+  textarea {
+    width: 100%;
+    max-width: 480px;
+    height: 96px;
+    background: #12141f;
+    color: #d8f0e0;
+    border: 1px solid #333a4d;
+    border-radius: 6px;
+    font-family: ui-monospace, "SF Mono", Consolas, monospace;
+    font-size: 13px;
+    padding: 12px;
+    resize: vertical;
+  }
+  button {
+    margin-top: 8px;
+    background: #28a0c8;
+    color: #0c1018;
+    border: none;
+    border-radius: 5px;
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:active {
+    transform: translateY(1px);
+  }
+</style>
+</head>
+<body>
+
+<h1>panelpon4 palette tuner</h1>
+<p class="sub">
+  Pick the 3 real hues the cart uses (red, teal, yellow) — everything else follows: the diamond and circle
+  aren't independently colorable, they're a 1px checkerboard dither of two of these three, same as in the actual
+  WASM-4 cart. Each swatch shows the real dither pattern (as it renders in-game) plus a flat "optical blend" chip
+  approximating what your eye reads it as from normal viewing distance, since a zoomed screenshot only shows the
+  checkerboard, never the blend.
+</p>
+
+<div class="pickers">
+  <div class="picker">
+    <label>Red (hue A)</label>
+    <input type="color" id="pickA" value="#d62380">
+    <span class="hex" id="hexA">#d62380</span>
+  </div>
+  <div class="picker">
+    <label>Teal (hue B)</label>
+    <input type="color" id="pickB" value="#28a0c8">
+    <span class="hex" id="hexB">#28a0c8</span>
+  </div>
+  <div class="picker">
+    <label>Yellow (hue C)</label>
+    <input type="color" id="pickC" value="#f2c94c">
+    <span class="hex" id="hexC">#f2c94c</span>
+  </div>
+</div>
+
+<div class="swatches" id="swatches"></div>
+
+<h2>Zig snippet</h2>
+<textarea id="snippet" readonly></textarea><br>
+<button id="copyBtn">Copy</button>
+
+<script>
+const TILE = 16, BLOCK = 15, SYM_SIZE = 11;
+const SYM_OFF = Math.floor((BLOCK - SYM_SIZE) / 2);
+const BG = [0x1a, 0x1c, 0x2c];
+
+// Exact copies of the Zig symbol bitmaps (src/main.zig) so these previews
+// match the real cart pixel-for-pixel.
+const SYMBOLS = {
+  heart: [
+    "..##...##..",
+    ".#########.",
+    ".#########.",
+    ".#########.",
+    ".#########.",
+    "..#######..",
+    "...#####...",
+    "....###....",
+    ".....#.....",
+    "...........",
+    "...........",
+  ],
+  triangle: [
+    "...........",
+    "...........",
+    "...........",
+    ".....#.....",
+    "....###....",
+    "...#####...",
+    "..#######..",
+    ".#########.",
+    "...........",
+    "...........",
+    "...........",
+  ],
+  star: [
+    ".....#.....",
+    ".....#.....",
+    ".....#.....",
+    "...#.#.#...",
+    "....###....",
+    "###########",
+    "....###....",
+    "...#.#.#...",
+    ".....#.....",
+    ".....#.....",
+    ".....#.....",
+  ],
+  diamond: [
+    ".....#.....",
+    "....###....",
+    "...#####...",
+    "..#######..",
+    ".#########.",
+    "###########",
+    ".#########.",
+    "..#######..",
+    "...#####...",
+    "....###....",
+    ".....#.....",
+  ],
+  circle: [
+    "....###....",
+    "..#######..",
+    ".#########.",
+    ".#########.",
+    "###########",
+    "###########",
+    "###########",
+    ".#########.",
+    ".#########.",
+    "..#######..",
+    "....###....",
+  ],
+};
+
+function hexToRgb(hex) {
+  hex = hex.replace('#', '');
+  return [parseInt(hex.slice(0,2),16), parseInt(hex.slice(2,4),16), parseInt(hex.slice(4,6),16)];
+}
+function rgbToCss(rgb) {
+  return `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+}
+function rgbToHex(rgb) {
+  return '#' + rgb.map(v => v.toString(16).padStart(2,'0')).join('');
+}
+function avgRgb(a, b) {
+  return [Math.round((a[0]+b[0])/2), Math.round((a[1]+b[1])/2), Math.round((a[2]+b[2])/2)];
+}
+
+function drawSwatch(canvas, fillAt, symbolRows) {
+  const ctx = canvas.getContext('2d');
+  canvas.width = TILE;
+  canvas.height = TILE;
+  ctx.fillStyle = rgbToCss(BG);
+  ctx.fillRect(0, 0, TILE, TILE);
+  for (let y = 0; y < BLOCK; y++) {
+    for (let x = 0; x < BLOCK; x++) {
+      const isCorner = (x === 0 || x === BLOCK - 1) && (y === 0 || y === BLOCK - 1);
+      const rgb = isCorner ? BG : fillAt(x, y);
+      ctx.fillStyle = rgbToCss(rgb);
+      ctx.fillRect(x, y, 1, 1);
+    }
+  }
+  for (let sy = 0; sy < SYM_SIZE; sy++) {
+    for (let sx = 0; sx < SYM_SIZE; sx++) {
+      if (symbolRows[sy][sx] === '#') {
+        ctx.fillStyle = rgbToCss(BG);
+        ctx.fillRect(SYM_OFF + sx, SYM_OFF + sy, 1, 1);
+      }
+    }
+  }
+}
+
+const swatchDefs = [
+  { name: 'Heart', desc: 'solid red', symbol: 'heart', kind: 'solid', hue: 'A' },
+  { name: 'Triangle', desc: 'solid teal', symbol: 'triangle', kind: 'solid', hue: 'B' },
+  { name: 'Star', desc: 'solid yellow', symbol: 'star', kind: 'solid', hue: 'C' },
+  { name: 'Diamond', desc: 'red+teal dither -> purple', symbol: 'diamond', kind: 'dither', hues: ['A','B'] },
+  { name: 'Circle', desc: 'teal+yellow dither -> green', symbol: 'circle', kind: 'dither', hues: ['B','C'] },
+];
+
+const container = document.getElementById('swatches');
+const canvases = [];
+swatchDefs.forEach(def => {
+  const el = document.createElement('div');
+  el.className = 'swatch';
+  const canvas = document.createElement('canvas');
+  const nameEl = document.createElement('div');
+  nameEl.className = 'name';
+  nameEl.textContent = def.name;
+  const descEl = document.createElement('div');
+  descEl.className = 'desc';
+  descEl.textContent = def.desc;
+  el.appendChild(canvas);
+  el.appendChild(nameEl);
+  el.appendChild(descEl);
+
+  let blendChip = null, blendLabel = null;
+  if (def.kind === 'dither') {
+    const row = document.createElement('div');
+    row.className = 'blend-row';
+    blendChip = document.createElement('div');
+    blendChip.className = 'chip';
+    blendLabel = document.createElement('span');
+    blendLabel.className = 'label';
+    row.appendChild(blendChip);
+    row.appendChild(blendLabel);
+    el.appendChild(row);
+  }
+
+  container.appendChild(el);
+  canvases.push({ def, canvas, blendChip, blendLabel });
+});
+
+function render() {
+  const rgbA = hexToRgb(document.getElementById('pickA').value);
+  const rgbB = hexToRgb(document.getElementById('pickB').value);
+  const rgbC = hexToRgb(document.getElementById('pickC').value);
+  document.getElementById('hexA').textContent = document.getElementById('pickA').value;
+  document.getElementById('hexB').textContent = document.getElementById('pickB').value;
+  document.getElementById('hexC').textContent = document.getElementById('pickC').value;
+  const hueMap = { A: rgbA, B: rgbB, C: rgbC };
+
+  canvases.forEach(({ def, canvas, blendChip, blendLabel }) => {
+    const symbolRows = SYMBOLS[def.symbol];
+    if (def.kind === 'solid') {
+      const rgb = hueMap[def.hue];
+      drawSwatch(canvas, () => rgb, symbolRows);
+    } else {
+      const h0 = hueMap[def.hues[0]], h1 = hueMap[def.hues[1]];
+      drawSwatch(canvas, (x, y) => ((x + y) % 2 === 0 ? h0 : h1), symbolRows);
+      const blend = avgRgb(h0, h1);
+      blendChip.style.background = rgbToCss(blend);
+      blendLabel.textContent = 'optical blend ' + rgbToHex(blend);
+    }
+  });
+
+  document.getElementById('snippet').value =
+`w4.PALETTE[0] = 0x1a1c2c; // background
+w4.PALETTE[1] = 0x${document.getElementById('pickA').value.slice(1)}; // hue A: red
+w4.PALETTE[2] = 0x${document.getElementById('pickB').value.slice(1)}; // hue B: teal
+w4.PALETTE[3] = 0x${document.getElementById('pickC').value.slice(1)}; // hue C: yellow`;
+}
+
+['pickA', 'pickB', 'pickC'].forEach(id => {
+  document.getElementById(id).addEventListener('input', render);
+});
+document.getElementById('copyBtn').addEventListener('click', () => {
+  const ta = document.getElementById('snippet');
+  ta.select();
+  document.execCommand('copy');
+});
+
+render();
+</script>
+</body>
+</html>
