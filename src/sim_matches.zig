@@ -215,7 +215,12 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
             const is_chain = multiplier > 1;
             const is_combo = real_count > 3;
 
-            const group_end: i16 = c.POP_FRAMES + @as(i16, @intCast(member_count - 1)) * c.POP_STAGGER_FRAMES;
+            // Every member's timer (and so the whole group's resolution
+            // timer) starts with the pre-pop blink+pause preamble on top of
+            // the ordinary pop duration -- see PRE_POP_TOTAL_FRAMES and
+            // render.drawPoppingCell/drawRecyclingCell, which spend it before
+            // even beginning to read `timer` against POP_FRAMES.
+            const group_end: i16 = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + @as(i16, @intCast(member_count - 1)) * c.POP_STAGGER_FRAMES;
             for (0..member_count) |i| {
                 const pos = members[i];
                 const cell = self.cellAt(pos[0], pos[1]);
@@ -225,7 +230,7 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
                 // per-member stagger (timer) and the same whole-group
                 // resolution timer (pop_group_end).
                 cell.state = if (cell.is_garbage) .recycling else .popping;
-                cell.timer = c.POP_FRAMES + @as(i16, @intCast(i)) * c.POP_STAGGER_FRAMES;
+                cell.timer = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + @as(i16, @intCast(i)) * c.POP_STAGGER_FRAMES;
                 cell.pop_group_end = group_end;
                 if (cell.is_garbage) {
                     // Pick the reveal color now, at the moment the whole

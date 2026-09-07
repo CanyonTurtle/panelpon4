@@ -107,11 +107,21 @@ fn fillCellFull(x: i32, y: i32, cell: s.Cell, clip_top: i32, clip_bottom: i32) v
 // math as the full-scale version. No icon -- it wouldn't fit as the cell
 // shrinks, same as the full-scale version.
 fn drawMicroPopping(x: i32, y: i32, color: u8, timer: i16, clip_top: i32, clip_bottom: i32) void {
-    const elapsed = c.POP_FRAMES - timer;
-    if (elapsed < 0) {
+    const total_elapsed = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES - timer;
+    if (total_elapsed < 0) {
         fillCellFull(x, y, .{ .color = color }, clip_top, clip_bottom);
         return;
     }
+    if (total_elapsed < c.PRE_POP_TOTAL_FRAMES) {
+        // Mirrors render.drawPoppingCell's own pre-pop blink+pause preamble.
+        if (total_elapsed < c.PRE_POP_BLINK_FRAMES) {
+            if (@mod(total_elapsed, 2) == 0) fillCellFull(x, y, .{ .color = color }, clip_top, clip_bottom);
+        } else {
+            fillCellFull(x, y, .{ .color = color }, clip_top, clip_bottom);
+        }
+        return;
+    }
+    const elapsed = total_elapsed - c.PRE_POP_TOTAL_FRAMES;
     var size: i32 = MICRO_CELL;
     if (elapsed < c.POP_FLASH_FRAMES) {
         const puls: i32 = @intCast(@mod(elapsed, 8));
@@ -134,9 +144,18 @@ fn drawMicroPopping(x: i32, y: i32, color: u8, timer: i16, clip_top: i32, clip_b
 // as the full-scale version), then hard-cuts to a plain revealed block (with
 // its icon) and stays that way -- no animation of its own.
 fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, clip_top: i32, clip_bottom: i32) void {
-    const elapsed = c.POP_FRAMES - timer;
-    if (elapsed < 0) {
+    const total_elapsed = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES - timer;
+    if (total_elapsed < 0) {
         fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
+        return;
+    }
+    if (total_elapsed < c.PRE_POP_TOTAL_FRAMES) {
+        // Mirrors render.drawRecyclingCell's own pre-pop blink+pause preamble.
+        if (total_elapsed < c.PRE_POP_BLINK_FRAMES) {
+            if (@mod(total_elapsed, 2) == 0) fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
+        } else {
+            fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
+        }
         return;
     }
     fillCell(x, y, MICRO_CELL, MICRO_CELL, color, false, clip_top, clip_bottom);

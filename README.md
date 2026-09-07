@@ -54,18 +54,20 @@ the side panel. Both run the exact same rules and physics.
   direction, and swiping up/down retargets to the row above/below instead (there's no vertical swap).
   A continuous drag keeps swapping the same block further across the board as it travels; a tap alone does
   nothing.
-- Match 3 or more blocks of the same color/pattern in a horizontal or vertical line to pop them.
+- Match 3 or more blocks of the same color/pattern in a horizontal or vertical line to pop them. Each
+  affected block gives you a heads-up first: it blinks rapidly, holds still for a beat, then actually
+  starts popping (or, for garbage, recycling) -- a brief moment to read what's about to go before it does.
 - Blocks above a pop fall and can chain into new matches for bonus score. A genuine chain ("x2", "x3", ...)
   or a combo (a single match bigger than 3 blocks, shown as a bare block count) flies a small badge into
   the score display.
 - A big enough combo or chain drops garbage onto the *opponent's* board -- never your own. Garbage is inert
   (colorless, unswappable, unmatchable) until a match pops right next to it, which starts *recycling* it:
-  one garbage block at a time, with a short delay between each, cracks open into a fresh, plain-looking
-  normal block -- no animation of its own, just an instant reveal -- so you can read the color lineup
-  forming and plan your next move before the whole connected group finishes and every recycled block
-  becomes active together. A connected clump of garbage falls and lands as one rigid piece (a piece
-  touching down stops the whole clump at once), rendering as a single seamless bezeled slab rather than
-  individual tiles.
+  one garbage block at a time, with a short delay between each (after the same blink-then-pause heads-up as
+  a real pop), cracks open into a fresh, plain-looking normal block -- no animation beyond that, just an
+  instant reveal -- so you can read the color lineup forming and plan your next move before the whole
+  connected group finishes and every recycled block becomes active together. A connected clump of garbage
+  falls and lands as one rigid piece (a piece touching down stops the whole clump at once), rendering as a
+  single seamless bezeled slab rather than individual tiles.
 - A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
 - Each board's floor rises forever, faster as that board's own score climbs. Whoever's board tops out
   first loses (both at once is a draw).

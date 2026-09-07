@@ -110,7 +110,7 @@ test "a recycled garbage cell reveals a fresh chainable block only once its whol
     // this test needs to isolate against.)
 
     const member_count = 4; // 3 matched + 1 propagated garbage
-    const group_end: i16 = c.POP_FRAMES + (member_count - 1) * c.POP_STAGGER_FRAMES;
+    const group_end: i16 = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + (member_count - 1) * c.POP_STAGGER_FRAMES;
     const color_at_start = b.cellAt(5, 3).color;
 
     for (0..@intCast(group_end - 1)) |_| sim.simulate(&b, &opp);

@@ -149,13 +149,27 @@ fn drawNormalCell(x: i32, y: i32, color: u8) void {
 // uses this state -- a garbage cell pulled into the same event instead
 // recycles (see drawRecyclingCell below), which has no animation of its own.
 fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
-    const elapsed = c.POP_FRAMES - timer;
-    if (elapsed < 0) {
+    const total_elapsed = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES - timer;
+    if (total_elapsed < 0) {
         // Still waiting its turn in the pop cascade (see POP_STAGGER_FRAMES)
         // -- render exactly like a settled block until then.
         drawNormalCell(x, y, color);
         return;
     }
+    if (total_elapsed < c.PRE_POP_TOTAL_FRAMES) {
+        // The pre-pop preamble: first a hard on/off blink every single frame
+        // (distinct from the size-wobble flash below, which stays visible
+        // the whole time), then a short steady pause looking perfectly
+        // normal -- a heads-up cue that this cell is about to pop, before
+        // the actual pop cascade begins.
+        if (total_elapsed < c.PRE_POP_BLINK_FRAMES) {
+            if (@mod(total_elapsed, 2) == 0) drawNormalCell(x, y, color);
+        } else {
+            drawNormalCell(x, y, color);
+        }
+        return;
+    }
+    const elapsed = total_elapsed - c.PRE_POP_TOTAL_FRAMES;
     var size: i32 = BLOCK_SIZE;
     if (elapsed < c.POP_FLASH_FRAMES) {
         const puls: i32 = @intCast(@mod(elapsed, 8));
@@ -178,13 +192,25 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
 // POP_STAGGER_FRAMES), and the instant its own turn comes it just hard-cuts
 // to looking like a plain normal block and stays that way, inactive, doing
 // nothing further, until the whole group resolves (see sim.simulate). Before
-// its own turn, it still looks like part of the not-yet-recycled garbage
-// clump (see render_garbage's isAttached, which keys off this same timer to
-// know when to stop treating it as attached).
+// its own turn (including the pre-pop blink+pause preamble -- see
+// PRE_POP_TOTAL_FRAMES), it still looks like part of the not-yet-recycled
+// garbage clump (see render_garbage's isAttached, which keys off this same
+// timer to know when to stop treating it as attached).
 fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: rgarbage.Edges) void {
-    const elapsed = c.POP_FRAMES - timer;
-    if (elapsed < 0) {
+    const total_elapsed = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES - timer;
+    if (total_elapsed < 0) {
         rgarbage.drawLinked(x, y, edges);
+        return;
+    }
+    if (total_elapsed < c.PRE_POP_TOTAL_FRAMES) {
+        // Blink (hard on/off every frame) then a short steady pause, both
+        // still showing the inert/attached garbage look -- the actual reveal
+        // only happens once the preamble finishes.
+        if (total_elapsed < c.PRE_POP_BLINK_FRAMES) {
+            if (@mod(total_elapsed, 2) == 0) rgarbage.drawLinked(x, y, edges);
+        } else {
+            rgarbage.drawLinked(x, y, edges);
+        }
         return;
     }
     drawNormalCell(x, y, color);

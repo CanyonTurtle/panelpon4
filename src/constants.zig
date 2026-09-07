@@ -17,6 +17,15 @@ pub const PANEL_X: i32 = 108;
 pub const POP_FRAMES: i16 = 34; // per-block pop duration; longer gives big combos/chains more time to read
 pub const POP_FLASH_FRAMES: i16 = 10;
 pub const POP_STAGGER_FRAMES: i16 = 4; // delay between each matched block's pop, so they go one at a time
+
+// A cell about to pop/recycle gets a heads-up preamble before its own
+// pop/reveal cascade above (POP_FRAMES et al) even begins: first it blinks
+// (hard on/off every single frame -- a flicker, not the size-wobble flash
+// below), then holds steady, normal-looking, for a short beat -- see
+// render.drawPoppingCell/drawRecyclingCell and render_cpu's micro mirrors.
+pub const PRE_POP_BLINK_FRAMES: i16 = 8;
+pub const PRE_POP_PAUSE_FRAMES: i16 = 6;
+pub const PRE_POP_TOTAL_FRAMES: i16 = PRE_POP_BLINK_FRAMES + PRE_POP_PAUSE_FRAMES;
 pub const LAND_FRAMES: i16 = 8;
 pub const SWAP_FRAMES: i16 = 6;
 pub const FALL_SPEED: i16 = 4; // pixels per frame while falling

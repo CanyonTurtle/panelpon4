@@ -216,13 +216,13 @@ test "simulate marks the whole settled stack above a cleared pop as chainable" {
 
     _ = sim.checkMatches(&b, &opp, no_settled); // starts the pop at rows 7-9
     // Run enough frames for the whole staggered pop cascade to finish
-    // clearing (group_end = POP_FRAMES + (3-1)*POP_STAGGER_FRAMES). The
-    // very same frame the pop clears also runs this frame's gravity step,
-    // which cascades the stack above down by exactly one row (each cell
-    // marked chainable rides along with its own data via a plain struct
-    // copy), so the three originally-chainable cells now sit one row lower
-    // than where they started (rows 5-7, not 4-6).
-    const group_end = c.POP_FRAMES + 2 * c.POP_STAGGER_FRAMES;
+    // clearing (group_end = PRE_POP_TOTAL_FRAMES + POP_FRAMES +
+    // (3-1)*POP_STAGGER_FRAMES). The very same frame the pop clears also
+    // runs this frame's gravity step, which cascades the stack above down by
+    // exactly one row (each cell marked chainable rides along with its own
+    // data via a plain struct copy), so the three originally-chainable cells
+    // now sit one row lower than where they started (rows 5-7, not 4-6).
+    const group_end = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + 2 * c.POP_STAGGER_FRAMES;
     for (0..@intCast(group_end)) |_| sim.simulate(&b, &opp);
 
     try testing.expect(b.cellAt(7, 0).chainable);
@@ -248,7 +248,7 @@ test "a gap stops chainable marking from reaching blocks above it" {
     b.cellAt(12, 2).* = .{ .color = 4, .state = .normal };
 
     _ = sim.checkMatches(&b, &opp, no_settled);
-    const group_end = c.POP_FRAMES + 2 * c.POP_STAGGER_FRAMES;
+    const group_end = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + 2 * c.POP_STAGGER_FRAMES;
     for (0..@intCast(group_end)) |_| sim.simulate(&b, &opp);
 
     try testing.expect(!b.cellAt(9, 2).chainable);
