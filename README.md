@@ -57,7 +57,28 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 ## Project layout
 
 - `src/wasm4.zig` — bindings for the WASM-4 host API (drawing, input, memory-mapped registers).
-- `src/main.zig` — game logic: the rising ring-buffered board, gravity/falling, matching, swap/pop/landing
-  animations, rendering, and the WASM-4 `start`/`update` entry points.
+- `src/constants.zig` — layout/timing constants shared across modules.
+- `src/symbols.zig` — pixel-art symbol data drawn on each block color.
+- `src/state.zig` — the board grid, cursor, score/chain, and all other mutable game state, plus the small
+  pure helpers (ring-buffer indexing, RNG, board-busy query) that only need that state.
+- `src/board.zig` — row generation, the rising floor, and (re)starting a game.
+- `src/sim.zig` — the core simulation: swaps, pops, landings, gravity, and matching/chaining.
+- `src/audio.zig` — sound effects.
+- `src/input.zig` — gamepad and touch handling (cursor movement with DAS, swap triggering).
+- `src/render.zig` — all drawing: the board, cursor, panel, and title/game-over screens.
+- `src/main.zig` — wires the above together behind the WASM-4 `start`/`update` entry points.
 - `build.zig` / `build.zig.zon` — builds `src/main.zig` into a freestanding `wasm32` cart with the memory layout
-  WASM-4 expects.
+  WASM-4 expects, and wires up `zig build test`.
+
+## Testing
+
+`state.zig`, `board.zig`, and `sim.zig` (matching/chain logic in particular) have Zig `test` blocks —
+`sim.zig`'s live in the companion `src/sim_test.zig` to keep the module itself under ~500 lines. These run
+natively (not compiled into the cart) and are excluded from `input.zig`/`render.zig`, which touch WASM-4's real
+host functions and only make sense under an actual WASM-4 host.
+
+```sh
+zig build test
+```
+
+This also runs in CI on every push, before the cart is built.
