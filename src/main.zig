@@ -20,6 +20,7 @@ comptime {
         @export(&debug.getChain, .{ .name = "debugGetChain" });
         @export(&debug.getCellInfo, .{ .name = "debugGetCellInfo" });
         @export(&debug.getWinner, .{ .name = "debugGetWinner" });
+        @export(&debug.getCursorPos, .{ .name = "debugGetCursorPos" });
     }
 }
 
@@ -33,6 +34,10 @@ export fn update() void {
     s.frame_count += 1;
     const gp = w4.GAMEPAD1.*;
     const was_over = s.winner != .none;
+    // Any gamepad button (a direction or X) brings the cursor back -- see
+    // state.cursor_hidden and input.updateTouch, which hides it the instant
+    // touch starts.
+    if (gp != 0) s.cursor_hidden = false;
 
     if (!s.started) {
         _ = s.player.rngNext();

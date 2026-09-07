@@ -252,6 +252,10 @@ async function loadCart(wasmPath) {
     getCellInfo: (board, row, col) => e.debugGetCellInfo(board, row, col),
     // 0 = none, 1 = player, 2 = cpu, 3 = draw (see state.Winner)
     getWinner: () => e.debugGetWinner(),
+    getCursorPos: (board) => {
+      const v = e.debugGetCursorPos(board);
+      return { col: v & 0xff, row: (v >> 8) & 0xff };
+    },
   } : undefined;
 
   return { e, mem8, view, memory, setGamepad, setMouse, step, pressButton1, screenshot, debug };

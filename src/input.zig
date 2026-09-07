@@ -1,9 +1,9 @@
-// Gamepad and touch input: cursor movement (with DAS) and swap triggering,
-// always driving the player's own board (see state.player) -- the CPU has
-// no real input; see cpu_ai.zig for its random-move equivalent. Not unit
-// tested (it dereferences WASM4's real memory-mapped gamepad/mouse
-// registers, which only make sense under an actual WASM4 host) -- see
-// sim.zig for the swap/match logic it drives, which is tested.
+// Gamepad and touch input: cursor movement and swap triggering, always
+// driving the player's own board (see state.player) -- the CPU has no real
+// input; see cpu_ai.zig for its random-move equivalent. Not unit tested (it
+// dereferences WASM4's real memory-mapped gamepad/mouse registers, which
+// only make sense under an actual WASM4 host) -- see sim.zig for the
+// swap/match logic it ultimately drives, which is tested.
 
 const c = @import("constants.zig");
 const s = @import("state.zig");
@@ -64,61 +64,125 @@ pub fn updateCursorMovement(gp: u8) void {
     stepDas(cur_dir, &s.held_dir, &s.das_counter);
 }
 
-// Touch acts as a virtual joystick relative to the *current* cursor, not a
-// direct pointer: it never teleports the cursor to the touched tile. Touching
-// one of the cursor's own two tiles swaps (once per press, no matter how
-// long it's held or how the touch wanders while still on those tiles);
-// touching anywhere else moves the cursor one step toward it, through the
-// same moveCursor/DAS repeat the gamepad directions use. This keeps touch no
-// more capable than the physical controls -- reaching a distant swap still
-// takes the same number of discrete steps as walking the cursor there with
-// the d-pad -- and requires deliberately positioning the cursor rather than
-// dragging it straight to the target.
+// Minimum drag distance (px) before it registers as one discrete swipe --
+// small enough to feel responsive, large enough that a barely-trembling tap
+// never registers as an accidental move.
+const TOUCH_SWIPE_THRESHOLD: i32 = 8;
+
+// True if the two cells at (row, col)/(row, col+1) could be swapped right
+// now -- mirrors sim.trySwap's own guard exactly, without performing the
+// swap, so a pending touch swipe can tell "not valid, ever" (off the board)
+// apart from "not valid *yet*" (e.g. still mid-animation from the previous
+// swap) and keep retrying only the latter.
+fn canSwapAt(row: u8, col: u8) bool {
+    const a = s.player.cellAt(row, col);
+    const b = s.player.cellAt(row, col + 1);
+    if (!sim.swappable(a.state) or !sim.swappable(b.state)) return false;
+    if (a.is_garbage or b.is_garbage) return false;
+    if (a.state == .empty and b.state == .empty) return false;
+    return true;
+}
+
+// Swipe-only: a tap or a hold with no meaningful drag does nothing at all.
+// Touch aims directly at the block it touches down on (state.touch_anchor_
+// col/row, picked from the touch's on-board position) rather than moving a
+// separate cursor toward it -- see state.zig's module comment for the full
+// swipe-direction mapping. Also hides the player's cursor the instant it
+// starts (state.cursor_hidden, cleared again by any gamepad button -- see
+// main.zig), since touch always aims at the anchor it's already showing
+// through its own gesture, not wherever the (now-irrelevant) cursor sits.
 pub fn updateTouch() void {
     const held = w4.MOUSE_BUTTONS.* & w4.MOUSE_LEFT != 0;
     if (!held) {
         s.touch_active = false;
-        s.touch_swapped_this_press = false;
-        stepDas(0, &s.touch_held_dir, &s.touch_das_counter);
         return;
     }
+
+    const mx: i32 = w4.MOUSE_X.*;
+    const my: i32 = w4.MOUSE_Y.*;
+
     if (!s.touch_active) {
         s.touch_active = true;
-        s.touch_swapped_this_press = false;
+        s.cursor_hidden = true;
+        s.touch_swipe_origin_x = mx;
+        s.touch_swipe_origin_y = my;
+        s.touch_pending_dir = 0;
+
+        // Re-anchor to wherever this new touch landed -- clamped onto the
+        // board so a finger landing just outside its exact pixels still
+        // picks the nearest cell rather than being ignored outright.
+        var col = @divTrunc(mx - c.BOARD_X, c.TILE);
+        if (col < 0) col = 0;
+        if (col > c.COLS - 1) col = c.COLS - 1;
+        var row = @divTrunc(my - c.BOARD_Y + @as(i32, @intCast(s.player.scroll_px)), c.TILE);
+        if (row < 0) row = 0;
+        if (row > c.VISIBLE_ROWS - 1) row = c.VISIBLE_ROWS - 1;
+        s.touch_anchor_col = @intCast(col);
+        s.touch_anchor_row = @intCast(row);
     }
 
-    const mx = w4.MOUSE_X.*;
-    const my = w4.MOUSE_Y.*;
-    const board_w = @as(i32, c.COLS) * c.TILE;
-    const board_h = @as(i32, c.VISIBLE_ROWS) * c.TILE;
-    if (mx < c.BOARD_X or mx >= c.BOARD_X + board_w or my < c.BOARD_Y or my >= c.BOARD_Y + board_h) {
-        stepDas(0, &s.touch_held_dir, &s.touch_das_counter); // off the board: hold steady, no move or swap
-        return;
+    const dx = mx - s.touch_swipe_origin_x;
+    const dy = my - s.touch_swipe_origin_y;
+    const adx = @abs(dx);
+    const ady = @abs(dy);
+    if (@max(adx, ady) >= TOUCH_SWIPE_THRESHOLD) {
+        // Reset the measurement origin here (not just on touch-down) so one
+        // long continuous drag keeps generating swipes as it travels,
+        // rather than needing separate lift-and-touch gestures each time.
+        s.touch_swipe_origin_x = mx;
+        s.touch_swipe_origin_y = my;
+        // Newest swipe always wins over whatever was still pending -- only
+        // ever one buffered at a time.
+        s.touch_pending_dir = if (adx > ady)
+            (if (dx > 0) w4.BUTTON_RIGHT else w4.BUTTON_LEFT)
+        else
+            (if (dy > 0) w4.BUTTON_DOWN else w4.BUTTON_UP);
     }
 
-    const col: u8 = @intCast(@divTrunc(@as(i32, mx) - c.BOARD_X, c.TILE));
-    var row_signed = @divTrunc(@as(i32, my) - c.BOARD_Y + @as(i32, @intCast(s.player.scroll_px)), c.TILE);
-    if (row_signed < 0) row_signed = 0;
-    if (row_signed > c.VISIBLE_ROWS - 1) row_signed = c.VISIBLE_ROWS - 1;
-    const row: u8 = @intCast(row_signed);
+    applyPendingTouchSwipe();
+}
 
-    const col_in_span = col == s.player.cursor_col or col == s.player.cursor_col + 1;
-    if (row == s.player.cursor_row and col_in_span) {
-        if (!s.touch_swapped_this_press) {
+// Retargeting (up/down) always succeeds immediately -- there's no vertical
+// swap to wait on. A swap (left/right) only succeeds once the target pair
+// is actually swappable; until then it just stays pending and gets retried
+// here again next frame, so a fast continuous drag chains swaps at the
+// fastest rate the swap animation allows rather than dropping the ones that
+// arrive before the last one finishes.
+fn applyPendingTouchSwipe() void {
+    switch (s.touch_pending_dir) {
+        w4.BUTTON_UP => {
+            if (s.touch_anchor_row > 0) s.touch_anchor_row -= 1;
+            s.touch_pending_dir = 0;
+        },
+        w4.BUTTON_DOWN => {
+            if (s.touch_anchor_row < c.VISIBLE_ROWS - 1) s.touch_anchor_row += 1;
+            s.touch_pending_dir = 0;
+        },
+        w4.BUTTON_LEFT => {
+            if (s.touch_anchor_col == 0) {
+                s.touch_pending_dir = 0; // no neighbor to swap with -- drop it, not stuck retrying forever
+                return;
+            }
+            const target = s.touch_anchor_col - 1;
+            if (!canSwapAt(s.touch_anchor_row, target)) return; // keep pending, retry next frame
+            s.player.cursor_row = s.touch_anchor_row;
+            s.player.cursor_col = target;
             sim.trySwap(&s.player);
-            s.touch_swapped_this_press = true;
-        }
-        stepDas(0, &s.touch_held_dir, &s.touch_das_counter);
-        return;
+            s.touch_anchor_col = target; // the touched block moved left with it
+            s.touch_pending_dir = 0;
+        },
+        w4.BUTTON_RIGHT => {
+            if (s.touch_anchor_col >= c.COLS - 1) {
+                s.touch_pending_dir = 0;
+                return;
+            }
+            if (!canSwapAt(s.touch_anchor_row, s.touch_anchor_col)) return;
+            s.player.cursor_row = s.touch_anchor_row;
+            s.player.cursor_col = s.touch_anchor_col;
+            sim.trySwap(&s.player);
+            s.touch_anchor_col += 1; // the touched block moved right with it
+            s.touch_pending_dir = 0;
+        },
+        else => {},
     }
-
-    const dir: u8 = if (row < s.player.cursor_row)
-        w4.BUTTON_UP
-    else if (row > s.player.cursor_row)
-        w4.BUTTON_DOWN
-    else if (col < s.player.cursor_col)
-        w4.BUTTON_LEFT
-    else
-        w4.BUTTON_RIGHT;
-    stepDas(dir, &s.touch_held_dir, &s.touch_das_counter);
 }

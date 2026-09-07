@@ -53,3 +53,9 @@ pub fn getCellInfo(board: u32, logical_row: u32, col: u32) callconv(.c) u32 {
 pub fn getWinner() callconv(.c) u32 {
     return @intFromEnum(s.winner);
 }
+
+// Packed as col(8) | row(8), least-significant byte first.
+pub fn getCursorPos(board: u32) callconv(.c) u32 {
+    const b = boardFor(board);
+    return @as(u32, b.cursor_col) | (@as(u32, b.cursor_row) << 8);
+}

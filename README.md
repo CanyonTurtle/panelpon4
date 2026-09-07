@@ -45,6 +45,12 @@ CPU's at a simplified micro scale in the side panel. Both run the exact same rul
 
 - **Arrow keys**: move the two-tile cursor.
 - **X**: swap the two blocks under the cursor.
+- **Touch/mouse**: swipe-only -- touching down targets the block under your finger directly (the cursor
+  hides while you do, since you're aiming at that block, not steering a separate one -- it reappears the
+  next time you press a real button); swiping left/right swaps that block with its neighbor in that
+  direction, and swiping up/down retargets to the row above/below instead (there's no vertical swap).
+  A continuous drag keeps swapping the same block further across the board as it travels; a tap alone does
+  nothing.
 - Match 3 or more blocks of the same color/pattern in a horizontal or vertical line to pop them.
 - Blocks above a pop fall and can chain into new matches for bonus score. A genuine chain ("x2", "x3", ...)
   or a combo (a single match bigger than 3 blocks, shown as a bare block count) flies a small badge into
@@ -93,8 +99,10 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/cpu_ai.zig` — the CPU opponent's move picker: for now, just a random legal swap every so often (see
   `MOVE_INTERVAL`); actually seeking matches is out of scope for v1.
 - `src/audio.zig` — sound effects.
-- `src/input.zig` — gamepad and touch handling (cursor movement with DAS, swap triggering) -- always drives
-  `state.player`; the CPU has no real input (see `cpu_ai.zig`).
+- `src/input.zig` — gamepad (cursor movement with DAS, swap triggering) and touch (swipe-only: aims directly
+  at the touched block, swipes left/right swap it, up/down retarget rows -- with one-deep input buffering
+  so a fast continuous drag chains swaps at max speed) -- always drives `state.player`; the CPU has no real
+  input (see `cpu_ai.zig`).
 - `src/render.zig` — most drawing: the player's board (in full detail) at normal size, the cursor, panel,
   and title/game-over screens.
 - `src/render_cpu.zig` — the CPU's side of the panel: its score/label and its board at a simplified micro

@@ -401,8 +401,11 @@ const CURSOR_DITHER_HUES = badge.WARM_DITHER_HUES;
 
 // Always the player's own cursor -- the CPU has no cursor to show (its board
 // is drawn too small for one to read well, and it has no real input anyway).
+// Hidden while touch is the active input method (see state.cursor_hidden) --
+// swipes move it relative to wherever it already is rather than aiming at a
+// touched tile, so there's nothing the player needs to see it for.
 fn drawCursor() void {
-    if (s.winner != .none) return;
+    if (s.winner != .none or s.cursor_hidden) return;
     const base_x = c.BOARD_X + @as(i32, s.player.cursor_col) * c.TILE;
     const base_y = c.BOARD_Y + @as(i32, s.player.cursor_row) * c.TILE - @as(i32, @intCast(s.player.scroll_px));
 
