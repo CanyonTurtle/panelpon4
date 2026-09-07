@@ -4,18 +4,21 @@
 
 pub const SYMBOL_SIZE: usize = 11; // same parity as render.BLOCK_SIZE -> perfectly centered, no remainder
 
+// Inset a full pixel from every edge (unlike the original design, which
+// touched column 0/10 at its widest row) so it doesn't touch the block's
+// border now that BLOCK_SIZE == SYMBOL_SIZE leaves no padding of its own.
 pub const SYM_CIRCLE = [SYMBOL_SIZE][]const u8{
+    "...........",
     "....###....",
     "..##...##..",
     ".#.......#.",
     ".#.......#.",
-    "#.........#",
-    "#.........#",
-    "#.........#",
+    ".#.......#.",
     ".#.......#.",
     ".#.......#.",
     "..##...##..",
     "....###....",
+    "...........",
 };
 // Elongated isosceles: apex, two side rails (staircase), base line -- the
 // side rails are visibly longer than the base.
@@ -32,18 +35,22 @@ pub const SYM_TRIANGLE = [SYMBOL_SIZE][]const u8{
     "...........",
     "...........",
 };
+// Inset a full pixel from every edge (unlike the original design, which
+// touched row 0/10 at its top/bottom point and column 0/10 at its widest
+// row) so it doesn't touch the block's border now that BLOCK_SIZE ==
+// SYMBOL_SIZE leaves no padding of its own.
 pub const SYM_DIAMOND = [SYMBOL_SIZE][]const u8{
+    "...........",
     ".....#.....",
     "....#.#....",
     "...#...#...",
     "..#.....#..",
     ".#.......#.",
-    "#.........#",
-    ".#.......#.",
     "..#.....#..",
     "...#...#...",
     "....#.#....",
     ".....#.....",
+    "...........",
 };
 // Shifted 1 row down from the original filled design.
 pub const SYM_HEART = [SYMBOL_SIZE][]const u8{
@@ -59,18 +66,22 @@ pub const SYM_HEART = [SYMBOL_SIZE][]const u8{
     ".....#.....",
     "...........",
 };
+// The tips of all 4 arms trimmed by a pixel (unlike the original design,
+// which touched row 0/10 at the top/bottom arm tip and column 0/10 at the
+// crossbar's full-width row) so it doesn't touch the block's border now
+// that BLOCK_SIZE == SYMBOL_SIZE leaves no padding of its own.
 pub const SYM_STAR = [SYMBOL_SIZE][]const u8{
-    ".....#.....",
+    "...........",
     ".....#.....",
     ".....#.....",
     "...#.#.#...",
     "....###....",
-    "###########",
+    ".#########.",
     "....###....",
     "...#.#.#...",
     ".....#.....",
     ".....#.....",
-    ".....#.....",
+    "...........",
 };
 // Colors 0-2 are the solid hues (red, teal, yellow). Colors 3-4 are dithered
 // checkerboard blends of two adjacent hues -- red+teal reads as purple, and

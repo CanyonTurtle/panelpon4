@@ -69,7 +69,8 @@ the side panel. Both run the exact same rules and physics.
   first loses (both at once is a draw).
 - **Z**: manually raise your own floor by one row right away (finishes in a third of a second instead of
   waiting for the automatic pace) -- useful for deliberately forcing a rise when you want fresh blocks, or
-  to bail out of a bad board shape. On a cooldown (two thirds of a second) so it can't be spammed.
+  to bail out of a bad board shape. On a cooldown (two thirds of a second) so it can't be spammed -- hold it
+  down to keep raising row after row as soon as each cooldown clears, instead of having to tap repeatedly.
 - Press **X** on the title or game-over screen to (re)start.
 
 The CPU (v1) just makes random legal swaps every so often -- it isn't yet trying to find or set up matches.
@@ -109,6 +110,9 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   input (see `cpu_ai.zig`).
 - `src/render.zig` — most drawing: the player's board (in full detail) at normal size, the cursor, panel,
   and title/game-over screens.
+- `src/render_garbage.zig` — garbage's full-detail rendering (the muted checkerboard fill and the linked-
+  clump bezel look), split out from render.zig to keep that file under the project's ~500-line guideline,
+  mirroring the sim.zig/sim_garbage.zig split.
 - `src/render_cpu.zig` — the CPU's side of the panel: its score/label and its board at a simplified micro
   scale (dithered colors, tiny per-color icons, smooth rise scrolling, a cursor, popping/recycling
   animation -- just abstracted down to fit: no bevels, linked-garbage slab, landing squash, or popups).
@@ -130,8 +134,8 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 `state.zig`, `board.zig`, `sim.zig`/`sim_matches.zig`/`sim_garbage.zig`, and `cpu_ai.zig` have Zig `test`
 blocks — `sim.zig`'s live in the companion `src/sim_test.zig`, and garbage-specific ones in
 `src/sim_garbage_test.zig`, to keep each module under ~500 lines. These run natively (not compiled into the
-cart) and are excluded from `input.zig`/`render.zig`/`render_cpu.zig`, which touch WASM-4's real host
-functions and only make sense under an actual WASM-4 host.
+cart) and are excluded from `input.zig`/`render.zig`/`render_garbage.zig`/`render_cpu.zig`, which touch
+WASM-4's real host functions and only make sense under an actual WASM-4 host.
 
 ```sh
 zig build test

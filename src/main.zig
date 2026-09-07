@@ -21,6 +21,7 @@ comptime {
         @export(&debug.getCellInfo, .{ .name = "debugGetCellInfo" });
         @export(&debug.getWinner, .{ .name = "debugGetWinner" });
         @export(&debug.getCursorPos, .{ .name = "debugGetCursorPos" });
+        @export(&debug.getScrollPx, .{ .name = "debugGetScrollPx" });
     }
 }
 
@@ -51,7 +52,12 @@ export fn update() void {
     if (s.winner == .none) {
         input.updateCursorMovement(gp);
         if (input.justPressed(gp, w4.BUTTON_1)) sim.trySwap(&s.player);
-        if (input.justPressed(gp, w4.BUTTON_2)) board.tryManualRaise(&s.player);
+        // Held (not just a fresh press) so the raise keeps going for as long
+        // as Z stays down -- tryManualRaise already no-ops on its own while
+        // still cooling down or mid-raise, so calling it every held frame
+        // just means the next raise kicks off itself the instant it's
+        // actually allowed to, with no extra debouncing needed here.
+        if (gp & w4.BUTTON_2 != 0) board.tryManualRaise(&s.player);
         input.updateTouch();
         cpu_ai.update(&s.cpu);
 

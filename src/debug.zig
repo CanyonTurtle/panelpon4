@@ -59,3 +59,7 @@ pub fn getCursorPos(board: u32) callconv(.c) u32 {
     const b = boardFor(board);
     return @as(u32, b.cursor_col) | (@as(u32, b.cursor_row) << 8);
 }
+
+pub fn getScrollPx(board: u32) callconv(.c) u32 {
+    return boardFor(board).scroll_px;
+}

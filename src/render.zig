@@ -15,6 +15,7 @@ const w4 = @import("wasm4.zig");
 const sym = @import("symbols.zig");
 const badge = @import("render_badge.zig");
 const render_cpu = @import("render_cpu.zig");
+const rgarbage = @import("render_garbage.zig");
 
 // nibble values for DRAW_COLORS color1, one per palette slot (index+1)
 const DC_BG: u16 = 1;
@@ -144,71 +145,6 @@ fn drawNormalCell(x: i32, y: i32, color: u8) void {
     drawSymbolFor(color, x + sym_off, y + sym_off);
 }
 
-// Garbage (see Cell.is_garbage) is colorless and inert, so it renders as a
-// muted background+hue checkerboard -- distinct from all 5 real block colors
-// (which are either a solid hue or a hue+hue dither) -- with no symbol, so it
-// reads at a glance as "not a real, matchable color".
-const GARBAGE_HUE: u8 = 1; // teal; arbitrary, just needs to look muted/inert next to DC_BG
-
-fn drawGarbageRect(x: i32, y: i32, w: i32, h: i32) void {
-    if (w <= 0 or h <= 0) return;
-    var dy: i32 = 0;
-    while (dy < h) : (dy += 1) {
-        var dx: i32 = 0;
-        while (dx < w) : (dx += 1) {
-            w4.DRAW_COLORS.* = if (@mod(dx + dy, 2) == 0) DC_BG else HUE_DRAWCOLOR[GARBAGE_HUE];
-            w4.Rect(x + dx, y + dy, 1, 1);
-        }
-    }
-}
-
-// Which of a garbage cell's 4 orthogonal neighbors are themselves garbage,
-// still attached (see sim.zig's group-based gravity -- connected garbage
-// always falls/lands in lockstep, so a neighbor in any of these states is
-// guaranteed to be moving the same way this cell is, not just coincidentally
-// adjacent). Used to render a connected clump as one seamless slab: no gap
-// or bevel on the sides facing an attached neighbor, only on the outer
-// boundary of the whole clump.
-const GarbageEdges = struct { up: bool = false, down: bool = false, left: bool = false, right: bool = false };
-
-fn isAttachedGarbage(b: *s.Board, lr: u8, col: u8) bool {
-    const cell = b.cellAt(lr, col);
-    if (!cell.is_garbage) return false;
-    if (cell.state == .normal or cell.state == .falling or cell.state == .landing) return true;
-    // A recycling cell only still looks (and counts as) attached garbage
-    // while it hasn't had its own turn yet -- see drawRecyclingCell. The
-    // instant it reveals, it renders as a plain normal block, so the clump
-    // it was part of should visually shrink by one cell right along with it.
-    if (cell.state == .recycling) return c.POP_FRAMES - cell.timer < 0;
-    return false;
-}
-
-fn garbageEdgesAt(b: *s.Board, lr: u8, col: u8) GarbageEdges {
-    var e = GarbageEdges{};
-    if (lr > 0) e.up = isAttachedGarbage(b, lr - 1, col);
-    if (lr + 1 < c.ROWS) e.down = isAttachedGarbage(b, lr + 1, col);
-    if (col > 0) e.left = isAttachedGarbage(b, lr, col - 1);
-    if (col + 1 < c.COLS) e.right = isAttachedGarbage(b, lr, col + 1);
-    return e;
-}
-
-// Like drawGarbageBlock, but extends the fill into an attached right/down
-// neighbor's tile (closing the 1px gap normal blocks leave there -- an
-// attached left/up neighbor closes the gap on *its* side instead, so this
-// cell doesn't need to touch its own left/top) and only bevels a corner
-// where both adjacent edges are unattached -- a true exterior corner of the
-// whole connected clump, not a seam between two of its own cells.
-fn drawGarbageBlockLinked(x: i32, y: i32, edges: GarbageEdges) void {
-    const w: i32 = if (edges.right) BLOCK_SIZE + 1 else BLOCK_SIZE;
-    const h: i32 = if (edges.down) BLOCK_SIZE + 1 else BLOCK_SIZE;
-    drawGarbageRect(x, y, w, h);
-    w4.DRAW_COLORS.* = DC_BG;
-    if (!edges.up and !edges.left) w4.Rect(x, y, 1, 1);
-    if (!edges.up and !edges.right) w4.Rect(x + w - 1, y, 1, 1);
-    if (!edges.down and !edges.left) w4.Rect(x, y + h - 1, 1, 1);
-    if (!edges.down and !edges.right) w4.Rect(x + w - 1, y + h - 1, 1, 1);
-}
-
 // A real matched block disappearing (see CellState.popping). Garbage never
 // uses this state -- a garbage cell pulled into the same event instead
 // recycles (see drawRecyclingCell below), which has no animation of its own.
@@ -243,18 +179,18 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
 // to looking like a plain normal block and stays that way, inactive, doing
 // nothing further, until the whole group resolves (see sim.simulate). Before
 // its own turn, it still looks like part of the not-yet-recycled garbage
-// clump (see isAttachedGarbage, which keys off this same timer to know when
-// to stop treating it as attached).
-fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: GarbageEdges) void {
+// clump (see render_garbage's isAttached, which keys off this same timer to
+// know when to stop treating it as attached).
+fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: rgarbage.Edges) void {
     const elapsed = c.POP_FRAMES - timer;
     if (elapsed < 0) {
-        drawGarbageBlockLinked(x, y, edges);
+        rgarbage.drawLinked(x, y, edges);
         return;
     }
     drawNormalCell(x, y, color);
 }
 
-fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool, edges: GarbageEdges) void {
+fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool, edges: rgarbage.Edges) void {
     const elapsed = c.LAND_FRAMES - timer;
     const squash: i32 = if (elapsed < 3) (3 - @as(i32, elapsed)) * 2 else 0;
     const height = BLOCK_SIZE - squash;
@@ -263,7 +199,7 @@ fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool, edge
         // sim.zig's group-based gravity -- so this stays a seamless slab
         // through the bounce too, not just at rest.
         const w: i32 = if (edges.right) BLOCK_SIZE + 1 else BLOCK_SIZE;
-        drawGarbageRect(x, y + squash, w, height);
+        rgarbage.drawGarbageRect(x, y + squash, w, height);
         w4.DRAW_COLORS.* = DC_BG;
         if (!edges.up and !edges.left) w4.Rect(x, y + squash, 1, 1);
         if (!edges.up and !edges.right) w4.Rect(x + w - 1, y + squash, 1, 1);
@@ -307,6 +243,16 @@ fn stressBounceOffset() i32 {
     return -@divTrunc(tri * STRESS_BOUNCE_AMOUNT, half);
 }
 
+// The board's own visible area ends here vertically -- VISIBLE_ROWS*TILE no
+// longer happens to equal SCREEN_SIZE now that the board isn't always
+// exactly as tall as the screen, so this can't just be WASM4's SCREEN_SIZE
+// anymore. Used both to skip rows that are entirely below it (drawBoard)
+// and to mask over the bit of any row that's only *partially* below it
+// (maskBelowBoard) -- WASM4's rect() has no clip-region support, so a row
+// that's mid-scroll and still partly in bounds draws its *entire* tile
+// height regardless of where board_bottom falls across it.
+const BOARD_BOTTOM: i32 = c.BOARD_Y + @as(i32, c.VISIBLE_ROWS) * c.TILE;
+
 // Full-detail board rendering -- always `s.player`, at the normal board
 // position/scale. See render_cpu.zig for the CPU's simplified equivalent.
 fn drawBoard(b: *s.Board) void {
@@ -314,18 +260,10 @@ fn drawBoard(b: *s.Board) void {
     for (0..c.COLS) |ci| col_stressed[ci] = isColumnStressed(b, @intCast(ci));
     const bounce = stressBounceOffset();
 
-    // Clipped against the board's own visible area (not the raw screen --
-    // VISIBLE_ROWS*TILE no longer happens to equal SCREEN_SIZE now that the
-    // board isn't always exactly as tall as the screen), so the extra
-    // ring-buffer row (see state.Board.top) stays properly hidden until it
-    // actually scrolls into view, rather than always poking through
-    // whatever gap is left below the board's own frame.
-    const board_bottom = c.BOARD_Y + @as(i32, c.VISIBLE_ROWS) * c.TILE;
-
     var lr: u8 = 0;
     while (lr < c.ROWS) : (lr += 1) {
         const base_y = c.BOARD_Y + @as(i32, lr) * c.TILE - @as(i32, @intCast(b.scroll_px));
-        if (base_y + c.TILE <= c.BOARD_Y or base_y >= board_bottom) continue;
+        if (base_y + c.TILE <= c.BOARD_Y or base_y >= BOARD_BOTTOM) continue;
         var col: u8 = 0;
         while (col < c.COLS) : (col += 1) {
             const cell = b.cellAt(lr, col);
@@ -337,20 +275,34 @@ fn drawBoard(b: *s.Board) void {
                     // animation (falling/landing/popping/swapping) keep
                     // their own motion undisturbed.
                     const y = if (col_stressed[col]) base_y + bounce else base_y;
-                    if (cell.is_garbage) drawGarbageBlockLinked(x, y, garbageEdgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color);
+                    if (cell.is_garbage) rgarbage.drawLinked(x, y, rgarbage.edgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color);
                 },
                 .falling => {
                     const y = base_y - cell.fall_off;
-                    if (cell.is_garbage) drawGarbageBlockLinked(x, y, garbageEdgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color);
+                    if (cell.is_garbage) rgarbage.drawLinked(x, y, rgarbage.edgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color);
                 },
                 .popping => drawPoppingCell(x, base_y, cell.color, cell.timer),
-                .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, garbageEdgesAt(b, lr, col)),
-                .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, garbageEdgesAt(b, lr, col)),
+                .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, rgarbage.edgesAt(b, lr, col)),
+                .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, rgarbage.edgesAt(b, lr, col)),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},
             }
         }
     }
+}
+
+// Covers over whatever drawBoard just drew below BOARD_BOTTOM -- a row
+// mid-scroll can be only partly in bounds, but still draws its whole tile
+// height regardless (see BOARD_BOTTOM's comment), so without this the
+// incoming row would visibly poke out past the frame's bottom edge instead
+// of staying hidden until it's actually risen into view. A plain
+// background-colored fill is enough since it's the exact same color the
+// rest of the screen outside the board already is.
+fn maskBelowBoard() void {
+    const screen: i32 = @intCast(w4.SCREEN_SIZE);
+    if (BOARD_BOTTOM >= screen) return; // nothing below the board to mask
+    w4.DRAW_COLORS.* = DC_BG;
+    w4.Rect(0, BOARD_BOTTOM, @intCast(c.PANEL_X), @intCast(screen - BOARD_BOTTOM));
 }
 
 // Frame around the playable area with a 2px-radius chamfer at each corner
@@ -490,6 +442,7 @@ pub fn drawGameOver() void {
 pub fn render() void {
     clearBackground();
     drawBoard(&s.player);
+    maskBelowBoard();
     drawFrame();
     drawCursor();
     drawPanel();
