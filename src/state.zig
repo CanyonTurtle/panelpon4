@@ -78,12 +78,13 @@ pub var touch_das_counter: u8 = 0;
 // to be exact -- just cleared on reset like everything else.
 //
 // Three phases: it holds at the height of the match's topmost block (`x`/`y`
-// below), then eases up to the top edge of the board, then eases (from
-// there) into the score display -- see render.drawMatchPopups for the actual
-// interpolation.
+// below), then eases up to that same block's own top edge (`edge_y`) -- a
+// small, quick hop meant to catch the eye right at the match itself, not
+// travel anywhere yet -- then eases from there into the score display. See
+// render.drawMatchPopups for the actual interpolation.
 pub const MATCH_POPUP_HOLD: i16 = 12; // frames sitting at spawn height before rising
-pub const MATCH_POPUP_RISE: i16 = 8; // frames easing up to the board's top edge
-pub const MATCH_POPUP_FLY: i16 = 28; // frames easing from the top edge into the score
+pub const MATCH_POPUP_RISE: i16 = 8; // frames easing up to the match's own top edge
+pub const MATCH_POPUP_FLY: i16 = 28; // frames easing from that edge into the score
 pub const MATCH_POPUP_LIFETIME: i16 = MATCH_POPUP_HOLD + MATCH_POPUP_RISE + MATCH_POPUP_FLY;
 const MAX_MATCH_POPUPS = 4;
 const MATCH_POPUP_LABEL_CAP = 16;
@@ -94,12 +95,13 @@ pub const MatchPopup = struct {
     label_len: u8 = 0,
     x: i32 = 0, // badge center, at spawn -- see sim.checkMatches for how it's picked
     y: i32 = 0, // height of the match's topmost block, at spawn
+    edge_y: i32 = 0, // that same block's own top edge -- the rise phase's target
     elapsed: i16 = 0,
 };
 
 pub var match_popups: [MAX_MATCH_POPUPS]MatchPopup = [_]MatchPopup{.{}} ** MAX_MATCH_POPUPS;
 
-pub fn spawnMatchPopup(label: []const u8, x: i32, y: i32) void {
+pub fn spawnMatchPopup(label: []const u8, x: i32, y: i32, edge_y: i32) void {
     for (&match_popups) |*p| {
         if (!p.active) {
             p.active = true;
@@ -107,6 +109,7 @@ pub fn spawnMatchPopup(label: []const u8, x: i32, y: i32) void {
             @memcpy(p.label[0..p.label_len], label[0..p.label_len]);
             p.x = x;
             p.y = y;
+            p.edge_y = edge_y;
             p.elapsed = 0;
             return;
         }

@@ -350,11 +350,13 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                 const cx = c.BOARD_X + @as(i32, min_col) * c.TILE + @divTrunc(match_w, 2);
                 // Spawn at the height of the match's topmost block (not the
                 // whole bounding box's center), so it reads as belonging to
-                // the match right where it's most visible -- see
-                // render.drawMatchPopups for the rise-then-fly animation
-                // that follows.
-                const cy = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(s.scroll_px)) + @divTrunc(c.TILE, 2);
-                s.spawnMatchPopup(label, cx, cy);
+                // the match right where it's most visible. It then rises to
+                // that same block's own top edge (a quick, small "catch the
+                // eye" hop right at the match) before flying off to the
+                // score -- see render.drawMatchPopups.
+                const top_row_y = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(s.scroll_px));
+                const cy = top_row_y + @divTrunc(c.TILE, 2);
+                s.spawnMatchPopup(label, cx, cy, top_row_y);
             }
             s.score += @as(u32, @intCast(member_count)) * 10 * multiplier;
             audio.playPopSound(multiplier);

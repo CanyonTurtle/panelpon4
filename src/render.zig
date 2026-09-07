@@ -392,9 +392,6 @@ fn drawPanel() void {
 // Roughly where the score digits sit (see drawPanel) -- popups fly here.
 const MATCH_POPUP_TARGET_X: i32 = c.PANEL_X + 14;
 const MATCH_POPUP_TARGET_Y: i32 = 10;
-// The board's top edge -- badges rise here before the main flight to the
-// score (see drawMatchPopups).
-const MATCH_POPUP_EDGE_Y: i32 = c.BOARD_Y;
 
 // Sized snugly around the label (WASM4's font is a fixed 8x8 per glyph) with
 // a couple pixels of padding -- a small, subtle badge rather than something
@@ -429,26 +426,25 @@ fn drawMatchPopups() void {
         if (p.elapsed < rise_start) {
             // Holds at the height of the match's topmost block.
         } else if (p.elapsed < fly_start) {
-            // Quickly eases straight up to the board's top edge -- a short
-            // "lift off" before the main flight, proportional to how far
-            // above the top edge it already spawned (ease-out: fast start,
-            // settling in).
+            // Quickly eases straight up to that block's own top edge -- a
+            // small, local hop meant to catch the eye right at the match,
+            // not travel anywhere yet (ease-out: fast start, settling in).
             const t: i32 = p.elapsed - rise_start;
             const total: i32 = s.MATCH_POPUP_RISE;
             const remain = total - t;
             const num = total * total - remain * remain;
             const den = total * total;
-            cur_y = p.y + @divTrunc((MATCH_POPUP_EDGE_Y - p.y) * num, den);
+            cur_y = p.y + @divTrunc((p.edge_y - p.y) * num, den);
         } else {
             // Ease-in toward the score (t^2, not a constant-speed drift) --
-            // starts slow and accelerates from the top edge, reading as a
-            // "magnetic pull" rather than a simple slide.
+            // starts slow and accelerates from the match's top edge, reading
+            // as a "magnetic pull" rather than a simple slide.
             const fly_elapsed: i32 = p.elapsed - fly_start;
             const fly_total: i32 = s.MATCH_POPUP_FLY;
             const num = fly_elapsed * fly_elapsed;
             const den = fly_total * fly_total;
             cur_x = p.x + @divTrunc((MATCH_POPUP_TARGET_X - p.x) * num, den);
-            cur_y = MATCH_POPUP_EDGE_Y + @divTrunc((MATCH_POPUP_TARGET_Y - MATCH_POPUP_EDGE_Y) * num, den);
+            cur_y = p.edge_y + @divTrunc((MATCH_POPUP_TARGET_Y - p.edge_y) * num, den);
         }
 
         const label = p.label[0..p.label_len];
