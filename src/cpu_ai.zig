@@ -33,9 +33,9 @@ fn configFor(level: u8) DifficultyConfig {
         5 => .{ .move_interval = 17, .depth = 1, .mistake_pct = 18 },
         6 => .{ .move_interval = 14, .depth = 1, .mistake_pct = 10 },
         7 => .{ .move_interval = 12, .depth = 2, .mistake_pct = 6 },
-        8 => .{ .move_interval = 11, .depth = 2, .mistake_pct = 3 },
-        9 => .{ .move_interval = 9, .depth = 2, .mistake_pct = 1 },
-        10 => .{ .move_interval = 8, .depth = 2, .mistake_pct = 0 },
+        8 => .{ .move_interval = 11, .depth = 3, .mistake_pct = 3 },
+        9 => .{ .move_interval = 9, .depth = 3, .mistake_pct = 1 },
+        10 => .{ .move_interval = 8, .depth = 3, .mistake_pct = 0 },
         // state.difficulty is always clamped to 1-10 (see main.zig's title
         // screen) -- this is just a defensive fallback, not a real level.
         else => .{ .move_interval = 20, .depth = 1, .mistake_pct = 40 },
@@ -98,7 +98,7 @@ test "cpu AI waits while its board is busy" {
 
 test "at an engine level, the cpu finds and plays an obvious winning swap" {
     move_timer = 0;
-    s.difficulty = 10; // depth 2, mistake_pct 0 -- deterministic best play
+    s.difficulty = 10; // depth 3, mistake_pct 0 -- deterministic best play
     var b: s.Board = .{};
     // Row 5: 1,1,2,1 -- only swapping columns 2/3 completes a match. Nothing
     // else is on the board, so cpu_engine's own gravity pass (part of

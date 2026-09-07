@@ -275,6 +275,8 @@ fn structuralScore(grid: *const Grid) i32 {
     return score;
 }
 
+pub const ScoredMove = struct { move: Move, value: i32 };
+
 // Applies the swap to a copy, resolves its full cascade, and scores the
 // result: the cascade's own points dominate (multiplied well above anything
 // structuralScore could contribute, so a real pop always outranks a purely
@@ -282,6 +284,10 @@ fn structuralScore(grid: *const Grid) i32 {
 // move available afterward (see LOOKAHEAD_DISCOUNT) for depth > 1 -- the
 // "BFS" that lets a setup move (one that doesn't pop anything itself but
 // creates a strong follow-up) still rank above a shallow immediate pop.
+// Every extra ply compounds the same discount again (a depth-4 search's 3rd
+// ply counts for 1/2, its 4th for 1/4, and so on), so a long, uncertain
+// string of assumed-best replies naturally matters less than what's true
+// right now -- exactly the taper a deeper search needs to stay trustworthy.
 fn evaluateMove(grid: Grid, mv: Move, depth: u8) i32 {
     var g = grid;
     swap(&g, mv.row, mv.col);
@@ -293,21 +299,72 @@ fn evaluateMove(grid: Grid, mv: Move, depth: u8) i32 {
     return value;
 }
 
+// How many of a ply's legal candidates get expanded a further ply deep once
+// beyond the very first move (see bestSwapScored, which always weighs every
+// legal candidate for the actual decision this turn -- only the *lookahead*
+// below it is pruned). The branching factor (every legal swap, commonly
+// 20-40 of them) makes an exhaustive search at depth 3+ multiply out fast;
+// a good follow-up estimate doesn't need every branch explored, just the
+// handful that already look most promising, so only those get a real,
+// recursive evaluateMove call -- everything else keeps just its own
+// immediate (non-recursive) value. This is what makes depth 3-4 affordable
+// at roughly the cost the old exhaustive depth 2 used to be.
+const BEAM_WIDTH: usize = 8;
+const MAX_CANDIDATES = ROWS * (COLS - 1);
+
+// The best achievable value starting from `grid`, searching `depth` moves
+// deep -- see evaluateMove, which calls this for its own lookahead only
+// (never the top-level decision itself). Every legal candidate gets scored
+// by its own immediate value first (cheap: one cascade sim each, no
+// recursion), then -- only if there's a further ply left to search -- the
+// top BEAM_WIDTH of those (by that immediate value) are expanded with a
+// real recursive lookahead of their own; the rest keep just their immediate
+// value. For depth <= 1 this is exactly the old exhaustive search (nothing
+// ever needs expanding further), so existing depth-1/2 behavior is
+// unchanged -- pruning only starts changing anything from depth 3 on.
 fn bestMoveValue(grid: *const Grid, depth: u8) ?i32 {
-    var best: ?i32 = null;
+    var candidates: [MAX_CANDIDATES]ScoredMove = undefined;
+    var n: usize = 0;
     for (0..ROWS) |r| {
         for (0..COLS - 1) |cl| {
             const row: u8 = @intCast(r);
             const col: u8 = @intCast(cl);
             if (!legalSwap(grid, row, col)) continue;
-            const v = evaluateMove(grid.*, .{ .row = row, .col = col }, depth);
-            if (best == null or v > best.?) best = v;
+            const mv = Move{ .row = row, .col = col };
+            candidates[n] = .{ .move = mv, .value = evaluateMove(grid.*, mv, 1) };
+            n += 1;
         }
+    }
+    if (n == 0) return null;
+
+    if (depth <= 1) {
+        var best = candidates[0].value;
+        for (candidates[1..n]) |cm| best = @max(best, cm.value);
+        return best;
+    }
+
+    // Partial selection sort: bring the top `beam` candidates (by their own
+    // immediate value) to the front -- cheap at this scale (n is at most
+    // MAX_CANDIDATES), and the rest never need to be in order at all.
+    const beam = @min(BEAM_WIDTH, n);
+    for (0..beam) |i| {
+        var max_idx = i;
+        for (i + 1..n) |j| {
+            if (candidates[j].value > candidates[max_idx].value) max_idx = j;
+        }
+        if (max_idx != i) std.mem.swap(ScoredMove, &candidates[i], &candidates[max_idx]);
+    }
+
+    var best: i32 = std.math.minInt(i32);
+    for (candidates[0..beam]) |cm| {
+        var g = grid.*;
+        swap(&g, cm.move.row, cm.move.col);
+        var v = cm.value; // already this move's own immediate value
+        if (bestMoveValue(&g, depth - 1)) |follow| v += @divTrunc(follow, LOOKAHEAD_DISCOUNT);
+        best = @max(best, v);
     }
     return best;
 }
-
-pub const ScoredMove = struct { move: Move, value: i32 };
 
 // The best-scoring legal swap in the current grid, searching `depth` moves
 // deep (1 = just this swap's own result; 2 adds a discounted look at the

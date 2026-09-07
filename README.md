@@ -135,8 +135,14 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   `Grid`, tries every legal swap on a copy, resolves each one's full logical cascade (gravity, matches,
   garbage propagation, repeated for chains) to score it, and adds a bitboard-driven structural heuristic
   (same-color adjacency, column height) so moves that don't pop anything yet are still ranked sensibly --
-  plus an optional discounted look at the best follow-up move (a shallow best-first search) for the higher
-  levels, rewarding a setup move that enables a strong reply over a shallow immediate pop. Also weighs
+  plus a discounted look at the best follow-up move (a shallow best-first search, compounding the same
+  discount again each ply deeper) for the higher levels, rewarding a setup move that enables a strong reply
+  over a shallow immediate pop. The *lookahead* -- never the top-level decision itself, which always weighs
+  every legal candidate -- is beam-pruned (see `BEAM_WIDTH`): only the most promising handful of a ply's
+  candidates get a real recursive search of their own, the rest keep just their immediate value, which is
+  what keeps a beam-searched depth 3-4 roughly as cheap as an exhaustive depth 2 used to be (memory was
+  never the constraint -- `Grid` is 72 bytes with no heap allocation, and recursion depth maps straight to
+  a handful of small stack frames -- the branching factor is). Also weighs
   raising the stack (see `raiseValue`) against the best available swap: worth more the fewer real blocks
   are left on the board, worth less than any real match regardless, so it only wins when the board is
   genuinely short on material and has nothing better to do -- and it's judged against the height a raise

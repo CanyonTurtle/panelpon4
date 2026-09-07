@@ -167,3 +167,73 @@ test "raiseValue penalizes a dangerously tall column enough to outweigh scarce m
     const grid = engine.Grid.fromBoard(&b);
     try testing.expect(engine.raiseValue(grid) < 0);
 }
+
+test "bestMove still finds the winning swap at deeper, beam-pruned search depths" {
+    var b: s.Board = .{};
+    b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
+
+    const grid = engine.Grid.fromBoard(&b);
+    // Depths 2-4 all route the lookahead through bestMoveValue's beam
+    // pruning (see BEAM_WIDTH) -- an obvious, immediate win should never be
+    // lost to it at any depth.
+    for ([_]u8{ 2, 3, 4 }) |depth| {
+        const mv = engine.bestMove(grid, depth) orelse return error.NoMoveFound;
+        try testing.expectEqual(@as(u8, 5), mv.row);
+        try testing.expectEqual(@as(u8, 2), mv.col);
+    }
+}
+
+test "bestMove still prefers a chain-triggering swap over a flat match at deeper, beam-pruned search depths" {
+    var b: s.Board = .{};
+    // Identical fixture to the depth-1 version of this same test above --
+    // see its own comments for exactly why each cell is where it is.
+    b.cellAt(8, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(9, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(10, 0).* = .{ .color = 0, .state = .normal };
+    b.cellAt(11, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(10, 1).* = .{ .color = 0, .state = .normal };
+    b.cellAt(11, 1).* = .{ .color = 4, .state = .normal };
+    b.cellAt(10, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(11, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 3).* = .{ .color = 0, .state = .normal };
+    b.cellAt(11, 3).* = .{ .color = 4, .state = .normal };
+
+    b.cellAt(9, 4).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 4).* = .{ .color = 4, .state = .normal };
+    b.cellAt(11, 4).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 5).* = .{ .color = 1, .state = .normal };
+    b.cellAt(11, 5).* = .{ .color = 2, .state = .normal };
+
+    const grid = engine.Grid.fromBoard(&b);
+    for ([_]u8{ 3, 4 }) |depth| {
+        const mv = engine.bestMove(grid, depth) orelse return error.NoMoveFound;
+        try testing.expectEqual(@as(u8, 10), mv.row);
+        try testing.expectEqual(@as(u8, 2), mv.col);
+    }
+}
+
+test "a densely packed board (many more legal swaps than the beam width) still resolves cleanly at deep search depths" {
+    var b: s.Board = .{};
+    // Fill the whole board with a color pattern that never runs 3+ the same
+    // way in a row or column (a 3-color diagonal stripe: color depends on
+    // (row+col) mod 3), so nothing pre-matches, but nearly every adjacent
+    // pair is still a legal (if usually pointless) swap -- comfortably more
+    // than BEAM_WIDTH candidates, exercising the partial-sort/pruning path
+    // for real rather than only ever seeing a handful of candidates.
+    for (0..12) |row| {
+        for (0..6) |col| {
+            b.cellAt(@intCast(row), @intCast(col)).* = .{ .color = @intCast((row + col) % 3), .state = .normal };
+        }
+    }
+    const grid = engine.Grid.fromBoard(&b);
+    // Just needs to terminate and return a legal move at each depth --
+    // there are 60 legal swaps here, none of them winning outright, so this
+    // is a pruning-path sanity/regression check, not a specific-move
+    // assertion.
+    for ([_]u8{ 2, 3, 4 }) |depth| {
+        _ = engine.bestMove(grid, depth) orelse return error.NoMoveFound;
+    }
+}
