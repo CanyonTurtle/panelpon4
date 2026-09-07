@@ -18,7 +18,7 @@ pub const POP_FRAMES: i16 = 34; // per-block pop duration; longer gives big comb
 pub const POP_FLASH_FRAMES: i16 = 10;
 pub const POP_STAGGER_FRAMES: i16 = 4; // delay between each matched block's pop, so they go one at a time
 pub const LAND_FRAMES: i16 = 8;
-pub const SWAP_FRAMES: i16 = 3; // half of the original 6, for a snappier swap
+pub const SWAP_FRAMES: i16 = 6;
 pub const FALL_SPEED: i16 = 4; // pixels per frame while falling
 
 pub const MOVE_DAS_FIRST: u8 = 12;
