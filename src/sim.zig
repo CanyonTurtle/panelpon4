@@ -84,7 +84,11 @@ pub fn simulate() void {
                             // the *whole* connected pop event (which may
                             // span several garbage cells and/or real matched
                             // cells -- see the propagation pass in
-                            // checkMatches) finishes together.
+                            // checkMatches) finishes together. Its color was
+                            // already picked back when the pop started (see
+                            // checkMatches), so the player has been able to
+                            // see it -- and plan around it -- for the whole
+                            // pop, not just this final instant.
                             //
                             // Deliberately NOT marked just_settled/settled:
                             // checkMatches' "spend chainable on an unmatched
@@ -101,7 +105,6 @@ pub fn simulate() void {
                             // triggers a check) instead.
                             cell.state = .normal;
                             cell.is_garbage = false;
-                            cell.color = @intCast(s.randRange(c.NUM_COLORS));
                             cell.chainable = true;
                             cell.timer = 0;
                             cell.pop_group_end = 0;
@@ -377,6 +380,10 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
             var max_row: u8 = 0;
             var min_col: u8 = c.COLS - 1;
             var max_col: u8 = 0;
+            // Garbage never counts toward a combo -- only real matched
+            // color cells do, even though propagated garbage shares this
+            // same group and pops alongside them (see below).
+            var real_count: usize = 0;
             for (0..member_count) |i| {
                 const pos = members[i];
                 if (settled_chainable[pos[0]][pos[1]]) group_chainable = true;
@@ -384,6 +391,7 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                 if (pos[0] > max_row) max_row = pos[0];
                 if (pos[1] < min_col) min_col = pos[1];
                 if (pos[1] > max_col) max_col = pos[1];
+                if (!s.cellAt(pos[0], pos[1]).is_garbage) real_count += 1;
             }
             var multiplier: u8 = 1;
             if (s.chain == 0 or group_chainable) {
@@ -395,13 +403,14 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
             // a *chain* is a genuine continuation (multiplier > 1 -- this
             // match was only possible because of an earlier break); a
             // *combo* is simply a single match bigger than the minimum 3
-            // blocks, independent of chain state. A match can be both -- the
-            // chain label takes priority in that case, since it's the rarer
-            // feat. The very first match of a fresh chain sequence at its
-            // minimum size (multiplier == 1, member_count == 3) is just an
-            // ordinary pop, nothing to celebrate.
+            // real (non-garbage) blocks, independent of chain state. A match
+            // can be both -- the chain label takes priority in that case,
+            // since it's the rarer feat. The very first match of a fresh
+            // chain sequence at its minimum size (multiplier == 1,
+            // real_count == 3) is just an ordinary pop, nothing to
+            // celebrate.
             const is_chain = multiplier > 1;
-            const is_combo = member_count > 3;
+            const is_combo = real_count > 3;
 
             const group_end: i16 = c.POP_FRAMES + @as(i16, @intCast(member_count - 1)) * c.POP_STAGGER_FRAMES;
             for (0..member_count) |i| {
@@ -410,13 +419,24 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                 cell.state = .popping;
                 cell.timer = c.POP_FRAMES + @as(i16, @intCast(i)) * c.POP_STAGGER_FRAMES;
                 cell.pop_group_end = group_end;
+                if (cell.is_garbage) {
+                    // Reveal the color now, at the start of the pop, not at
+                    // the end -- see render.drawPoppingCell, which renders
+                    // any popping cell (garbage-sourced or not) using
+                    // whatever color it already holds. Letting the player
+                    // see the color for the whole pop (not just the instant
+                    // it resolves) is the point: it lets them premeditate a
+                    // matching lineup underneath before the reveal actually
+                    // lands.
+                    cell.color = @intCast(s.randRange(c.NUM_COLORS));
+                }
             }
             if (is_chain or is_combo) {
                 var label_buf: [16]u8 = undefined;
                 const label = if (is_chain)
                     std.fmt.bufPrint(&label_buf, "x{d}", .{multiplier}) catch "x?"
                 else
-                    std.fmt.bufPrint(&label_buf, "{d}", .{member_count}) catch "?";
+                    std.fmt.bufPrint(&label_buf, "{d}", .{real_count}) catch "?";
                 const match_w = (@as(i32, max_col) - @as(i32, min_col) + 1) * c.TILE;
                 const cx = c.BOARD_X + @as(i32, min_col) * c.TILE + @divTrunc(match_w, 2);
                 // Spawn at the center of the match's topmost block (not the
@@ -443,11 +463,11 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                     // this never underflows.
                     const garbage_rows: u8 = multiplier - 1;
                     garbage.spawnGarbage(garbage_rows, c.COLS, 0);
-                } else if (member_count >= 6) {
+                } else if (real_count >= 6) {
                     garbage.spawnGarbage(1, c.COLS, 0);
-                } else if (member_count == 5) {
+                } else if (real_count == 5) {
                     garbage.spawnGarbage(1, 4, min_col);
-                } else { // member_count == 4, the only case left under is_combo
+                } else { // real_count == 4, the only case left under is_combo
                     garbage.spawnGarbage(1, 3, min_col);
                 }
             }

@@ -195,44 +195,13 @@ fn drawGarbageBlockLinked(x: i32, y: i32, edges: GarbageEdges) void {
     if (!edges.down and !edges.right) w4.Rect(x + w - 1, y + h - 1, 1, 1);
 }
 
-fn drawGarbageBlock(x: i32, y: i32, w: i32, h: i32) void {
-    drawGarbageRect(x, y, w, h);
-    if (w <= 2 * BEVEL_RADIUS or h <= 2 * BEVEL_RADIUS) return;
-    w4.DRAW_COLORS.* = DC_BG;
-    var dy: i32 = 0;
-    while (dy < BEVEL_RADIUS) : (dy += 1) {
-        var dx: i32 = 0;
-        while (dx < BEVEL_RADIUS) : (dx += 1) {
-            if (dx + dy < BEVEL_RADIUS) {
-                w4.Rect(x + dx, y + dy, 1, 1);
-                w4.Rect(x + w - 1 - dx, y + dy, 1, 1);
-                w4.Rect(x + dx, y + h - 1 - dy, 1, 1);
-                w4.Rect(x + w - 1 - dx, y + h - 1 - dy, 1, 1);
-            }
-        }
-    }
-}
-
-fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool) void {
+// Also used for a popping garbage cell (see Cell.is_garbage): its color is
+// already picked the moment the pop starts (see sim.checkMatches), so it
+// renders exactly like a real matched cell popping -- the whole point is to
+// let the player see, and plan around, the color it's about to become for
+// the entire pop, not just reveal it at the very end.
+fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
     const elapsed = c.POP_FRAMES - timer;
-    if (is_garbage) {
-        // Garbage doesn't shrink away -- it isn't disappearing, it's
-        // revealing a fresh block once the whole connected pop event
-        // finishes (see sim.simulate) -- so it just pulses/cracks in place
-        // for as long as it's popping, at full size right up until the
-        // instant it resolves into a real block.
-        if (elapsed < 0) {
-            drawGarbageBlock(x, y, BLOCK_SIZE, BLOCK_SIZE);
-            return;
-        }
-        const puls: i32 = @intCast(@mod(elapsed, 8));
-        const delta: i32 = if (puls < 4) puls else 8 - puls;
-        const size = BLOCK_SIZE - delta;
-        if (size <= 0) return;
-        const off = @divTrunc(BLOCK_SIZE - size, 2);
-        drawGarbageBlock(x + off, y + off, size, size);
-        return;
-    }
     if (elapsed < 0) {
         // Still waiting its turn in the pop cascade (see POP_STAGGER_FRAMES)
         // -- render exactly like a settled block until then.
@@ -334,7 +303,7 @@ fn drawBoard() void {
                     const y = base_y - cell.fall_off;
                     if (cell.is_garbage) drawGarbageBlockLinked(x, y, garbageEdgesAt(lr, col)) else drawNormalCell(x, y, cell.color);
                 },
-                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.is_garbage),
+                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer),
                 .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, garbageEdgesAt(lr, col)),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},

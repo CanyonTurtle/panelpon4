@@ -10,4 +10,5 @@ test {
     _ = @import("board.zig");
     _ = @import("sim.zig");
     _ = @import("sim_test.zig");
+    _ = @import("sim_garbage_test.zig");
 }
