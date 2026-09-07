@@ -42,7 +42,7 @@ pub fn trySwap() void {
 }
 
 pub fn simulate() void {
-    s.tickComboPopups();
+    s.tickMatchPopups();
 
     var settled = false;
     // Cells that completed a .swapping/.landing -> .normal transition this
@@ -299,8 +299,8 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
             // cells fell into place from an earlier break (chainable); a
             // match made purely of ordinary settled blocks isn't, even if
             // some unrelated cascade elsewhere is still busy right now. The
-            // very first match of a fresh combo (chain still 0) always
-            // counts, since there's nothing to "continue" yet.
+            // very first match of a fresh chain sequence (chain still 0)
+            // always counts, since there's nothing to "continue" yet.
             var group_chainable = false;
             var min_row: u8 = c.ROWS - 1;
             var max_row: u8 = 0;
@@ -319,12 +319,19 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                 s.chain += 1;
                 multiplier = s.chain;
             }
-            // A genuine chain (multiplier > 1 -- this match was only possible
-            // because of an earlier break) gets the orange flashing/flying
-            // combo flourish (see state.ComboPopup and Cell.combo_flash). The
-            // very first match of a fresh combo (multiplier == 1) is just an
-            // ordinary pop, nothing to celebrate yet.
-            const is_combo = multiplier > 1;
+            // Two distinct, independently-triggered flourishes share the same
+            // flash/fly animation (see state.MatchPopup and
+            // Cell.flourish_flash), but mean different things: a *chain* is a
+            // genuine continuation (multiplier > 1 -- this match was only
+            // possible because of an earlier break); a *combo* is simply a
+            // single match bigger than the minimum 3 blocks, independent of
+            // chain state. A match can be both -- the chain label takes
+            // priority in that case, since it's the rarer feat. The very
+            // first match of a fresh chain sequence at its minimum size
+            // (multiplier == 1, member_count == 3) is just an ordinary pop,
+            // nothing to celebrate.
+            const is_chain = multiplier > 1;
+            const is_combo = member_count > 3;
 
             const group_end: i16 = c.POP_FRAMES + @as(i16, @intCast(member_count - 1)) * c.POP_STAGGER_FRAMES;
             for (0..member_count) |i| {
@@ -333,14 +340,19 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                 cell.state = .popping;
                 cell.timer = c.POP_FRAMES + @as(i16, @intCast(i)) * c.POP_STAGGER_FRAMES;
                 cell.pop_group_end = group_end;
-                cell.combo_flash = is_combo;
+                cell.flourish_flash = is_chain or is_combo;
             }
-            if (is_combo) {
+            if (is_chain or is_combo) {
+                var label_buf: [16]u8 = undefined;
+                const label = if (is_chain)
+                    std.fmt.bufPrint(&label_buf, "x{d} chain!", .{multiplier}) catch "chain!"
+                else
+                    std.fmt.bufPrint(&label_buf, "{d} combo!", .{member_count}) catch "combo!";
                 const px = c.BOARD_X + @as(i32, min_col) * c.TILE;
                 const py = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(s.scroll_px));
                 const pw = (@as(i32, max_col) - @as(i32, min_col) + 1) * c.TILE;
                 const ph = (@as(i32, max_row) - @as(i32, min_row) + 1) * c.TILE;
-                s.spawnComboPopup(multiplier, px, py, pw, ph);
+                s.spawnMatchPopup(label, px, py, pw, ph);
             }
             s.score += @as(u32, @intCast(member_count)) * 10 * multiplier;
             audio.playPopSound(multiplier);

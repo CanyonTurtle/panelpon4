@@ -121,18 +121,25 @@ test "a chainable match while chain > 0 does inflate the chain" {
     try testing.expectEqual(@as(u8, 2), s.chain);
 }
 
-test "the first match of a fresh combo does not spawn a combo popup" {
+fn activePopupLabel() ?[]const u8 {
+    for (&s.match_popups) |*p| {
+        if (p.active) return p.label[0..p.label_len];
+    }
+    return null;
+}
+
+test "the first ordinary 3-match of a fresh chain does not spawn a popup" {
     s.resetForTest();
     s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
     s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
     s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
     _ = sim.checkMatches(no_settled);
     try testing.expectEqual(@as(u8, 1), s.chain);
-    try testing.expect(!s.cellAt(5, 0).combo_flash);
-    for (s.combo_popups) |p| try testing.expect(!p.active);
+    try testing.expect(!s.cellAt(5, 0).flourish_flash);
+    for (s.match_popups) |p| try testing.expect(!p.active);
 }
 
-test "a genuine chain match marks combo_flash and spawns a combo popup" {
+test "a genuine chain match marks flourish_flash and spawns an 'xN chain!' popup" {
     s.resetForTest();
     s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
     s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
@@ -145,15 +152,44 @@ test "a genuine chain match marks combo_flash and spawns a combo popup" {
     _ = sim.checkMatches(no_settled);
     try testing.expectEqual(@as(u8, 2), s.chain);
 
-    try testing.expect(s.cellAt(8, 3).combo_flash);
-    try testing.expect(s.cellAt(8, 4).combo_flash);
-    try testing.expect(s.cellAt(8, 5).combo_flash);
+    try testing.expect(s.cellAt(8, 3).flourish_flash);
+    try testing.expect(s.cellAt(8, 4).flourish_flash);
+    try testing.expect(s.cellAt(8, 5).flourish_flash);
 
-    var found_active = false;
-    for (s.combo_popups) |p| {
-        if (p.active and p.multiplier == 2) found_active = true;
-    }
-    try testing.expect(found_active);
+    try testing.expectEqualStrings("x2 chain!", activePopupLabel().?);
+}
+
+test "a match bigger than 3 blocks is a combo even at chain 1" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 4).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+
+    try testing.expectEqual(@as(u8, 1), s.chain); // not a chain continuation
+    try testing.expect(s.cellAt(5, 0).flourish_flash); // but still flourishes
+    try testing.expectEqualStrings("5 combo!", activePopupLabel().?);
+}
+
+test "a match that is both a chain and a combo shows the chain label" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+
+    // A 4-block chainable match: both is_chain (multiplier 2) and is_combo
+    // (member_count 4) are true here.
+    s.cellAt(8, 2).* = .{ .color = 2, .state = .normal, .chainable = true };
+    s.cellAt(8, 3).* = .{ .color = 2, .state = .normal };
+    s.cellAt(8, 4).* = .{ .color = 2, .state = .normal };
+    s.cellAt(8, 5).* = .{ .color = 2, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+    try testing.expectEqual(@as(u8, 2), s.chain);
+
+    try testing.expectEqualStrings("x2 chain!", activePopupLabel().?);
 }
 
 test "simulate marks the whole settled stack above a cleared pop as chainable" {

@@ -192,7 +192,7 @@ fn drawWarmDitherSquareCentered(x: i32, y: i32, size: i32) void {
     drawDitheredRectBlit(x + off, y + off, size, size, WARM_DITHER_HUES);
 }
 
-fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, combo_flash: bool) void {
+fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, flourish_flash: bool) void {
     const elapsed = c.POP_FRAMES - timer;
     if (elapsed < 0) {
         // Still waiting its turn in the pop cascade (see POP_STAGGER_FRAMES)
@@ -212,10 +212,10 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, combo_flash: bool) voi
         size = @divTrunc(BLOCK_SIZE * remain, shrink_total);
         if (size < 0) size = 0;
     }
-    // A genuine chain pop (see Cell.combo_flash) flashes the shared warm
+    // A chain or combo pop (see Cell.flourish_flash) flashes the shared warm
     // dither instead of its own color for its whole pop animation, tying it
-    // visually to the flying "xN" combo popup this same match spawned.
-    if (combo_flash) {
+    // visually to the flying text popup this same match spawned.
+    if (flourish_flash) {
         drawWarmDitherSquareCentered(x, y, size);
     } else {
         drawHueSquareCentered(x, y, color, size);
@@ -286,7 +286,7 @@ fn drawBoard() void {
                     drawNormalCell(x, y, cell.color);
                 },
                 .falling => drawNormalCell(x, base_y - cell.fall_off, cell.color),
-                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.combo_flash),
+                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.flourish_flash),
                 .landing => drawLandingCell(x, base_y, cell.color, cell.timer),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},
@@ -414,12 +414,12 @@ fn drawOutlinedText(str: []const u8, x: i32, y: i32, fg: u16) void {
 }
 
 // Roughly where the score digits sit (see drawPanel) -- popups fly here.
-const COMBO_TARGET_X: i32 = c.PANEL_X + 14;
-const COMBO_TARGET_Y: i32 = 10;
-const COMBO_MIN_SIZE: i32 = 3;
+const MATCH_POPUP_TARGET_X: i32 = c.PANEL_X + 14;
+const MATCH_POPUP_TARGET_Y: i32 = 10;
+const MATCH_POPUP_MIN_SIZE: i32 = 3;
 
-fn drawComboPopups() void {
-    for (s.combo_popups) |p| {
+fn drawMatchPopups() void {
+    for (s.match_popups) |p| {
         if (!p.active) continue;
 
         var cur_x = p.x;
@@ -427,24 +427,23 @@ fn drawComboPopups() void {
         var cur_w = p.w;
         var cur_h = p.h;
 
-        if (p.elapsed >= s.COMBO_POPUP_HOLD) {
+        if (p.elapsed >= s.MATCH_POPUP_HOLD) {
             // Ease-in toward the score (t^2, not a constant-speed drift) --
             // starts slow and accelerates, reading as a "magnetic pull"
             // rather than a simple slide.
-            const fly_elapsed: i32 = p.elapsed - s.COMBO_POPUP_HOLD;
-            const fly_total: i32 = s.COMBO_POPUP_FLY;
+            const fly_elapsed: i32 = p.elapsed - s.MATCH_POPUP_HOLD;
+            const fly_total: i32 = s.MATCH_POPUP_FLY;
             const num = fly_elapsed * fly_elapsed;
             const den = fly_total * fly_total;
-            cur_x = p.x + @divTrunc((COMBO_TARGET_X - p.x) * num, den);
-            cur_y = p.y + @divTrunc((COMBO_TARGET_Y - p.y) * num, den);
-            cur_w = p.w + @divTrunc((COMBO_MIN_SIZE - p.w) * num, den);
-            cur_h = p.h + @divTrunc((COMBO_MIN_SIZE - p.h) * num, den);
+            cur_x = p.x + @divTrunc((MATCH_POPUP_TARGET_X - p.x) * num, den);
+            cur_y = p.y + @divTrunc((MATCH_POPUP_TARGET_Y - p.y) * num, den);
+            cur_w = p.w + @divTrunc((MATCH_POPUP_MIN_SIZE - p.w) * num, den);
+            cur_h = p.h + @divTrunc((MATCH_POPUP_MIN_SIZE - p.h) * num, den);
         }
 
         drawDitheredRectBlit(cur_x, cur_y, cur_w, cur_h, WARM_DITHER_HUES);
 
-        var buf: [4]u8 = undefined;
-        const label = std.fmt.bufPrint(&buf, "x{d}", .{p.multiplier}) catch "x?";
+        const label = p.label[0..p.label_len];
         const text_x = cur_x + @divTrunc(cur_w, 2) - @as(i32, @intCast(label.len)) * 4;
         drawOutlinedText(label, text_x, cur_y - 8, HUE_DRAWCOLOR[2]);
     }
@@ -472,5 +471,5 @@ pub fn render() void {
     drawFrame();
     drawCursor();
     drawPanel();
-    drawComboPopups();
+    drawMatchPopups();
 }
