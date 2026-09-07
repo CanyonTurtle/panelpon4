@@ -4,7 +4,7 @@ const c = @import("constants.zig");
 const s = @import("state.zig");
 
 pub fn riseSpeedFramesPerPixel() u32 {
-    const level = s.score / 300;
+    const level = s.score / 600;
     const speed = if (level > 4) 4 else 8 - level;
     return speed;
 }
@@ -44,13 +44,14 @@ pub fn generateRowInto(target_phys: u8, logical_r: u8) void {
 }
 
 pub fn doRise() void {
-    var col: u8 = 0;
-    while (col < c.COLS) : (col += 1) {
-        if (s.cellAt(0, col).state != .empty) {
-            s.game_over = true;
-            return;
-        }
-    }
+    // Always perform the rise first, then check the row that lands at the
+    // top (logical row 0) afterward -- checking beforehand would inspect the
+    // row that's just about to be retired (relabeled to the bottom buffer
+    // slot), which by construction the player has already watched scroll
+    // fully off the top of the screen over the preceding animation. Checking
+    // post-rise instead means game_over fires the instant the stack is
+    // exactly flush with the top of the visible board, never after it's
+    // scrolled out of view.
     generateRowInto(s.top, c.ROWS - 1);
     s.top = @intCast((@as(u16, s.top) + 1) % @as(u16, c.ROWS));
 
@@ -60,6 +61,14 @@ pub fn doRise() void {
     // the same physical row it was on, so the cursor rises with the stack
     // unless the player is actively moving it.
     if (s.cursor_row > 0) s.cursor_row -= 1;
+
+    var col: u8 = 0;
+    while (col < c.COLS) : (col += 1) {
+        if (s.cellAt(0, col).state != .empty) {
+            s.game_over = true;
+            return;
+        }
+    }
 }
 
 pub fn updateRise() void {
@@ -103,9 +112,22 @@ const testing = @import("std").testing;
 
 test "doRise triggers game_over once a column reaches the top row" {
     s.resetForTest();
-    s.cellAt(0, 0).state = .normal;
+    // Row 1 becomes the new row 0 after this rise -- see doRise's comment on
+    // why the check happens post-rise rather than on the row being retired.
+    s.cellAt(1, 0).state = .normal;
     doRise();
     try testing.expect(s.game_over);
+}
+
+test "doRise does not end the game over a row that's merely about to scroll off" {
+    s.resetForTest();
+    // Occupied row 0 is about to be retired (relabeled to the bottom buffer
+    // slot) by this rise, not promoted to the top -- it must not trigger
+    // game_over on its own. Row 1 (left empty here) is what becomes the new
+    // row 0, and that's what actually gets checked.
+    s.cellAt(0, 0).state = .normal;
+    doRise();
+    try testing.expect(!s.game_over);
 }
 
 test "doRise shifts top and keeps the cursor tracking the same physical row" {
@@ -142,8 +164,8 @@ test "riseSpeedFramesPerPixel decreases with score and floors at 4" {
     s.resetForTest();
     s.score = 0;
     try testing.expectEqual(@as(u32, 8), riseSpeedFramesPerPixel());
-    s.score = 300;
+    s.score = 600;
     try testing.expectEqual(@as(u32, 7), riseSpeedFramesPerPixel());
-    s.score = 3000;
+    s.score = 6000;
     try testing.expectEqual(@as(u32, 4), riseSpeedFramesPerPixel());
 }

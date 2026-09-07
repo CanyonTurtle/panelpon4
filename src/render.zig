@@ -400,6 +400,19 @@ const MATCH_POPUP_CHAR_W: i32 = 8;
 const MATCH_POPUP_PAD_X: i32 = 2;
 const MATCH_POPUP_PAD_Y: i32 = 1;
 
+// A 1px background-colored outline around the badge, with the 4 corner
+// pixels left unpainted (showing the dithered fill underneath) -- the same
+// chamfer idea as drawBevelledBlock's corner punch, giving the badge a
+// subtly rounded, beveled edge instead of a harsh flat rectangle.
+fn drawBadgeOutline(x: i32, y: i32, w: i32, h: i32) void {
+    if (w <= 2 or h <= 2) return;
+    w4.DRAW_COLORS.* = DC_BG;
+    w4.Rect(x + 1, y, @intCast(w - 2), 1); // top
+    w4.Rect(x + 1, y + h - 1, @intCast(w - 2), 1); // bottom
+    w4.Rect(x, y + 1, 1, @intCast(h - 2)); // left
+    w4.Rect(x + w - 1, y + 1, 1, @intCast(h - 2)); // right
+}
+
 fn drawMatchPopups() void {
     for (s.match_popups) |p| {
         if (!p.active) continue;
@@ -425,6 +438,7 @@ fn drawMatchPopups() void {
         const badge_y = cur_y - @divTrunc(badge_h, 2);
 
         drawDitheredRectBlit(badge_x, badge_y, badge_w, badge_h, WARM_DITHER_HUES);
+        drawBadgeOutline(badge_x, badge_y, badge_w, badge_h);
         // Black text directly on the bright orange block reads clearly on
         // its own -- the same technique drawSymbolFor uses for symbols on a
         // block color -- so no separate outline pass is needed here.

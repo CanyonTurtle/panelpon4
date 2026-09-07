@@ -211,13 +211,19 @@ async function loadCart(wasmPath) {
     setGamepad(BUTTON_1); e.update();
     setGamepad(0); e.update();
   }
-  function screenshot(path, scale = 3) {
-    const outW = SCREEN * scale, outH = SCREEN * scale;
+  // region: optional {x, y, w, h} in screen pixels to crop before scaling --
+  // handy for zooming into a small UI element (like a badge) at a large
+  // scale without producing a huge full-screen image.
+  function screenshot(path, scale = 3, region) {
+    const rx = region ? region.x : 0, ry = region ? region.y : 0;
+    const rw = region ? region.w : SCREEN, rh = region ? region.h : SCREEN;
+    const outW = rw * scale, outH = rh * scale;
     const rgba = Buffer.alloc(outW * outH * 4);
-    for (let y = 0; y < SCREEN; y++) {
-      for (let x = 0; x < SCREEN; x++) {
-        const idx = y * 40 + (x >> 2);
-        const shift = (x & 3) * 2;
+    for (let y = 0; y < rh; y++) {
+      for (let x = 0; x < rw; x++) {
+        const sx0 = rx + x, sy0 = ry + y;
+        const idx = sy0 * 40 + (sx0 >> 2);
+        const shift = (sx0 & 3) * 2;
         const colorIdx = (mem8[FRAMEBUFFER_ADDR + idx] >> shift) & 0b11;
         const [r, g, b] = paletteColor(colorIdx);
         for (let sy = 0; sy < scale; sy++) {
