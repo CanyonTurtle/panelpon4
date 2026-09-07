@@ -314,10 +314,18 @@ fn drawBoard(b: *s.Board) void {
     for (0..c.COLS) |ci| col_stressed[ci] = isColumnStressed(b, @intCast(ci));
     const bounce = stressBounceOffset();
 
+    // Clipped against the board's own visible area (not the raw screen --
+    // VISIBLE_ROWS*TILE no longer happens to equal SCREEN_SIZE now that the
+    // board isn't always exactly as tall as the screen), so the extra
+    // ring-buffer row (see state.Board.top) stays properly hidden until it
+    // actually scrolls into view, rather than always poking through
+    // whatever gap is left below the board's own frame.
+    const board_bottom = c.BOARD_Y + @as(i32, c.VISIBLE_ROWS) * c.TILE;
+
     var lr: u8 = 0;
     while (lr < c.ROWS) : (lr += 1) {
         const base_y = c.BOARD_Y + @as(i32, lr) * c.TILE - @as(i32, @intCast(b.scroll_px));
-        if (base_y <= -c.TILE or base_y >= w4.SCREEN_SIZE) continue;
+        if (base_y + c.TILE <= c.BOARD_Y or base_y >= board_bottom) continue;
         var col: u8 = 0;
         while (col < c.COLS) : (col += 1) {
             const cell = b.cellAt(lr, col);

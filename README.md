@@ -40,8 +40,9 @@ npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm --html web/panelpon4.html --t
 
 ## How to play
 
-You play against a CPU opponent, each with your own full board -- yours at normal size on the left, the
-CPU's at a simplified micro scale in the side panel. Both run the exact same rules and physics.
+Each board is the traditional Panel de Pon size, 6 columns by 12 rows. You play against a CPU opponent,
+each with your own full board -- yours at normal size on the left, the CPU's at a simplified micro scale in
+the side panel. Both run the exact same rules and physics.
 
 - **Arrow keys**: move the two-tile cursor.
 - **X**: swap the two blocks under the cursor.

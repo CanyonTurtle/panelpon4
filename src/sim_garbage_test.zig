@@ -91,7 +91,7 @@ test "a recycled garbage cell reveals a fresh chainable block only once its whol
     b.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
     b.cellAt(5, 3).* = .{ .state = .normal, .is_garbage = true };
     // A genuine floor directly below the garbage cell -- anchored all the
-    // way to row 10 (the true bottom of the ring buffer), or gravity would
+    // way to row 12 (the true bottom of the ring buffer), or gravity would
     // treat the "floor" itself as unsupported and let it fall away, leaving
     // the revealed block nothing to rest on (the project's standing
     // test-fixture pitfall). This keeps the revealed block at a known
@@ -101,6 +101,8 @@ test "a recycled garbage cell reveals a fresh chainable block only once its whol
     b.cellAt(8, 3).* = .{ .color = 3, .state = .normal };
     b.cellAt(9, 3).* = .{ .color = 4, .state = .normal };
     b.cellAt(10, 3).* = .{ .color = 3, .state = .normal };
+    b.cellAt(11, 3).* = .{ .color = 4, .state = .normal };
+    b.cellAt(12, 3).* = .{ .color = 3, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled);
     // (This match's 4 members -- 3 real + 1 propagated garbage -- also cross
     // the combo threshold and spawn combo garbage on the opponent's board;
@@ -303,7 +305,7 @@ test "linked garbage falls and lands as one rigid body, not per column independe
     b.cellAt(0, 0).* = .{ .state = .normal, .is_garbage = true };
     b.cellAt(0, 1).* = .{ .state = .normal, .is_garbage = true };
     b.cellAt(0, 2).* = .{ .state = .normal, .is_garbage = true };
-    // The obstacle itself needs anchoring all the way to row 10 (the true
+    // The obstacle itself needs anchoring all the way to row 12 (the true
     // bottom of the ring buffer) or ordinary gravity treats it as
     // unsupported and lets it fall away too, silently flattening the
     // "uneven floor" this test depends on (a recurring test-fixture
@@ -311,6 +313,8 @@ test "linked garbage falls and lands as one rigid body, not per column independe
     b.cellAt(8, 1).* = .{ .color = 2, .state = .normal };
     b.cellAt(9, 1).* = .{ .color = 3, .state = .normal };
     b.cellAt(10, 1).* = .{ .color = 2, .state = .normal };
+    b.cellAt(11, 1).* = .{ .color = 3, .state = .normal };
+    b.cellAt(12, 1).* = .{ .color = 2, .state = .normal };
 
     for (0..100) |_| sim.simulate(&b, &opp);
 
@@ -340,9 +344,19 @@ test "a resting garbage group re-falls together once its support disappears" {
     b.cellAt(9, 0).* = .{ .color = 3, .state = .normal }; // temporary support
     b.cellAt(9, 1).* = .{ .color = 4, .state = .normal };
     b.cellAt(9, 2).* = .{ .color = 3, .state = .normal };
-    b.cellAt(10, 0).* = .{ .color = 3, .state = .normal }; // true floor
+    // True floor, anchored all the way to row 12 (the true bottom of the
+    // ring buffer) -- a single row at row 10 is no longer enough on its own
+    // now that the board is taller than 11 rows; it'd be just as
+    // unsupported as anything else without this.
+    b.cellAt(10, 0).* = .{ .color = 3, .state = .normal };
     b.cellAt(10, 1).* = .{ .color = 4, .state = .normal };
     b.cellAt(10, 2).* = .{ .color = 3, .state = .normal };
+    b.cellAt(11, 0).* = .{ .color = 4, .state = .normal };
+    b.cellAt(11, 1).* = .{ .color = 3, .state = .normal };
+    b.cellAt(11, 2).* = .{ .color = 4, .state = .normal };
+    b.cellAt(12, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(12, 1).* = .{ .color = 4, .state = .normal };
+    b.cellAt(12, 2).* = .{ .color = 3, .state = .normal };
 
     // The garbage falls and rests at row 8, on top of the (unrelated,
     // non-matching, never-triggered) support.

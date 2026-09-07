@@ -207,7 +207,12 @@ test "simulate marks the whole settled stack above a cleared pop as chainable" {
     b.cellAt(7, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(8, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(9, 0).* = .{ .color = 1, .state = .normal };
+    // Anchored all the way to row 12 (the true bottom of the ring buffer)
+    // or gravity would treat row 10 itself as unsupported and let it fall
+    // away (the project's standing test-fixture pitfall).
     b.cellAt(10, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(11, 0).* = .{ .color = 4, .state = .normal };
+    b.cellAt(12, 0).* = .{ .color = 2, .state = .normal };
 
     _ = sim.checkMatches(&b, &opp, no_settled); // starts the pop at rows 7-9
     // Run enough frames for the whole staggered pop cascade to finish
@@ -228,13 +233,19 @@ test "simulate marks the whole settled stack above a cleared pop as chainable" {
 test "a gap stops chainable marking from reaching blocks above it" {
     var b: s.Board = .{};
     var opp: s.Board = .{};
+    // Anchored all the way to row 12 (the true bottom) -- see the previous
+    // test's comment on why.
     b.cellAt(7, 1).* = .{ .color = 1, .state = .normal };
     b.cellAt(8, 1).* = .{ .color = 1, .state = .normal };
     b.cellAt(9, 1).* = .{ .color = 1, .state = .normal };
     b.cellAt(10, 1).* = .{ .color = 3, .state = .normal };
+    b.cellAt(11, 1).* = .{ .color = 4, .state = .normal };
+    b.cellAt(12, 1).* = .{ .color = 2, .state = .normal };
     // Column 2 is untouched/unrelated -- should never become chainable.
     b.cellAt(9, 2).* = .{ .color = 2, .state = .normal };
     b.cellAt(10, 2).* = .{ .color = 4, .state = .normal };
+    b.cellAt(11, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(12, 2).* = .{ .color = 4, .state = .normal };
 
     _ = sim.checkMatches(&b, &opp, no_settled);
     const group_end = c.POP_FRAMES + 2 * c.POP_STAGGER_FRAMES;

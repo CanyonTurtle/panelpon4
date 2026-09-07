@@ -2,12 +2,15 @@
 // Constants used by only one module live in that module instead.
 
 pub const COLS: u8 = 6;
-pub const VISIBLE_ROWS: u8 = 10;
+pub const VISIBLE_ROWS: u8 = 12; // traditional Panel de Pon board size (6x12)
 pub const ROWS: u8 = VISIBLE_ROWS + 1; // one extra buffer row rising in from below
-pub const TILE: i32 = 16;
+pub const TILE: i32 = 12;
 pub const NUM_COLORS: u8 = 5; // 3 solid hues + 2 dithered blends of adjacent hues
 
-pub const BOARD_X: i32 = 4;
+// Content width is COLS*TILE (72px); centered in the space left of the
+// panel (0..PANEL_X, i.e. (108-72)/2 = 18) now that a 12px tile makes the
+// board noticeably narrower than it used to be at 16px.
+pub const BOARD_X: i32 = 18;
 pub const BOARD_Y: i32 = 0;
 pub const PANEL_X: i32 = 108;
 
