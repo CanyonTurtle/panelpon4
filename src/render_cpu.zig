@@ -106,22 +106,23 @@ fn fillCellFull(x: i32, y: i32, cell: s.Cell, clip_top: i32, clip_bottom: i32) v
 // the much smaller cell), and the shrink uses the exact same fraction/timing
 // math as the full-scale version. No icon -- it wouldn't fit as the cell
 // shrinks, same as the full-scale version.
-fn drawMicroPopping(x: i32, y: i32, color: u8, timer: i16, clip_top: i32, clip_bottom: i32) void {
-    const total_elapsed = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES - timer;
-    if (total_elapsed < 0) {
-        fillCellFull(x, y, .{ .color = color }, clip_top, clip_bottom);
-        return;
-    }
-    if (total_elapsed < c.PRE_POP_TOTAL_FRAMES) {
-        // Mirrors render.drawPoppingCell's own pre-pop blink+pause preamble.
-        if (total_elapsed < c.PRE_POP_BLINK_FRAMES) {
-            if (@mod(total_elapsed, 2) == 0) fillCellFull(x, y, .{ .color = color }, clip_top, clip_bottom);
+fn drawMicroPopping(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16, clip_top: i32, clip_bottom: i32) void {
+    if (pre_pop_timer > 0) {
+        // Mirrors render.drawPoppingCell's own pre-pop blink+pause preamble,
+        // shared in lockstep by the whole group (see Cell.pre_pop_timer).
+        const elapsed = c.PRE_POP_TOTAL_FRAMES - pre_pop_timer;
+        if (elapsed < c.PRE_POP_BLINK_FRAMES) {
+            if (@mod(elapsed, 2) == 0) fillCellFull(x, y, .{ .color = color }, clip_top, clip_bottom);
         } else {
             fillCellFull(x, y, .{ .color = color }, clip_top, clip_bottom);
         }
         return;
     }
-    const elapsed = total_elapsed - c.PRE_POP_TOTAL_FRAMES;
+    const elapsed = c.POP_FRAMES - timer;
+    if (elapsed < 0) {
+        fillCellFull(x, y, .{ .color = color }, clip_top, clip_bottom);
+        return;
+    }
     var size: i32 = MICRO_CELL;
     if (elapsed < c.POP_FLASH_FRAMES) {
         const puls: i32 = @intCast(@mod(elapsed, 8));
@@ -143,19 +144,21 @@ fn drawMicroPopping(x: i32, y: i32, color: u8, timer: i16, clip_top: i32, clip_b
 // looks like inert garbage until its own staggered turn (same timer/formula
 // as the full-scale version), then hard-cuts to a plain revealed block (with
 // its icon) and stays that way -- no animation of its own.
-fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, clip_top: i32, clip_bottom: i32) void {
-    const total_elapsed = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES - timer;
-    if (total_elapsed < 0) {
-        fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
-        return;
-    }
-    if (total_elapsed < c.PRE_POP_TOTAL_FRAMES) {
-        // Mirrors render.drawRecyclingCell's own pre-pop blink+pause preamble.
-        if (total_elapsed < c.PRE_POP_BLINK_FRAMES) {
-            if (@mod(total_elapsed, 2) == 0) fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
+fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16, clip_top: i32, clip_bottom: i32) void {
+    if (pre_pop_timer > 0) {
+        // Mirrors render.drawRecyclingCell's own pre-pop blink+pause
+        // preamble, shared in lockstep by the whole group.
+        const elapsed = c.PRE_POP_TOTAL_FRAMES - pre_pop_timer;
+        if (elapsed < c.PRE_POP_BLINK_FRAMES) {
+            if (@mod(elapsed, 2) == 0) fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
         } else {
             fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
         }
+        return;
+    }
+    const elapsed = c.POP_FRAMES - timer;
+    if (elapsed < 0) {
+        fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
         return;
     }
     fillCell(x, y, MICRO_CELL, MICRO_CELL, color, false, clip_top, clip_bottom);
@@ -190,8 +193,8 @@ fn drawMicroBoard(b: *s.Board, origin_x: i32, origin_y: i32) void {
                     fillCellFull(x + off, base_y, cell.*, clip_top, clip_bottom);
                 },
                 .landing => fillCellFull(x, base_y, cell.*, clip_top, clip_bottom),
-                .popping => drawMicroPopping(x, base_y, cell.color, cell.timer, clip_top, clip_bottom),
-                .recycling => drawMicroRecycling(x, base_y, cell.color, cell.timer, clip_top, clip_bottom),
+                .popping => drawMicroPopping(x, base_y, cell.color, cell.timer, cell.pre_pop_timer, clip_top, clip_bottom),
+                .recycling => drawMicroRecycling(x, base_y, cell.color, cell.timer, cell.pre_pop_timer, clip_top, clip_bottom),
                 .empty => {},
             }
         }

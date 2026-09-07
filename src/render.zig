@@ -148,28 +148,30 @@ fn drawNormalCell(x: i32, y: i32, color: u8) void {
 // A real matched block disappearing (see CellState.popping). Garbage never
 // uses this state -- a garbage cell pulled into the same event instead
 // recycles (see drawRecyclingCell below), which has no animation of its own.
-fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
-    const total_elapsed = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES - timer;
-    if (total_elapsed < 0) {
-        // Still waiting its turn in the pop cascade (see POP_STAGGER_FRAMES)
-        // -- render exactly like a settled block until then.
-        drawNormalCell(x, y, color);
-        return;
-    }
-    if (total_elapsed < c.PRE_POP_TOTAL_FRAMES) {
-        // The pre-pop preamble: first a hard on/off blink every single frame
-        // (distinct from the size-wobble flash below, which stays visible
-        // the whole time), then a short steady pause looking perfectly
-        // normal -- a heads-up cue that this cell is about to pop, before
-        // the actual pop cascade begins.
-        if (total_elapsed < c.PRE_POP_BLINK_FRAMES) {
-            if (@mod(total_elapsed, 2) == 0) drawNormalCell(x, y, color);
+fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16) void {
+    if (pre_pop_timer > 0) {
+        // The whole group's shared pre-pop preamble (see Cell.pre_pop_timer)
+        // -- every member of the match is in this same phase simultaneously,
+        // not staggered like the pop cascade below: first a hard on/off
+        // blink every single frame (distinct from the size-wobble flash
+        // below, which stays visible the whole time), then a short steady
+        // pause looking perfectly normal -- a heads-up cue that this cell is
+        // about to pop, before the actual (staggered) pop cascade begins.
+        const elapsed = c.PRE_POP_TOTAL_FRAMES - pre_pop_timer;
+        if (elapsed < c.PRE_POP_BLINK_FRAMES) {
+            if (@mod(elapsed, 2) == 0) drawNormalCell(x, y, color);
         } else {
             drawNormalCell(x, y, color);
         }
         return;
     }
-    const elapsed = total_elapsed - c.PRE_POP_TOTAL_FRAMES;
+    const elapsed = c.POP_FRAMES - timer;
+    if (elapsed < 0) {
+        // Still waiting its turn in the pop cascade (see POP_STAGGER_FRAMES)
+        // -- render exactly like a settled block until then.
+        drawNormalCell(x, y, color);
+        return;
+    }
     var size: i32 = BLOCK_SIZE;
     if (elapsed < c.POP_FLASH_FRAMES) {
         const puls: i32 = @intCast(@mod(elapsed, 8));
@@ -196,21 +198,24 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
 // PRE_POP_TOTAL_FRAMES), it still looks like part of the not-yet-recycled
 // garbage clump (see render_garbage's isAttached, which keys off this same
 // timer to know when to stop treating it as attached).
-fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: rgarbage.Edges) void {
-    const total_elapsed = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES - timer;
-    if (total_elapsed < 0) {
-        rgarbage.drawLinked(x, y, edges);
-        return;
-    }
-    if (total_elapsed < c.PRE_POP_TOTAL_FRAMES) {
-        // Blink (hard on/off every frame) then a short steady pause, both
-        // still showing the inert/attached garbage look -- the actual reveal
-        // only happens once the preamble finishes.
-        if (total_elapsed < c.PRE_POP_BLINK_FRAMES) {
-            if (@mod(total_elapsed, 2) == 0) rgarbage.drawLinked(x, y, edges);
+fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: rgarbage.Edges, pre_pop_timer: i16) void {
+    if (pre_pop_timer > 0) {
+        // The whole group's shared pre-pop preamble (see Cell.pre_pop_timer
+        // and drawPoppingCell above) -- blink (hard on/off every frame) then
+        // a short steady pause, both still showing the inert/attached
+        // garbage look; the actual reveal only happens once the preamble
+        // finishes and this cell's own staggered turn comes up.
+        const elapsed = c.PRE_POP_TOTAL_FRAMES - pre_pop_timer;
+        if (elapsed < c.PRE_POP_BLINK_FRAMES) {
+            if (@mod(elapsed, 2) == 0) rgarbage.drawLinked(x, y, edges);
         } else {
             rgarbage.drawLinked(x, y, edges);
         }
+        return;
+    }
+    const elapsed = c.POP_FRAMES - timer;
+    if (elapsed < 0) {
+        rgarbage.drawLinked(x, y, edges);
         return;
     }
     drawNormalCell(x, y, color);
@@ -307,8 +312,8 @@ fn drawBoard(b: *s.Board) void {
                     const y = base_y - cell.fall_off;
                     if (cell.is_garbage) rgarbage.drawLinked(x, y, rgarbage.edgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color);
                 },
-                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer),
-                .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, rgarbage.edgesAt(b, lr, col)),
+                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.pre_pop_timer),
+                .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, rgarbage.edgesAt(b, lr, col), cell.pre_pop_timer),
                 .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, rgarbage.edgesAt(b, lr, col)),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},

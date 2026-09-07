@@ -37,6 +37,15 @@ pub const Cell = struct {
     // hits 0, so the pop animation is staggered but the logical disappearance
     // -- and the gravity it triggers -- happens for the whole match at once.
     pop_group_end: i16 = 0,
+    // Counts down identically (no per-member offset) for every cell in a
+    // pop/recycle group, so the whole group's pre-pop blink+pause preamble
+    // (see PRE_POP_TOTAL_FRAMES) plays back in lockstep across every member
+    // instead of staggered like `timer` above. `timer` itself doesn't start
+    // counting down until this reaches 0 for the whole group (see
+    // sim.simulate) -- so the existing staggered pop cascade proceeds
+    // exactly as it did before this preamble existed, just uniformly
+    // delayed for everyone.
+    pre_pop_timer: i16 = 0,
     // Marked true, all at once, on the whole contiguous stack of settled
     // blocks directly above a pop the instant it finishes clearing (see
     // sim.simulate) -- not tracked through gravity as things actually fall,

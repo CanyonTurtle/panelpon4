@@ -46,11 +46,12 @@ fn isAttached(b: *s.Board, lr: u8, col: u8) bool {
     if (cell.state == .normal or cell.state == .falling or cell.state == .landing) return true;
     // A recycling cell only still looks (and counts as) attached garbage
     // while it hasn't had its own turn yet -- see render.drawRecyclingCell,
-    // including the pre-pop blink+pause preamble (PRE_POP_TOTAL_FRAMES) that
-    // now comes before the reveal. The instant it reveals, it renders as a
-    // plain normal block, so the clump it was part of should visually shrink
-    // by one cell right along with it.
-    if (cell.state == .recycling) return c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES - cell.timer < c.PRE_POP_TOTAL_FRAMES;
+    // including the shared pre-pop blink+pause preamble (Cell.pre_pop_timer)
+    // that now comes before the reveal, in lockstep across the whole group.
+    // The instant it reveals, it renders as a plain normal block, so the
+    // clump it was part of should visually shrink by one cell right along
+    // with it.
+    if (cell.state == .recycling) return cell.pre_pop_timer > 0 or c.POP_FRAMES - cell.timer < 0;
     return false;
 }
 

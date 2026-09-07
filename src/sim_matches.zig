@@ -215,11 +215,10 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
             const is_chain = multiplier > 1;
             const is_combo = real_count > 3;
 
-            // Every member's timer (and so the whole group's resolution
-            // timer) starts with the pre-pop blink+pause preamble on top of
-            // the ordinary pop duration -- see PRE_POP_TOTAL_FRAMES and
-            // render.drawPoppingCell/drawRecyclingCell, which spend it before
-            // even beginning to read `timer` against POP_FRAMES.
+            // The whole group's resolution timer includes the shared pre-pop
+            // blink+pause preamble (PRE_POP_TOTAL_FRAMES) on top of the
+            // ordinary staggered pop duration, so the group doesn't resolve
+            // before the preamble even finishes playing.
             const group_end: i16 = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + @as(i16, @intCast(member_count - 1)) * c.POP_STAGGER_FRAMES;
             for (0..member_count) |i| {
                 const pos = members[i];
@@ -230,7 +229,12 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
                 // per-member stagger (timer) and the same whole-group
                 // resolution timer (pop_group_end).
                 cell.state = if (cell.is_garbage) .recycling else .popping;
-                cell.timer = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + @as(i16, @intCast(i)) * c.POP_STAGGER_FRAMES;
+                cell.timer = c.POP_FRAMES + @as(i16, @intCast(i)) * c.POP_STAGGER_FRAMES;
+                // Identical for every member (no i offset) -- see
+                // Cell.pre_pop_timer -- so the whole group blinks/pauses in
+                // lockstep; `timer` above doesn't start counting down until
+                // this reaches 0 (see sim.simulate).
+                cell.pre_pop_timer = c.PRE_POP_TOTAL_FRAMES;
                 cell.pop_group_end = group_end;
                 if (cell.is_garbage) {
                     // Pick the reveal color now, at the moment the whole

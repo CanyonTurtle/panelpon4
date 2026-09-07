@@ -88,9 +88,21 @@ pub fn simulate(self: *s.Board, opponent: *s.Board) void {
                 // (every member, of either kind, in this connected pop/
                 // recycle event) finishes together.
                 .popping, .recycling => {
-                    cell.timer -= 1;
-                    if (cell.timer == 0) {
-                        audio.playPopTick();
+                    // The shared pre-pop blink+pause preamble (see
+                    // Cell.pre_pop_timer) counts down in lockstep for every
+                    // member of the group first; `timer` -- which drives the
+                    // ordinary staggered pop/reveal cascade below, unchanged
+                    // from before this preamble existed -- is frozen until
+                    // that finishes, so every member's own cascade still
+                    // starts exactly where it always did, just uniformly
+                    // delayed for the whole group.
+                    if (cell.pre_pop_timer > 0) {
+                        cell.pre_pop_timer -= 1;
+                    } else {
+                        cell.timer -= 1;
+                        if (cell.timer == 0) {
+                            audio.playPopTick();
+                        }
                     }
                     cell.pop_group_end -= 1;
                     if (cell.pop_group_end <= 0) {
@@ -126,6 +138,7 @@ pub fn simulate(self: *s.Board, opponent: *s.Board) void {
                             cell.is_garbage = false;
                             cell.chainable = true;
                             cell.timer = 0;
+                            cell.pre_pop_timer = 0;
                             cell.pop_group_end = 0;
                         } else {
                             cell.* = s.Cell{};
