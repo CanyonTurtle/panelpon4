@@ -186,13 +186,7 @@ fn drawNormalCell(x: i32, y: i32, color: u8) void {
     drawSymbolFor(color, x + sym_off, y + sym_off);
 }
 
-fn drawWarmDitherSquareCentered(x: i32, y: i32, size: i32) void {
-    if (size <= 0) return;
-    const off = @divTrunc(c.TILE - size, 2);
-    drawDitheredRectBlit(x + off, y + off, size, size, WARM_DITHER_HUES);
-}
-
-fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, flourish_flash: bool) void {
+fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
     const elapsed = c.POP_FRAMES - timer;
     if (elapsed < 0) {
         // Still waiting its turn in the pop cascade (see POP_STAGGER_FRAMES)
@@ -212,14 +206,7 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, flourish_flash: bool) 
         size = @divTrunc(BLOCK_SIZE * remain, shrink_total);
         if (size < 0) size = 0;
     }
-    // A chain or combo pop (see Cell.flourish_flash) flashes the shared warm
-    // dither instead of its own color for its whole pop animation, tying it
-    // visually to the flying text popup this same match spawned.
-    if (flourish_flash) {
-        drawWarmDitherSquareCentered(x, y, size);
-    } else {
-        drawHueSquareCentered(x, y, color, size);
-    }
+    drawHueSquareCentered(x, y, color, size);
 }
 
 fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16) void {
@@ -286,7 +273,7 @@ fn drawBoard() void {
                     drawNormalCell(x, y, cell.color);
                 },
                 .falling => drawNormalCell(x, base_y - cell.fall_off, cell.color),
-                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.flourish_flash),
+                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer),
                 .landing => drawLandingCell(x, base_y, cell.color, cell.timer),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},
@@ -402,21 +389,16 @@ fn drawPanel() void {
     }
 }
 
-// Draws str once offset by 1px in each cardinal direction in a dark color
-// before the real foreground pass, giving pixel text a readable outline
-// against whatever busy/bright content (like the orange dither) it sits on.
-fn drawOutlinedText(str: []const u8, x: i32, y: i32, fg: u16) void {
-    w4.DRAW_COLORS.* = DC_BG;
-    const offsets = [_][2]i32{ .{ -1, 0 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 1 } };
-    for (offsets) |o| w4.Text(str, x + o[0], y + o[1]);
-    w4.DRAW_COLORS.* = fg;
-    w4.Text(str, x, y);
-}
-
 // Roughly where the score digits sit (see drawPanel) -- popups fly here.
 const MATCH_POPUP_TARGET_X: i32 = c.PANEL_X + 14;
 const MATCH_POPUP_TARGET_Y: i32 = 10;
-const MATCH_POPUP_MIN_SIZE: i32 = 3;
+
+// Sized snugly around the label (WASM4's font is a fixed 8x8 per glyph) with
+// a couple pixels of padding -- a small, subtle badge rather than something
+// covering the whole match.
+const MATCH_POPUP_CHAR_W: i32 = 8;
+const MATCH_POPUP_PAD_X: i32 = 2;
+const MATCH_POPUP_PAD_Y: i32 = 1;
 
 fn drawMatchPopups() void {
     for (s.match_popups) |p| {
@@ -424,9 +406,6 @@ fn drawMatchPopups() void {
 
         var cur_x = p.x;
         var cur_y = p.y;
-        var cur_w = p.w;
-        var cur_h = p.h;
-
         if (p.elapsed >= s.MATCH_POPUP_HOLD) {
             // Ease-in toward the score (t^2, not a constant-speed drift) --
             // starts slow and accelerates, reading as a "magnetic pull"
@@ -437,15 +416,20 @@ fn drawMatchPopups() void {
             const den = fly_total * fly_total;
             cur_x = p.x + @divTrunc((MATCH_POPUP_TARGET_X - p.x) * num, den);
             cur_y = p.y + @divTrunc((MATCH_POPUP_TARGET_Y - p.y) * num, den);
-            cur_w = p.w + @divTrunc((MATCH_POPUP_MIN_SIZE - p.w) * num, den);
-            cur_h = p.h + @divTrunc((MATCH_POPUP_MIN_SIZE - p.h) * num, den);
         }
 
-        drawDitheredRectBlit(cur_x, cur_y, cur_w, cur_h, WARM_DITHER_HUES);
-
         const label = p.label[0..p.label_len];
-        const text_x = cur_x + @divTrunc(cur_w, 2) - @as(i32, @intCast(label.len)) * 4;
-        drawOutlinedText(label, text_x, cur_y - 8, HUE_DRAWCOLOR[2]);
+        const badge_w = @as(i32, @intCast(label.len)) * MATCH_POPUP_CHAR_W + 2 * MATCH_POPUP_PAD_X;
+        const badge_h = MATCH_POPUP_CHAR_W + 2 * MATCH_POPUP_PAD_Y;
+        const badge_x = cur_x - @divTrunc(badge_w, 2);
+        const badge_y = cur_y - @divTrunc(badge_h, 2);
+
+        drawDitheredRectBlit(badge_x, badge_y, badge_w, badge_h, WARM_DITHER_HUES);
+        // Black text directly on the bright orange block reads clearly on
+        // its own -- the same technique drawSymbolFor uses for symbols on a
+        // block color -- so no separate outline pass is needed here.
+        w4.DRAW_COLORS.* = DC_BG;
+        w4.Text(label, badge_x + MATCH_POPUP_PAD_X, badge_y + MATCH_POPUP_PAD_Y);
     }
 }
 

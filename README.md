@@ -43,8 +43,9 @@ npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm --html web/panelpon4.html --t
 - **Arrow keys**: move the two-tile cursor.
 - **X**: swap the two blocks under the cursor.
 - Match 3 or more blocks of the same color/pattern in a horizontal or vertical line to pop them.
-- Blocks above a pop fall and can chain into new matches for bonus score -- a genuine chain flashes
-  orange and flies an "xN" badge into the score display.
+- Blocks above a pop fall and can chain into new matches for bonus score. A genuine chain ("x2", "x3", ...)
+  or a combo (a single match bigger than 3 blocks, shown as a bare block count) flies a small badge into
+  the score display.
 - A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
 - The floor rises forever, faster as your score climbs. If blocks reach the top row, it's game over.
 - Press **X** on the title or game-over screen to (re)start.
@@ -68,9 +69,14 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/audio.zig` — sound effects.
 - `src/input.zig` — gamepad and touch handling (cursor movement with DAS, swap triggering).
 - `src/render.zig` — all drawing: the board, cursor, panel, and title/game-over screens.
+- `src/debug.zig` — debug-only helpers (set up a board scenario, read back cell/chain state) for scripted
+  testing; only exported as WASM functions in Debug builds (see the `comptime` block in `main.zig`) --
+  `zig build --release=small` never includes this surface. Used via `tools/wasm4-harness.js`.
 - `src/main.zig` — wires the above together behind the WASM-4 `start`/`update` entry points.
 - `build.zig` / `build.zig.zon` — builds `src/main.zig` into a freestanding `wasm32` cart with the memory layout
   WASM-4 expects, and wires up `zig build test`.
+- `tools/wasm4-harness.js` — a shared Node harness for driving a compiled cart headlessly (scripted board
+  scenarios via `src/debug.zig`, screenshots, fuzzing input). See the comment at the top of the file for usage.
 
 ## Testing
 

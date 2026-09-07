@@ -135,11 +135,10 @@ test "the first ordinary 3-match of a fresh chain does not spawn a popup" {
     s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
     _ = sim.checkMatches(no_settled);
     try testing.expectEqual(@as(u8, 1), s.chain);
-    try testing.expect(!s.cellAt(5, 0).flourish_flash);
     for (s.match_popups) |p| try testing.expect(!p.active);
 }
 
-test "a genuine chain match marks flourish_flash and spawns an 'xN chain!' popup" {
+test "a genuine chain match spawns an 'xN' popup" {
     s.resetForTest();
     s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
     s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
@@ -152,11 +151,7 @@ test "a genuine chain match marks flourish_flash and spawns an 'xN chain!' popup
     _ = sim.checkMatches(no_settled);
     try testing.expectEqual(@as(u8, 2), s.chain);
 
-    try testing.expect(s.cellAt(8, 3).flourish_flash);
-    try testing.expect(s.cellAt(8, 4).flourish_flash);
-    try testing.expect(s.cellAt(8, 5).flourish_flash);
-
-    try testing.expectEqualStrings("x2 chain!", activePopupLabel().?);
+    try testing.expectEqualStrings("x2", activePopupLabel().?);
 }
 
 test "a match bigger than 3 blocks is a combo even at chain 1" {
@@ -169,8 +164,7 @@ test "a match bigger than 3 blocks is a combo even at chain 1" {
     _ = sim.checkMatches(no_settled);
 
     try testing.expectEqual(@as(u8, 1), s.chain); // not a chain continuation
-    try testing.expect(s.cellAt(5, 0).flourish_flash); // but still flourishes
-    try testing.expectEqualStrings("5 combo!", activePopupLabel().?);
+    try testing.expectEqualStrings("5", activePopupLabel().?);
 }
 
 test "a match that is both a chain and a combo shows the chain label" {
@@ -189,7 +183,7 @@ test "a match that is both a chain and a combo shows the chain label" {
     _ = sim.checkMatches(no_settled);
     try testing.expectEqual(@as(u8, 2), s.chain);
 
-    try testing.expectEqualStrings("x2 chain!", activePopupLabel().?);
+    try testing.expectEqualStrings("x2", activePopupLabel().?);
 }
 
 test "simulate marks the whole settled stack above a cleared pop as chainable" {

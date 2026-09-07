@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const w4 = @import("wasm4.zig");
 const s = @import("state.zig");
 const board = @import("board.zig");
@@ -5,6 +6,20 @@ const sim = @import("sim.zig");
 const input = @import("input.zig");
 const render = @import("render.zig");
 const audio = @import("audio.zig");
+const debug = @import("debug.zig");
+
+// Debug-only WASM exports (see debug.zig) for tools/wasm4-harness.js to
+// drive: only compiled into Debug builds, so `zig build --release=small`
+// still exports just start/update.
+comptime {
+    if (builtin.mode == .Debug) {
+        @export(&debug.clearBoard, .{ .name = "debugClearBoard" });
+        @export(&debug.setCell, .{ .name = "debugSetCell" });
+        @export(&debug.setCursor, .{ .name = "debugSetCursor" });
+        @export(&debug.getChain, .{ .name = "debugGetChain" });
+        @export(&debug.getCellInfo, .{ .name = "debugGetCellInfo" });
+    }
+}
 
 export fn start() void {
     render.setupPalette();

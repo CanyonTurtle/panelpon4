@@ -320,16 +320,15 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                 multiplier = s.chain;
             }
             // Two distinct, independently-triggered flourishes share the same
-            // flash/fly animation (see state.MatchPopup and
-            // Cell.flourish_flash), but mean different things: a *chain* is a
-            // genuine continuation (multiplier > 1 -- this match was only
-            // possible because of an earlier break); a *combo* is simply a
-            // single match bigger than the minimum 3 blocks, independent of
-            // chain state. A match can be both -- the chain label takes
-            // priority in that case, since it's the rarer feat. The very
-            // first match of a fresh chain sequence at its minimum size
-            // (multiplier == 1, member_count == 3) is just an ordinary pop,
-            // nothing to celebrate.
+            // popup badge (see state.MatchPopup), but mean different things:
+            // a *chain* is a genuine continuation (multiplier > 1 -- this
+            // match was only possible because of an earlier break); a
+            // *combo* is simply a single match bigger than the minimum 3
+            // blocks, independent of chain state. A match can be both -- the
+            // chain label takes priority in that case, since it's the rarer
+            // feat. The very first match of a fresh chain sequence at its
+            // minimum size (multiplier == 1, member_count == 3) is just an
+            // ordinary pop, nothing to celebrate.
             const is_chain = multiplier > 1;
             const is_combo = member_count > 3;
 
@@ -340,19 +339,18 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                 cell.state = .popping;
                 cell.timer = c.POP_FRAMES + @as(i16, @intCast(i)) * c.POP_STAGGER_FRAMES;
                 cell.pop_group_end = group_end;
-                cell.flourish_flash = is_chain or is_combo;
             }
             if (is_chain or is_combo) {
                 var label_buf: [16]u8 = undefined;
                 const label = if (is_chain)
-                    std.fmt.bufPrint(&label_buf, "x{d} chain!", .{multiplier}) catch "chain!"
+                    std.fmt.bufPrint(&label_buf, "x{d}", .{multiplier}) catch "x?"
                 else
-                    std.fmt.bufPrint(&label_buf, "{d} combo!", .{member_count}) catch "combo!";
-                const px = c.BOARD_X + @as(i32, min_col) * c.TILE;
-                const py = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(s.scroll_px));
-                const pw = (@as(i32, max_col) - @as(i32, min_col) + 1) * c.TILE;
-                const ph = (@as(i32, max_row) - @as(i32, min_row) + 1) * c.TILE;
-                s.spawnMatchPopup(label, px, py, pw, ph);
+                    std.fmt.bufPrint(&label_buf, "{d}", .{member_count}) catch "?";
+                const match_w = (@as(i32, max_col) - @as(i32, min_col) + 1) * c.TILE;
+                const match_h = (@as(i32, max_row) - @as(i32, min_row) + 1) * c.TILE;
+                const cx = c.BOARD_X + @as(i32, min_col) * c.TILE + @divTrunc(match_w, 2);
+                const cy = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(s.scroll_px)) + @divTrunc(match_h, 2);
+                s.spawnMatchPopup(label, cx, cy);
             }
             s.score += @as(u32, @intCast(member_count)) * 10 * multiplier;
             audio.playPopSound(multiplier);

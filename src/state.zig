@@ -34,15 +34,6 @@ pub const Cell = struct {
     // busy. Reverts to false the moment a block settles back to .normal
     // without being part of a match -- see sim.checkMatches.
     chainable: bool = false,
-    // Set true (only ever alongside state = .popping) for every cell in a
-    // match that's either a genuine chain continuation (multiplier > 1) or a
-    // combo (more than 3 blocks in one match) -- see sim.checkMatches.
-    // render.zig reads it to render the orange dithered flash instead of
-    // this cell's normal color while it pops. Never propagated by gravity
-    // (popping cells are never subject to it) and always reset by the time a
-    // fresh Cell{} replaces this one when the pop clears, so it never leaks
-    // onto an unrelated cell.
-    flourish_flash: bool = false,
 };
 
 pub var grid: [c.ROWS][c.COLS]Cell = undefined;
@@ -77,15 +68,15 @@ pub var touch_swapped_this_press: bool = false;
 pub var touch_held_dir: u8 = 0;
 pub var touch_das_counter: u8 = 0;
 
-// A floating text badge + orange-dithered highlight that flashes over a
-// chain-or-combo match's location, then flies to the score display. Purely
-// cosmetic -- spawned by sim.checkMatches (text like "x2 chain!" or
-// "5 combo!", pre-rendered into `label` there so this module and render.zig
-// stay agnostic of what the text actually says), advanced once per frame by
+// A small floating text badge (an orange-dithered block with black text)
+// that appears at a chain-or-combo match's location, then flies to the score
+// display. Purely cosmetic -- spawned by sim.checkMatches (text like "x2" or
+// "5", pre-rendered into `label` there so this module and render.zig stay
+// agnostic of what the text actually says), advanced once per frame by
 // tickMatchPopups (called from sim.simulate), and drawn by
 // render.drawMatchPopups. Nothing here affects gameplay, so none of it needs
 // to be exact -- just cleared on reset like everything else.
-pub const MATCH_POPUP_HOLD: i16 = 12; // frames flashing in place before flying
+pub const MATCH_POPUP_HOLD: i16 = 12; // frames sitting in place before flying
 pub const MATCH_POPUP_FLY: i16 = 28; // frames spent flying to the score
 pub const MATCH_POPUP_LIFETIME: i16 = MATCH_POPUP_HOLD + MATCH_POPUP_FLY;
 const MAX_MATCH_POPUPS = 4;
@@ -95,16 +86,14 @@ pub const MatchPopup = struct {
     active: bool = false,
     label: [MATCH_POPUP_LABEL_CAP]u8 = undefined,
     label_len: u8 = 0,
-    x: i32 = 0,
+    x: i32 = 0, // badge center, at spawn -- see sim.checkMatches for how it's picked
     y: i32 = 0,
-    w: i32 = 0,
-    h: i32 = 0,
     elapsed: i16 = 0,
 };
 
 pub var match_popups: [MAX_MATCH_POPUPS]MatchPopup = [_]MatchPopup{.{}} ** MAX_MATCH_POPUPS;
 
-pub fn spawnMatchPopup(label: []const u8, x: i32, y: i32, w: i32, h: i32) void {
+pub fn spawnMatchPopup(label: []const u8, x: i32, y: i32) void {
     for (&match_popups) |*p| {
         if (!p.active) {
             p.active = true;
@@ -112,8 +101,6 @@ pub fn spawnMatchPopup(label: []const u8, x: i32, y: i32, w: i32, h: i32) void {
             @memcpy(p.label[0..p.label_len], label[0..p.label_len]);
             p.x = x;
             p.y = y;
-            p.w = w;
-            p.h = h;
             p.elapsed = 0;
             return;
         }
