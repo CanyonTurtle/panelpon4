@@ -98,7 +98,8 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/render.zig` — most drawing: the player's board (in full detail) at normal size, the cursor, panel,
   and title/game-over screens.
 - `src/render_cpu.zig` — the CPU's side of the panel: its score/label and its board at a simplified micro
-  scale (solid-color cells, no bevel/dither/symbols -- there's no room for that detail this small).
+  scale (dithered colors, tiny per-color icons, smooth rise scrolling, a cursor, popping/recycling
+  animation -- just abstracted down to fit: no bevels, linked-garbage slab, landing squash, or popups).
 - `src/render_badge.zig` — the chain/combo popup badge, plus the shared checkerboard-blit dithering
   primitive it's built on (reusable for any future dithered-highlight effect).
 - `src/debug.zig` — debug-only helpers (set up a board scenario, read back cell/chain/winner state) for
