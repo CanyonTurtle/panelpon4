@@ -41,3 +41,10 @@ pub const MOVE_DAS_REPEAT: u8 = 6;
 // runs at 60fps, so 20 and 40 frames respectively).
 pub const MANUAL_RAISE_FRAMES: u32 = 20;
 pub const MANUAL_RAISE_COOLDOWN: u32 = 40;
+
+// A board only actually tops out once it's sat idle, with a block at or
+// above the ceiling, for this many consecutive frames (1 second at 60fps) --
+// see board.updateDangerTimer. Long enough to give a high-level player a
+// real beat to clear the danger row before it's final, short enough that it
+// never feels like the game is ignoring an obvious loss.
+pub const DANGER_FORGIVENESS_FRAMES: u32 = 60;

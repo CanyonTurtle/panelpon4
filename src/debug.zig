@@ -89,3 +89,7 @@ pub fn setDifficulty(level: u32) callconv(.c) void {
 pub fn getManualRaiseElapsed(board: u32) callconv(.c) u32 {
     return boardFor(board).manual_raise_elapsed;
 }
+
+pub fn getDangerTimer(board: u32) callconv(.c) u32 {
+    return boardFor(board).danger_timer;
+}

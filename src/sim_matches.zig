@@ -274,23 +274,31 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
                 const edge_y = cy - s.MATCH_POPUP_RISE_PX;
                 self.spawnMatchPopup(label, cx, cy, edge_y, group_end);
 
-                // A big enough combo or chain drops garbage onto the
-                // *opponent's* board -- never self-inflicted in vs-CPU play.
-                // Chain takes priority over combo sizing when a match is
-                // both, mirroring the badge label precedence just above -- a
-                // match doesn't spawn both kinds at once.
+                // A big enough combo or chain queues garbage onto the
+                // *opponent's* board -- never self-inflicted in vs-CPU play
+                // -- rather than spawning it immediately (see
+                // sim_garbage.zig's queueing lifecycle, driven once per
+                // frame from main.zig): a still-ongoing chain on `self`
+                // keeps overwriting its own pending attack here as it grows,
+                // only handing the FINAL size over once the whole chain
+                // concludes, while a combo's already-complete attack goes
+                // straight into the opponent's own incoming queue to await
+                // their board going idle. Chain takes priority over combo
+                // sizing when a match is both, mirroring the badge label
+                // precedence just above -- a match doesn't queue both kinds
+                // at once.
                 if (is_chain) {
                     // x2 -> 1 row, x3 -> 2 rows, ... (extrapolated linearly;
                     // only x2/x3 were specified) -- multiplier > 1 here, so
                     // this never underflows.
                     const garbage_rows: u8 = multiplier - 1;
-                    garbage.spawnGarbage(opponent, garbage_rows, c.COLS, 0);
+                    garbage.queueChainGarbage(self, garbage_rows, c.COLS, 0);
                 } else if (real_count >= 6) {
-                    garbage.spawnGarbage(opponent, 1, c.COLS, 0);
+                    garbage.queueComboGarbage(opponent, 1, c.COLS, 0);
                 } else if (real_count == 5) {
-                    garbage.spawnGarbage(opponent, 1, 4, min_col);
+                    garbage.queueComboGarbage(opponent, 1, 4, min_col);
                 } else { // real_count == 4, the only case left under is_combo
-                    garbage.spawnGarbage(opponent, 1, 3, min_col);
+                    garbage.queueComboGarbage(opponent, 1, 3, min_col);
                 }
             }
             self.score += @as(u32, @intCast(member_count)) * 10 * multiplier;

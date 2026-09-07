@@ -60,7 +60,10 @@ the side panel. Both run the exact same rules and physics.
 - Blocks above a pop fall and can chain into new matches for bonus score. A genuine chain ("x2", "x3", ...)
   or a combo (a single match bigger than 3 blocks, shown as a bare block count) flies a small badge into
   the score display.
-- A big enough combo or chain drops garbage onto the *opponent's* board -- never your own. Garbage is inert
+- A big enough combo or chain drops garbage onto the *opponent's* board -- never your own -- but not
+  immediately: it queues, and only actually lands once *both* sides are idle (never mid-match, on either
+  end), and a still-growing chain only hands over its final size once the whole chain concludes -- an x4
+  chain drops one block sized for x4 alone, not the sum of every step along the way. Garbage is inert
   (colorless, unswappable, unmatchable) until a match pops right next to it, which starts *recycling* it:
   one garbage block at a time, with a short delay between each (after the same blink-then-pause heads-up as
   a real pop), cracks open into a fresh, plain-looking normal block -- no animation beyond that, just an
@@ -70,8 +73,12 @@ the side panel. Both run the exact same rules and physics.
   single seamless bezeled slab rather than individual tiles.
 - A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
 - Each board's floor rises forever, faster as that board's own score climbs -- true for the CPU too, so a
-  CPU that's playing efficiently is also accelerating its own rise. Whoever's board tops out first loses
-  (both at once is a draw).
+  CPU that's playing efficiently is also accelerating its own rise. Topping out isn't instant, though: once
+  a board is idle with a block at or above the ceiling, a one-second forgiveness timer starts, and only
+  running it out actually ends the match for that side (clearing the danger row, or the board going busy
+  again, resets it) -- a real beat to recover from a close call rather than an instant loss the moment a
+  rise happens to touch the top. Whoever's forgiveness timer runs out first loses (both on the same frame
+  is a draw).
 - On the title screen, **left/right** sets the CPU's difficulty, 1-10 (fixed for the rest of the session --
   there's no menu to revisit it mid-match or between replays). Every level runs the same move-search engine
   (see `src/cpu_engine.zig`) -- lower levels are simply worse at listening to it (far more likely to ignore
@@ -103,16 +110,23 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   match-popup pool) plus its small methods (ring-buffer indexing, RNG, board-busy query), and the two live
   instances of it, `player`/`cpu`. Every other module takes an explicit `*Board` rather than reaching into
   an implicit global, so the exact same logic drives both sides of a vs-CPU match.
-- `src/board.zig` — row generation, the rising floor (automatic and the Z-button manual raise), and
-  (re)starting a game, each taking the `*Board` to act on.
+- `src/board.zig` — row generation, the rising floor (automatic and the Z-button manual raise),
+  `updateDangerTimer` (the actual loss condition -- a forgiveness timer gated on the board being idle with
+  a block at or above the ceiling, rather than an instant check right after a rise), and (re)starting a
+  game, each taking the `*Board` to act on.
 - `src/sim.zig` — the core simulation: swaps, pops, landings, and per-cell gravity, each taking `self`
   (and, for simulate, `opponent`) -- tests in the companion `src/sim_test.zig`.
-- `src/sim_matches.zig` — match detection, chain/combo scoring, and garbage spawning (re-exported from
-  `sim.zig` as `checkMatches`); a big enough combo/chain on `self` spawns garbage on `opponent`, never
+- `src/sim_matches.zig` — match detection, chain/combo scoring, and garbage queueing (re-exported from
+  `sim.zig` as `checkMatches`); a big enough combo/chain on `self` queues garbage for `opponent`, never
   `self` -- garbage is never self-inflicted in vs-CPU play.
 - `src/sim_garbage.zig` — garbage's rigid-body group gravity (a connected clump falls and lands as one piece,
-  computed by connectivity fresh every frame) and its spawn placement -- tests in the companion
-  `src/sim_garbage_test.zig`.
+  computed by connectivity fresh every frame), its spawn placement, and the queueing lifecycle between the
+  two (`queueChainGarbage`/`queueComboGarbage` record what a combo or a still-growing chain would send,
+  `resolveChainEnd` seals and hands off a concluded chain's final size to the opponent once `self` goes
+  idle, and `releaseIncomingGarbage` actually spawns whatever's queued for a board once *that* board goes
+  idle too -- driven once per frame per board from `main.zig`, so garbage from either side never lands
+  while a match or chain is still resolving, on the sending board or the receiving one) -- tests in the
+  companion `src/sim_garbage_test.zig`.
 - `src/cpu_ai.zig` — the CPU opponent's move picker, branching on `state.difficulty` (see `configFor`):
   every level from 1-10 runs `cpu_engine.zig`'s actual search, differing only in how often they listen to
   it (a steep chance to ignore its pick and play a random legal swap instead at the low end, falling to

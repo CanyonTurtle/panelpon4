@@ -55,14 +55,6 @@ pub fn generateRowInto(self: *s.Board, target_phys: u8, logical_r: u8) void {
 }
 
 pub fn doRise(self: *s.Board) void {
-    // Always perform the rise first, then check the row that lands at the
-    // top (logical row 0) afterward -- checking beforehand would inspect the
-    // row that's just about to be retired (relabeled to the bottom buffer
-    // slot), which by construction the player has already watched scroll
-    // fully off the top of the screen over the preceding animation. Checking
-    // post-rise instead means game_over fires the instant the stack is
-    // exactly flush with the top of the visible board, never after it's
-    // scrolled out of view.
     generateRowInto(self, self.top, c.ROWS - 1);
     self.top = @intCast((@as(u16, self.top) + 1) % @as(u16, c.ROWS));
 
@@ -73,12 +65,34 @@ pub fn doRise(self: *s.Board) void {
     // unless the player is actively moving it.
     if (self.cursor_row > 0) self.cursor_row -= 1;
 
-    var col: u8 = 0;
-    while (col < c.COLS) : (col += 1) {
-        if (self.cellAt(0, col).state != .empty) {
-            self.game_over = true;
-            return;
-        }
+    // Reaching the top row no longer ends the game by itself -- see
+    // updateDangerTimer below, which checks this same condition (a block at
+    // or above the ceiling) continuously every frame instead, gated behind a
+    // forgiveness timer so a high-level player gets a real beat to clear it
+    // rather than losing the instant a rise happens to touch row 0.
+}
+
+fn rowOccupied(self: *s.Board, row: u8) bool {
+    for (0..c.COLS) |col| {
+        if (self.cellAt(row, @intCast(col)).state != .empty) return true;
+    }
+    return false;
+}
+
+// The actual loss condition: continuously (not just right after a rise)
+// checks whether the board is idle with a block at or above the ceiling
+// (row 0 occupied), and ticks a forgiveness timer while both hold -- only
+// once that's run for DANGER_FORGIVENESS_FRAMES (1 second) does the game
+// actually end. Reset to 0 the instant either condition stops holding (the
+// board goes busy again, or the danger row clears), so a close call that
+// gets cleared in time never carries over into the next one.
+pub fn updateDangerTimer(self: *s.Board) void {
+    if (self.game_over) return;
+    if (!self.boardBusy() and rowOccupied(self, 0)) {
+        self.danger_timer += 1;
+        if (self.danger_timer >= c.DANGER_FORGIVENESS_FRAMES) self.game_over = true;
+    } else {
+        self.danger_timer = 0;
     }
 }
 
@@ -151,23 +165,69 @@ pub fn resetGame(self: *s.Board) void {
 
 const testing = @import("std").testing;
 
-test "doRise triggers game_over once a column reaches the top row" {
+test "doRise no longer ends the game directly -- see updateDangerTimer's forgiveness timer" {
     var b: s.Board = .{};
-    // Row 1 becomes the new row 0 after this rise -- see doRise's comment on
-    // why the check happens post-rise rather than on the row being retired.
+    // Row 1 becomes the new row 0 after this rise (see the old version of
+    // this test/doRise's history for why post-rise row 0 is what used to
+    // matter) -- reaching it doesn't instantly end the game anymore.
     b.cellAt(1, 0).state = .normal;
     doRise(&b);
+    try testing.expect(!b.game_over);
+}
+
+test "updateDangerTimer does nothing while the board is busy, even with a block at the ceiling" {
+    var b: s.Board = .{};
+    b.cellAt(0, 0).state = .falling; // busy, and already at the ceiling
+    for (0..c.DANGER_FORGIVENESS_FRAMES * 2) |_| updateDangerTimer(&b);
+    try testing.expectEqual(@as(u32, 0), b.danger_timer);
+    try testing.expect(!b.game_over);
+}
+
+test "updateDangerTimer does nothing while idle with no block at the ceiling" {
+    var b: s.Board = .{};
+    b.cellAt(5, 0).state = .normal; // idle, but nowhere near the ceiling
+    for (0..c.DANGER_FORGIVENESS_FRAMES * 2) |_| updateDangerTimer(&b);
+    try testing.expectEqual(@as(u32, 0), b.danger_timer);
+    try testing.expect(!b.game_over);
+}
+
+test "updateDangerTimer ends the game only after the forgiveness timer elapses while idle and at the ceiling" {
+    var b: s.Board = .{};
+    b.cellAt(0, 0).state = .normal; // idle and at the ceiling from frame 0
+    for (0..c.DANGER_FORGIVENESS_FRAMES - 1) |_| updateDangerTimer(&b);
+    try testing.expect(!b.game_over);
+    updateDangerTimer(&b); // the DANGER_FORGIVENESS_FRAMES-th frame
     try testing.expect(b.game_over);
 }
 
-test "doRise does not end the game over a row that's merely about to scroll off" {
+test "updateDangerTimer resets if the board goes busy before the forgiveness timer elapses" {
     var b: s.Board = .{};
-    // Occupied row 0 is about to be retired (relabeled to the bottom buffer
-    // slot) by this rise, not promoted to the top -- it must not trigger
-    // game_over on its own. Row 1 (left empty here) is what becomes the new
-    // row 0, and that's what actually gets checked.
     b.cellAt(0, 0).state = .normal;
-    doRise(&b);
+    for (0..c.DANGER_FORGIVENESS_FRAMES - 1) |_| updateDangerTimer(&b);
+    try testing.expectEqual(c.DANGER_FORGIVENESS_FRAMES - 1, b.danger_timer);
+
+    b.cellAt(5, 1).state = .falling; // becomes busy for one frame
+    updateDangerTimer(&b);
+    try testing.expectEqual(@as(u32, 0), b.danger_timer);
+
+    // Idle again, still at the ceiling -- needs the FULL duration again, not
+    // a continuation from where it left off.
+    b.cellAt(5, 1).state = .empty;
+    for (0..c.DANGER_FORGIVENESS_FRAMES - 1) |_| updateDangerTimer(&b);
+    try testing.expect(!b.game_over);
+    updateDangerTimer(&b);
+    try testing.expect(b.game_over);
+}
+
+test "updateDangerTimer resets if the ceiling clears before the forgiveness timer elapses" {
+    var b: s.Board = .{};
+    b.cellAt(0, 0).state = .normal;
+    for (0..c.DANGER_FORGIVENESS_FRAMES - 1) |_| updateDangerTimer(&b);
+    try testing.expectEqual(c.DANGER_FORGIVENESS_FRAMES - 1, b.danger_timer);
+
+    b.cellAt(0, 0).state = .empty; // the danger row clears in time
+    updateDangerTimer(&b);
+    try testing.expectEqual(@as(u32, 0), b.danger_timer);
     try testing.expect(!b.game_over);
 }
 

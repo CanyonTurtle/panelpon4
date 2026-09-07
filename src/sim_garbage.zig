@@ -37,6 +37,73 @@ pub fn spawnGarbage(target: *s.Board, rows: u8, width: u8, anchor_col: u8) void 
     }
 }
 
+// Garbage queueing: rather than spawning the instant a combo/chain is
+// detected (which used to let it fall mid-cascade, and let a multi-step
+// chain dribble out several separate blocks as it grew), every attack now
+// waits in a queue and only actually lands via spawnGarbage once the
+// relevant board is idle -- see sim.checkMatches (the only caller of
+// queueChainGarbage/queueComboGarbage) and main.zig (which drives
+// resolveChainEnd/releaseIncomingGarbage once per frame for both boards).
+
+// Records what a still-ongoing chain on `self` would currently send,
+// overwriting whatever an earlier step in the SAME chain recorded -- a x4
+// chain should hand over one block sized by x4 alone once it concludes, not
+// the sum of what x2/x3/x4 would each have sent on their own. See
+// resolveChainEnd for where this actually gets sent.
+pub fn queueChainGarbage(self: *s.Board, rows: u8, width: u8, anchor_col: u8) void {
+    self.chain_pending_garbage = .{ .rows = rows, .width = width, .anchor_col = anchor_col };
+}
+
+// Queues a single, already-complete attack (a combo, or a chain's final
+// sealed attack from resolveChainEnd below) into `target`'s own incoming
+// queue, to actually land once `target` itself goes idle -- see
+// releaseIncomingGarbage. Silently dropped if the queue is somehow already
+// full (as generous as it is, that would take many simultaneous attacks
+// piling up while target's board stays busy the whole time) -- missing one
+// attack under such an extreme pile-up is far less disruptive than crashing
+// or blocking every other attack behind it.
+pub fn queueComboGarbage(target: *s.Board, rows: u8, width: u8, anchor_col: u8) void {
+    for (&target.incoming_garbage) |*slot| {
+        if (slot.* == null) {
+            slot.* = .{ .rows = rows, .width = width, .anchor_col = anchor_col };
+            return;
+        }
+    }
+}
+
+// Called once per frame per board (see main.zig) -- seals and hands off
+// `self`'s currently-pending chain garbage (if any) to `opponent` the
+// instant `self` goes idle, i.e. its chain has genuinely concluded (mirrors
+// the chain-reset check this replaces: chain only resets once the board is
+// fully idle, so a chain still cascading through further steps never gets
+// cut short here). Rule 1 (garbage never falls mid-match/chain) is enforced
+// on the *receiving* side instead, by releaseIncomingGarbage below -- sealing
+// it here only decides the final size and hands it off, it doesn't spawn
+// anything on `opponent` directly.
+pub fn resolveChainEnd(self: *s.Board, opponent: *s.Board) void {
+    if (self.boardBusy()) return;
+    if (self.chain_pending_garbage) |p| {
+        queueComboGarbage(opponent, p.rows, p.width, p.anchor_col);
+        self.chain_pending_garbage = null;
+    }
+    self.chain = 0;
+}
+
+// Called once per frame per board (see main.zig) -- drains `self`'s own
+// incoming queue into the board via spawnGarbage, but only once `self` is
+// idle: rule 1 (garbage never falls mid-match/chain), enforced from the
+// receiving side so a big attack landing while the recipient is still deep
+// in their own cascade never interrupts it.
+pub fn releaseIncomingGarbage(self: *s.Board) void {
+    if (self.boardBusy()) return;
+    for (&self.incoming_garbage) |*slot| {
+        if (slot.*) |p| {
+            spawnGarbage(self, p.rows, p.width, p.anchor_col);
+            slot.* = null;
+        }
+    }
+}
+
 // True if (r, col) is one of the given component's own members -- used to
 // tell "internal support" (another cell of the same rigid body sitting
 // directly below) apart from a genuine obstacle or empty space.

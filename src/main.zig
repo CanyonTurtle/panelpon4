@@ -3,6 +3,7 @@ const w4 = @import("wasm4.zig");
 const s = @import("state.zig");
 const board = @import("board.zig");
 const sim = @import("sim.zig");
+const garbage = @import("sim_garbage.zig");
 const input = @import("input.zig");
 const cpu_ai = @import("cpu_ai.zig");
 const render = @import("render.zig");
@@ -26,6 +27,7 @@ comptime {
         @export(&debug.getDifficulty, .{ .name = "debugGetDifficulty" });
         @export(&debug.setDifficulty, .{ .name = "debugSetDifficulty" });
         @export(&debug.getManualRaiseElapsed, .{ .name = "debugGetManualRaiseElapsed" });
+        @export(&debug.getDangerTimer, .{ .name = "debugGetDangerTimer" });
     }
 }
 
@@ -72,14 +74,26 @@ export fn update() void {
 
         sim.simulate(&s.player, &s.cpu);
         sim.simulate(&s.cpu, &s.player);
-        if (!s.player.boardBusy()) s.player.chain = 0;
-        if (!s.cpu.boardBusy()) s.cpu.chain = 0;
+        // Seals and hands off each board's own concluded chain garbage to
+        // the *other* board's incoming queue (also resets .chain, replacing
+        // the plain "if idle, reset" check this used to be -- see
+        // sim_garbage.resolveChainEnd), then drains each board's own
+        // incoming queue once it's idle (sim_garbage.releaseIncomingGarbage)
+        // -- together, garbage from either side never lands while a match
+        // or chain is still resolving on the sending board OR the
+        // receiving one.
+        garbage.resolveChainEnd(&s.player, &s.cpu);
+        garbage.resolveChainEnd(&s.cpu, &s.player);
+        garbage.releaseIncomingGarbage(&s.player);
+        garbage.releaseIncomingGarbage(&s.cpu);
         board.updateRise(&s.player);
         board.updateRise(&s.cpu);
+        board.updateDangerTimer(&s.player);
+        board.updateDangerTimer(&s.cpu);
 
-        // Whoever's board tops out first loses -- see board.doRise. Both on
-        // the same frame (only possible if both happen to rise into a
-        // topped-out state simultaneously) is a draw.
+        // Whoever's board tops out first loses -- see board.updateDangerTimer.
+        // Both on the same frame (only possible if both happen to top out on
+        // the exact same frame) is a draw.
         if (s.player.game_over and s.cpu.game_over) {
             s.winner = .draw;
         } else if (s.player.game_over) {

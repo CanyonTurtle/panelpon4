@@ -6,6 +6,7 @@ const testing = std.testing;
 const c = @import("constants.zig");
 const s = @import("state.zig");
 const sim = @import("sim.zig");
+const garbage = @import("sim_garbage.zig");
 
 const no_settled: [c.ROWS][c.COLS]bool = std.mem.zeroes([c.ROWS][c.COLS]bool);
 
@@ -264,6 +265,11 @@ test "a big combo drops garbage on the opponent's board, never the triggering bo
     b.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled);
 
+    // Queued on the opponent, not yet spawned -- see sim_garbage.zig's
+    // queueing lifecycle (garbage no longer lands the instant a combo is
+    // detected; it waits for the receiving board to go idle).
+    for (0..c.COLS) |col| try testing.expectEqual(s.CellState.empty, opp.cellAt(0, @intCast(col)).state);
+    garbage.releaseIncomingGarbage(&opp); // opp is idle by default -- releases immediately
     for (0..3) |col| try testing.expect(opp.cellAt(0, @intCast(col)).is_garbage);
     for (0..c.COLS) |col| try testing.expectEqual(s.CellState.empty, b.cellAt(0, @intCast(col)).state);
 }

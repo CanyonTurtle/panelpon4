@@ -103,6 +103,15 @@ pub const MATCH_POPUP_FLY: i16 = 28; // frames easing from that edge into the sc
 const MAX_MATCH_POPUPS = 4;
 const MATCH_POPUP_LABEL_CAP = 16;
 
+// A single pending garbage attack -- rows/width/anchor_col are exactly
+// sim_garbage.spawnGarbage's own parameters, just not applied to the board
+// yet. See sim_garbage.zig's queueChainGarbage/queueComboGarbage/
+// resolveChainEnd/releaseIncomingGarbage for the full queueing lifecycle
+// this and the two Board fields below exist for.
+pub const GarbageAttack = struct { rows: u8 = 0, width: u8 = 0, anchor_col: u8 = 0 };
+
+const MAX_INCOMING_GARBAGE = 8;
+
 pub const MatchPopup = struct {
     active: bool = false,
     label: [MATCH_POPUP_LABEL_CAP]u8 = undefined,
@@ -151,6 +160,28 @@ pub const Board = struct {
     score: u32 = 0,
     chain: u8 = 0,
     game_over: bool = false,
+    // Counts consecutive idle frames spent with a block at or above the
+    // ceiling -- see board.updateDangerTimer, which is what actually sets
+    // game_over now (a rise reaching the top no longer ends the game by
+    // itself; see board.doRise). Reset to 0 the instant either condition
+    // stops holding, so a close call that gets cleared in time never
+    // carries over into the next one.
+    danger_timer: u32 = 0,
+
+    // A chain still in progress on THIS board keeps overwriting this with
+    // whatever the latest step's garbage would be (see
+    // sim_garbage.queueChainGarbage) -- only the FINAL step's size survives
+    // to actually send, once the chain concludes (see
+    // sim_garbage.resolveChainEnd), never a sum of every step along the way.
+    // A combo's own garbage has no such "wait for it to grow" concern (it's
+    // already a single, complete event) and goes straight into the
+    // *opponent's* incoming_garbage below instead.
+    chain_pending_garbage: ?GarbageAttack = null,
+    // Garbage attacks aimed at THIS board, waiting for it to go idle before
+    // actually landing (see sim_garbage.releaseIncomingGarbage) -- so
+    // garbage from either side never appears while a match or chain is
+    // still resolving, on the sending board OR the receiving one.
+    incoming_garbage: [MAX_INCOMING_GARBAGE]?GarbageAttack = [_]?GarbageAttack{null} ** MAX_INCOMING_GARBAGE,
 
     match_popups: [MAX_MATCH_POPUPS]MatchPopup = [_]MatchPopup{.{}} ** MAX_MATCH_POPUPS,
 
@@ -226,7 +257,7 @@ pub const CPU_RNG_SEED: u32 = 0x853c49e6;
 pub var player: Board = .{};
 pub var cpu: Board = .{ .rng_state = CPU_RNG_SEED };
 
-// Who won the match once either board tops out (see board.doRise) -- both
+// Who won the match once either board tops out (see board.updateDangerTimer) -- both
 // simultaneously (extremely unlikely, but possible if both boards top out
 // on the exact same frame) is a draw. `.none` means the match is still in
 // progress. See main.zig for where this gets set and drives the overall

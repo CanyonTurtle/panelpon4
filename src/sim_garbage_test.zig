@@ -8,6 +8,7 @@ const testing = std.testing;
 const c = @import("constants.zig");
 const s = @import("state.zig");
 const sim = @import("sim.zig");
+const garbage = @import("sim_garbage.zig");
 
 const no_settled: [c.ROWS][c.COLS]bool = std.mem.zeroes([c.ROWS][c.COLS]bool);
 
@@ -156,6 +157,7 @@ test "a combo of 4 spawns a 3-wide garbage row on the opponent's board, anchored
     b.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled);
 
+    garbage.releaseIncomingGarbage(&opp); // idle by default -- releases immediately
     for (0..3) |col| try testing.expect(opp.cellAt(0, @intCast(col)).is_garbage);
     try testing.expectEqual(s.CellState.empty, opp.cellAt(0, 3).state);
     for (0..c.COLS) |col| try testing.expectEqual(s.CellState.empty, b.cellAt(0, @intCast(col)).state);
@@ -171,6 +173,7 @@ test "a combo of 5 spawns a 4-wide garbage row on the opponent's board" {
     b.cellAt(5, 4).* = .{ .color = 1, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled);
 
+    garbage.releaseIncomingGarbage(&opp);
     for (0..4) |col| try testing.expect(opp.cellAt(0, @intCast(col)).is_garbage);
     try testing.expectEqual(s.CellState.empty, opp.cellAt(0, 4).state);
 }
@@ -181,6 +184,7 @@ test "a combo of 6 or more spawns a full garbage row on the opponent's board" {
     for (0..6) |col| b.cellAt(5, @intCast(col)).* = .{ .color = 1, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled);
 
+    garbage.releaseIncomingGarbage(&opp);
     for (0..c.COLS) |col| try testing.expect(opp.cellAt(0, @intCast(col)).is_garbage);
 }
 
@@ -195,36 +199,54 @@ test "the first ordinary 3-match never spawns garbage" {
     for (0..c.COLS) |col| try testing.expectEqual(s.CellState.empty, opp.cellAt(0, @intCast(col)).state);
 }
 
-test "a chain spawns full garbage rows on the opponent's board, scaled by the multiplier" {
+test "a chain seals its garbage size only once it concludes, using the final step's size, not a sum of every step" {
     var b: s.Board = .{};
     var opp: s.Board = .{};
     b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
     b.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled); // chain 0 -> 1, ordinary, no garbage
+    try testing.expectEqual(@as(?s.GarbageAttack, null), b.chain_pending_garbage);
 
     b.cellAt(8, 3).* = .{ .color = 2, .state = .normal, .chainable = true };
     b.cellAt(8, 4).* = .{ .color = 2, .state = .normal };
     b.cellAt(8, 5).* = .{ .color = 2, .state = .normal };
-    _ = sim.checkMatches(&b, &opp, no_settled); // chain 1 -> 2 (x2): 1 full row
+    _ = sim.checkMatches(&b, &opp, no_settled); // chain 1 -> 2 (x2): would be 1 full row
     try testing.expectEqual(@as(u8, 2), b.chain);
-    for (0..c.COLS) |col| try testing.expect(opp.cellAt(0, @intCast(col)).is_garbage);
-
-    // Clear what the x2 event just spawned so the x3 assertion below is
-    // unambiguous about what *this* event produces.
-    for (0..c.COLS) |col| opp.cellAt(0, @intCast(col)).* = .{};
+    try testing.expectEqual(@as(u8, 1), b.chain_pending_garbage.?.rows);
+    // Not released to the opponent yet -- the chain hasn't concluded (b is
+    // still mid-pop), matching rule 1: garbage never falls mid-chain.
+    for (0..c.COLS) |col| try testing.expectEqual(s.CellState.empty, opp.cellAt(0, @intCast(col)).state);
 
     b.cellAt(9, 0).* = .{ .color = 3, .state = .normal, .chainable = true };
     b.cellAt(9, 1).* = .{ .color = 3, .state = .normal };
     b.cellAt(9, 2).* = .{ .color = 3, .state = .normal };
-    _ = sim.checkMatches(&b, &opp, no_settled); // chain 2 -> 3 (x3): 2 full rows
+    _ = sim.checkMatches(&b, &opp, no_settled); // chain 2 -> 3 (x3): overwrites the pending amount
     try testing.expectEqual(@as(u8, 3), b.chain);
+    // 2 rows (x3's own size) -- NOT 1 + 2 = 3, the x2 step's pending amount
+    // is simply discarded, not accumulated (rule 2).
+    try testing.expectEqual(@as(u8, 2), b.chain_pending_garbage.?.rows);
+
+    // Let the whole chain actually finish (every pop/recycle cascade
+    // resolves and b goes idle) -- mirrors main.zig's own per-frame driving
+    // (sim.simulate, then resolveChainEnd, every frame).
+    var frames: u32 = 0;
+    while (frames < 300) : (frames += 1) {
+        sim.simulate(&b, &opp);
+        garbage.resolveChainEnd(&b, &opp);
+        if (!b.boardBusy()) break;
+    }
+    try testing.expectEqual(@as(?s.GarbageAttack, null), b.chain_pending_garbage);
+
+    garbage.releaseIncomingGarbage(&opp);
+    // Exactly 2 rows -- the x3 step's own size, not 1 (from x2) + 2 (from x3).
     for (0..2) |row| {
         for (0..c.COLS) |col| try testing.expect(opp.cellAt(@intCast(row), @intCast(col)).is_garbage);
     }
+    for (0..c.COLS) |col| try testing.expectEqual(s.CellState.empty, opp.cellAt(2, @intCast(col)).state);
 }
 
-test "a match that is both a chain and a combo spawns chain-shaped garbage, not combo-shaped" {
+test "a match that is both a chain and a combo queues chain-shaped garbage, not combo-shaped" {
     var b: s.Board = .{};
     var opp: s.Board = .{};
     b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
@@ -241,8 +263,26 @@ test "a match that is both a chain and a combo spawns chain-shaped garbage, not 
     b.cellAt(8, 5).* = .{ .color = 2, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled);
     try testing.expectEqual(@as(u8, 2), b.chain);
+    try testing.expectEqual(@as(u8, 1), b.chain_pending_garbage.?.rows);
+    try testing.expectEqual(@as(u8, c.COLS), b.chain_pending_garbage.?.width);
+}
 
-    for (0..c.COLS) |col| try testing.expect(opp.cellAt(0, @intCast(col)).is_garbage);
+test "queued garbage doesn't land while the receiving board is still busy, even though the attacker is long done" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5, 3).* = .{ .color = 1, .state = .normal }; // combo of 4
+    _ = sim.checkMatches(&b, &opp, no_settled);
+
+    opp.cellAt(9, 0).state = .falling; // opp is still mid-cascade on its own
+    garbage.releaseIncomingGarbage(&opp);
+    for (0..c.COLS) |col| try testing.expectEqual(s.CellState.empty, opp.cellAt(0, @intCast(col)).state);
+
+    opp.cellAt(9, 0).state = .normal; // opp settles
+    garbage.releaseIncomingGarbage(&opp);
+    for (0..3) |col| try testing.expect(opp.cellAt(0, @intCast(col)).is_garbage);
 }
 
 test "garbage spawn skips cells that are already occupied, rather than overwriting them" {
@@ -254,6 +294,7 @@ test "garbage spawn skips cells that are already occupied, rather than overwriti
     b.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
     b.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled); // combo of 4 -> width-3 garbage at cols 0-2
+    garbage.releaseIncomingGarbage(&opp);
 
     try testing.expectEqual(@as(u8, 2), opp.cellAt(0, 1).color);
     try testing.expect(!opp.cellAt(0, 1).is_garbage);
@@ -287,6 +328,7 @@ test "combo garbage spawn sizing counts only real cells, ignoring propagated gar
     b.cellAt(5, 3).* = .{ .color = 1, .state = .normal }; // 4 real matched cells
     b.cellAt(5, 4).* = .{ .state = .normal, .is_garbage = true }; // propagates, doesn't count
     _ = sim.checkMatches(&b, &opp, no_settled);
+    garbage.releaseIncomingGarbage(&opp);
 
     // real_count == 4 -> width-3 garbage row, NOT width-4 (which the total
     // member_count of 5, including the propagated cell, would wrongly
