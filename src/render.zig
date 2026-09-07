@@ -450,9 +450,17 @@ fn drawPanel() void {
 
 pub fn drawTitle() void {
     w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("PANELPON4", 40, 60);
+    w4.Text("PANELPON4", 40, 44);
     w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("PRESS X", 52, 80);
+    var buf: [24]u8 = undefined;
+    // Levels 1-4 are cpu_ai's random flipper (just faster each step); 5-10
+    // hand off to cpu_engine's actual move search instead -- see
+    // cpu_ai.configFor for exactly how each level differs.
+    const kind: []const u8 = if (s.difficulty <= 4) "RANDOM" else "ENGINE";
+    const label = std.fmt.bufPrint(&buf, "LEVEL {d}  {s}", .{ s.difficulty, kind }) catch "LEVEL ?";
+    w4.Text(label, 34, 68);
+    w4.Text("<-      ->", 40, 80);
+    w4.Text("PRESS X", 52, 100);
 }
 
 pub fn drawGameOver() void {

@@ -236,6 +236,13 @@ pub var winner: Winner = .none;
 
 pub var started: bool = false;
 
+// The CPU's difficulty, 1-10 -- set on the title screen (see main.zig) and
+// then fixed for the rest of the session (there's no menu to revisit it
+// mid-match or between replays). Levels 1-4 are cpu_ai's original random
+// flipper at increasing speed; 5-10 hand off to cpu_engine's actual move
+// search instead, at increasing strength -- see cpu_ai.configFor.
+pub var difficulty: u8 = 1;
+
 pub var frame_count: u32 = 0;
 pub var prev_gamepad: u8 = 0;
 pub var held_dir: u8 = 0;

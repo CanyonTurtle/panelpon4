@@ -18,10 +18,12 @@ comptime {
         @export(&debug.setCell, .{ .name = "debugSetCell" });
         @export(&debug.setCursor, .{ .name = "debugSetCursor" });
         @export(&debug.getChain, .{ .name = "debugGetChain" });
+        @export(&debug.getScore, .{ .name = "debugGetScore" });
         @export(&debug.getCellInfo, .{ .name = "debugGetCellInfo" });
         @export(&debug.getWinner, .{ .name = "debugGetWinner" });
         @export(&debug.getCursorPos, .{ .name = "debugGetCursorPos" });
         @export(&debug.getScrollPx, .{ .name = "debugGetScrollPx" });
+        @export(&debug.getDifficulty, .{ .name = "debugGetDifficulty" });
     }
 }
 
@@ -44,6 +46,11 @@ export fn update() void {
         _ = s.player.rngNext();
         render.clearBackground();
         render.drawTitle();
+        // Sets the CPU's difficulty for the whole match (see state.difficulty
+        // and cpu_ai.configFor) -- there's no menu to revisit it later, so
+        // this is the only place it's adjustable.
+        if (input.justPressed(gp, w4.BUTTON_LEFT) and s.difficulty > 1) s.difficulty -= 1;
+        if (input.justPressed(gp, w4.BUTTON_RIGHT) and s.difficulty < 10) s.difficulty += 1;
         if (input.justPressed(gp, w4.BUTTON_1)) s.started = true;
         s.prev_gamepad = gp;
         return;

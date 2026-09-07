@@ -69,8 +69,13 @@ the side panel. Both run the exact same rules and physics.
   falls and lands as one rigid piece (a piece touching down stops the whole clump at once), rendering as a
   single seamless bezeled slab rather than individual tiles.
 - A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
-- Each board's floor rises forever, faster as that board's own score climbs. Whoever's board tops out
-  first loses (both at once is a draw).
+- Each board's floor rises forever, faster as that board's own score climbs -- true for the CPU too, so a
+  CPU that's playing efficiently is also accelerating its own rise. Whoever's board tops out first loses
+  (both at once is a draw).
+- On the title screen, **left/right** sets the CPU's difficulty, 1-10 (fixed for the rest of the session --
+  there's no menu to revisit it mid-match or between replays). Levels 1-4 are a random flipper at
+  increasing speed. Levels 5-10 hand off to an actual move-search engine instead, at increasing strength --
+  see `src/cpu_engine.zig`.
 - **Z**: manually raise your own floor by one row right away (finishes in a third of a second instead of
   waiting for the automatic pace) -- useful for deliberately forcing a rise when you want fresh blocks, or
   to bail out of a bad board shape. On a cooldown (two thirds of a second) so it can't be spammed -- hold it
@@ -105,8 +110,19 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/sim_garbage.zig` — garbage's rigid-body group gravity (a connected clump falls and lands as one piece,
   computed by connectivity fresh every frame) and its spawn placement -- tests in the companion
   `src/sim_garbage_test.zig`.
-- `src/cpu_ai.zig` — the CPU opponent's move picker: for now, just a random legal swap every so often (see
-  `MOVE_INTERVAL`); actually seeking matches is out of scope for v1.
+- `src/cpu_ai.zig` — the CPU opponent's move picker, branching on `state.difficulty` (see `configFor`):
+  levels 1-4 are a random legal swap every so often, just faster each step; levels 5-10 hand off to
+  `cpu_engine.zig` instead, at increasing search depth/speed and decreasing chance to ignore it and play
+  randomly anyway.
+- `src/cpu_engine.zig` — the actual move-search engine behind the CPU's higher difficulty levels: snapshots
+  the board into a small `Grid`, tries every legal swap on a copy, resolves each one's full logical
+  cascade (gravity, matches, garbage propagation, repeated for chains) to score it, and adds a
+  bitboard-driven structural heuristic (same-color adjacency, column height) so moves that don't pop
+  anything yet are still ranked sensibly -- plus an optional discounted look at the best follow-up move
+  (a shallow best-first search) for the higher levels, rewarding a setup move that enables a strong reply
+  over a shallow immediate pop. Deliberately its own small simulator rather than reusing `sim.zig`
+  directly -- see the module's own doc comment for why -- tests in the companion
+  `src/cpu_engine_test.zig`.
 - `src/audio.zig` — sound effects.
 - `src/input.zig` — gamepad (cursor movement with DAS, swap triggering, itself one-deep buffered -- a press
   that lands mid-swap is remembered and applied the instant it's possible) and touch (swipe-only: aims
@@ -136,9 +152,10 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 
 ## Testing
 
-`state.zig`, `board.zig`, `sim.zig`/`sim_matches.zig`/`sim_garbage.zig`, and `cpu_ai.zig` have Zig `test`
-blocks — `sim.zig`'s live in the companion `src/sim_test.zig`, and garbage-specific ones in
-`src/sim_garbage_test.zig`, to keep each module under ~500 lines. These run natively (not compiled into the
+`state.zig`, `board.zig`, `sim.zig`/`sim_matches.zig`/`sim_garbage.zig`, `cpu_ai.zig`, and `cpu_engine.zig`
+have Zig `test` blocks — `sim.zig`'s live in the companion `src/sim_test.zig`, garbage-specific ones in
+`src/sim_garbage_test.zig`, and `cpu_engine.zig`'s in `src/cpu_engine_test.zig`, to keep each module under
+~500 lines. These run natively (not compiled into the
 cart) and are excluded from `input.zig`/`render.zig`/`render_garbage.zig`/`render_cpu.zig`, which touch
 WASM-4's real host functions and only make sense under an actual WASM-4 host.
 

@@ -38,6 +38,10 @@ pub fn getChain(board: u32) callconv(.c) u32 {
     return boardFor(board).chain;
 }
 
+pub fn getScore(board: u32) callconv(.c) u32 {
+    return boardFor(board).score;
+}
+
 // Packed as state(8) | color(8) | chainable(1), least-significant byte first.
 pub fn getCellInfo(board: u32, logical_row: u32, col: u32) callconv(.c) u32 {
     const cell = boardFor(board).cellAt(@intCast(logical_row), @intCast(col));
@@ -62,4 +66,12 @@ pub fn getCursorPos(board: u32) callconv(.c) u32 {
 
 pub fn getScrollPx(board: u32) callconv(.c) u32 {
     return boardFor(board).scroll_px;
+}
+
+// The CPU difficulty currently set (see state.difficulty) -- lets a script
+// confirm the title screen's left/right adjustment actually took effect
+// without having to infer it from rendered text (the harness doesn't render
+// real font glyphs -- see tools/wasm4-harness.js's doText).
+pub fn getDifficulty() callconv(.c) u32 {
+    return s.difficulty;
 }
