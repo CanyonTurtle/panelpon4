@@ -1,5 +1,7 @@
-// Gamepad and touch input: cursor movement (with DAS) and swap triggering.
-// Not unit tested (it dereferences WASM4's real memory-mapped gamepad/mouse
+// Gamepad and touch input: cursor movement (with DAS) and swap triggering,
+// always driving the player's own board (see state.player) -- the CPU has
+// no real input; see cpu_ai.zig for its random-move equivalent. Not unit
+// tested (it dereferences WASM4's real memory-mapped gamepad/mouse
 // registers, which only make sense under an actual WASM4 host) -- see
 // sim.zig for the swap/match logic it drives, which is tested.
 
@@ -14,13 +16,13 @@ pub fn justPressed(gp: u8, btn: u8) bool {
 
 pub fn moveCursor(dir: u8) void {
     if (dir == w4.BUTTON_LEFT) {
-        if (s.cursor_col > 0) s.cursor_col -= 1;
+        if (s.player.cursor_col > 0) s.player.cursor_col -= 1;
     } else if (dir == w4.BUTTON_RIGHT) {
-        if (s.cursor_col < c.COLS - 2) s.cursor_col += 1;
+        if (s.player.cursor_col < c.COLS - 2) s.player.cursor_col += 1;
     } else if (dir == w4.BUTTON_UP) {
-        if (s.cursor_row > 0) s.cursor_row -= 1;
+        if (s.player.cursor_row > 0) s.player.cursor_row -= 1;
     } else if (dir == w4.BUTTON_DOWN) {
-        if (s.cursor_row < c.VISIBLE_ROWS - 1) s.cursor_row += 1;
+        if (s.player.cursor_row < c.VISIBLE_ROWS - 1) s.player.cursor_row += 1;
     }
 }
 
@@ -95,26 +97,26 @@ pub fn updateTouch() void {
     }
 
     const col: u8 = @intCast(@divTrunc(@as(i32, mx) - c.BOARD_X, c.TILE));
-    var row_signed = @divTrunc(@as(i32, my) - c.BOARD_Y + @as(i32, @intCast(s.scroll_px)), c.TILE);
+    var row_signed = @divTrunc(@as(i32, my) - c.BOARD_Y + @as(i32, @intCast(s.player.scroll_px)), c.TILE);
     if (row_signed < 0) row_signed = 0;
     if (row_signed > c.VISIBLE_ROWS - 1) row_signed = c.VISIBLE_ROWS - 1;
     const row: u8 = @intCast(row_signed);
 
-    const col_in_span = col == s.cursor_col or col == s.cursor_col + 1;
-    if (row == s.cursor_row and col_in_span) {
+    const col_in_span = col == s.player.cursor_col or col == s.player.cursor_col + 1;
+    if (row == s.player.cursor_row and col_in_span) {
         if (!s.touch_swapped_this_press) {
-            sim.trySwap();
+            sim.trySwap(&s.player);
             s.touch_swapped_this_press = true;
         }
         stepDas(0, &s.touch_held_dir, &s.touch_das_counter);
         return;
     }
 
-    const dir: u8 = if (row < s.cursor_row)
+    const dir: u8 = if (row < s.player.cursor_row)
         w4.BUTTON_UP
-    else if (row > s.cursor_row)
+    else if (row > s.player.cursor_row)
         w4.BUTTON_DOWN
-    else if (col < s.cursor_col)
+    else if (col < s.player.cursor_col)
         w4.BUTTON_LEFT
     else
         w4.BUTTON_RIGHT;

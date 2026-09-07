@@ -1,6 +1,12 @@
 // All drawing: palette setup, the board/cursor/panel, and the title/game-over
 // screens. Not unit tested -- everything here bottoms out in WASM4's extern
 // draw calls, which only make sense under an actual WASM4 host.
+//
+// The player's board renders in full detail (bevel, symbols, dither,
+// linked-garbage bezel) at its normal size via drawBoard/drawCursor, always
+// on `s.player`. The CPU's board shares the exact same simulation but is
+// drawn at a simplified micro scale by the companion render_cpu.zig, split
+// out to keep this file under the project's ~500-line-per-file guideline.
 
 const std = @import("std");
 const c = @import("constants.zig");
@@ -8,6 +14,7 @@ const s = @import("state.zig");
 const w4 = @import("wasm4.zig");
 const sym = @import("symbols.zig");
 const badge = @import("render_badge.zig");
+const render_cpu = @import("render_cpu.zig");
 
 // nibble values for DRAW_COLORS color1, one per palette slot (index+1)
 const DC_BG: u16 = 1;
@@ -164,8 +171,8 @@ fn drawGarbageRect(x: i32, y: i32, w: i32, h: i32) void {
 // boundary of the whole clump.
 const GarbageEdges = struct { up: bool = false, down: bool = false, left: bool = false, right: bool = false };
 
-fn isAttachedGarbage(lr: u8, col: u8) bool {
-    const cell = s.cellAt(lr, col);
+fn isAttachedGarbage(b: *s.Board, lr: u8, col: u8) bool {
+    const cell = b.cellAt(lr, col);
     if (!cell.is_garbage) return false;
     if (cell.state == .normal or cell.state == .falling or cell.state == .landing) return true;
     // A recycling cell only still looks (and counts as) attached garbage
@@ -176,12 +183,12 @@ fn isAttachedGarbage(lr: u8, col: u8) bool {
     return false;
 }
 
-fn garbageEdgesAt(lr: u8, col: u8) GarbageEdges {
+fn garbageEdgesAt(b: *s.Board, lr: u8, col: u8) GarbageEdges {
     var e = GarbageEdges{};
-    if (lr > 0) e.up = isAttachedGarbage(lr - 1, col);
-    if (lr + 1 < c.ROWS) e.down = isAttachedGarbage(lr + 1, col);
-    if (col > 0) e.left = isAttachedGarbage(lr, col - 1);
-    if (col + 1 < c.COLS) e.right = isAttachedGarbage(lr, col + 1);
+    if (lr > 0) e.up = isAttachedGarbage(b, lr - 1, col);
+    if (lr + 1 < c.ROWS) e.down = isAttachedGarbage(b, lr + 1, col);
+    if (col > 0) e.left = isAttachedGarbage(b, lr, col - 1);
+    if (col + 1 < c.COLS) e.right = isAttachedGarbage(b, lr, col + 1);
     return e;
 }
 
@@ -284,10 +291,10 @@ const STRESS_WARNING_ROWS: u8 = 3;
 const STRESS_BOUNCE_PERIOD: i32 = 16;
 const STRESS_BOUNCE_AMOUNT: i32 = 3;
 
-fn isColumnStressed(col: u8) bool {
+fn isColumnStressed(b: *s.Board, col: u8) bool {
     var lr: u8 = 0;
     while (lr < STRESS_WARNING_ROWS) : (lr += 1) {
-        if (s.cellAt(lr, col).state != .empty) return true;
+        if (b.cellAt(lr, col).state != .empty) return true;
     }
     return false;
 }
@@ -301,18 +308,20 @@ fn stressBounceOffset() i32 {
     return -@divTrunc(tri * STRESS_BOUNCE_AMOUNT, half);
 }
 
-fn drawBoard() void {
+// Full-detail board rendering -- always `s.player`, at the normal board
+// position/scale. See render_cpu.zig for the CPU's simplified equivalent.
+fn drawBoard(b: *s.Board) void {
     var col_stressed: [c.COLS]bool = undefined;
-    for (0..c.COLS) |ci| col_stressed[ci] = isColumnStressed(@intCast(ci));
+    for (0..c.COLS) |ci| col_stressed[ci] = isColumnStressed(b, @intCast(ci));
     const bounce = stressBounceOffset();
 
     var lr: u8 = 0;
     while (lr < c.ROWS) : (lr += 1) {
-        const base_y = c.BOARD_Y + @as(i32, lr) * c.TILE - @as(i32, @intCast(s.scroll_px));
+        const base_y = c.BOARD_Y + @as(i32, lr) * c.TILE - @as(i32, @intCast(b.scroll_px));
         if (base_y <= -c.TILE or base_y >= w4.SCREEN_SIZE) continue;
         var col: u8 = 0;
         while (col < c.COLS) : (col += 1) {
-            const cell = s.cellAt(lr, col);
+            const cell = b.cellAt(lr, col);
             if (cell.state == .empty) continue;
             const x = c.BOARD_X + @as(i32, col) * c.TILE;
             switch (cell.state) {
@@ -321,15 +330,15 @@ fn drawBoard() void {
                     // animation (falling/landing/popping/swapping) keep
                     // their own motion undisturbed.
                     const y = if (col_stressed[col]) base_y + bounce else base_y;
-                    if (cell.is_garbage) drawGarbageBlockLinked(x, y, garbageEdgesAt(lr, col)) else drawNormalCell(x, y, cell.color);
+                    if (cell.is_garbage) drawGarbageBlockLinked(x, y, garbageEdgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color);
                 },
                 .falling => {
                     const y = base_y - cell.fall_off;
-                    if (cell.is_garbage) drawGarbageBlockLinked(x, y, garbageEdgesAt(lr, col)) else drawNormalCell(x, y, cell.color);
+                    if (cell.is_garbage) drawGarbageBlockLinked(x, y, garbageEdgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color);
                 },
                 .popping => drawPoppingCell(x, base_y, cell.color, cell.timer),
-                .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, garbageEdgesAt(lr, col)),
-                .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, garbageEdgesAt(lr, col)),
+                .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, garbageEdgesAt(b, lr, col)),
+                .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, garbageEdgesAt(b, lr, col)),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},
             }
@@ -391,10 +400,12 @@ const CURSOR_PULSE_AMOUNT: i32 = 2;
 const CURSOR_PUSH: i32 = 1;
 const CURSOR_DITHER_HUES = badge.WARM_DITHER_HUES;
 
+// Always the player's own cursor -- the CPU has no cursor to show (its board
+// is drawn too small for one to read well, and it has no real input anyway).
 fn drawCursor() void {
-    if (s.game_over) return;
-    const base_x = c.BOARD_X + @as(i32, s.cursor_col) * c.TILE;
-    const base_y = c.BOARD_Y + @as(i32, s.cursor_row) * c.TILE - @as(i32, @intCast(s.scroll_px));
+    if (s.winner != .none) return;
+    const base_x = c.BOARD_X + @as(i32, s.player.cursor_col) * c.TILE;
+    const base_y = c.BOARD_Y + @as(i32, s.player.cursor_row) * c.TILE - @as(i32, @intCast(s.player.scroll_px));
 
     // Blink by contracting slightly instead of changing color.
     const half = @divTrunc(CURSOR_PULSE_PERIOD, 2);
@@ -433,12 +444,12 @@ fn drawPanel() void {
     w4.DRAW_COLORS.* = 0x0002;
     w4.Text("SCORE", c.PANEL_X, 4);
     var buf: [12]u8 = undefined;
-    const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.score}) catch "0";
+    const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.player.score}) catch "0";
     w4.Text(score_str, c.PANEL_X, 14);
 
-    if (s.chain > 1) {
+    if (s.player.chain > 1) {
         var buf2: [12]u8 = undefined;
-        const chain_str = std.fmt.bufPrint(&buf2, "x{d}", .{s.chain}) catch "";
+        const chain_str = std.fmt.bufPrint(&buf2, "x{d}", .{s.player.chain}) catch "";
         w4.DRAW_COLORS.* = 0x0004;
         w4.Text(chain_str, c.PANEL_X, 28);
     }
@@ -452,19 +463,26 @@ pub fn drawTitle() void {
 }
 
 pub fn drawGameOver() void {
+    const text: []const u8 = switch (s.winner) {
+        .player => "YOU WIN",
+        .cpu => "YOU LOSE",
+        .draw => "DRAW",
+        .none => unreachable, // drawGameOver is only ever called once winner != .none
+    };
     w4.DRAW_COLORS.* = 0x0001;
     w4.Rect(20, 60, 120, 40);
     w4.DRAW_COLORS.* = 0x0004;
-    w4.Text("GAME OVER", 32, 68);
+    w4.Text(text, 32, 68);
     w4.DRAW_COLORS.* = 0x0002;
     w4.Text("PRESS X", 40, 84);
 }
 
 pub fn render() void {
     clearBackground();
-    drawBoard();
+    drawBoard(&s.player);
     drawFrame();
     drawCursor();
     drawPanel();
-    badge.drawMatchPopups();
+    badge.drawMatchPopups(&s.player.match_popups);
+    render_cpu.draw();
 }

@@ -88,8 +88,8 @@ fn drawBadgeOutline(x: i32, y: i32, w: i32, h: i32) void {
     w4.Rect(x + w - 1, y + 1, 1, @intCast(h - 2)); // right
 }
 
-pub fn drawMatchPopups() void {
-    for (s.match_popups) |p| {
+pub fn drawMatchPopups(match_popups: []const s.MatchPopup) void {
+    for (match_popups) |p| {
         if (!p.active) continue;
 
         var cur_x = p.x;

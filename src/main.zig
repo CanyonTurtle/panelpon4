@@ -4,6 +4,7 @@ const s = @import("state.zig");
 const board = @import("board.zig");
 const sim = @import("sim.zig");
 const input = @import("input.zig");
+const cpu_ai = @import("cpu_ai.zig");
 const render = @import("render.zig");
 const audio = @import("audio.zig");
 const debug = @import("debug.zig");
@@ -18,21 +19,23 @@ comptime {
         @export(&debug.setCursor, .{ .name = "debugSetCursor" });
         @export(&debug.getChain, .{ .name = "debugGetChain" });
         @export(&debug.getCellInfo, .{ .name = "debugGetCellInfo" });
+        @export(&debug.getWinner, .{ .name = "debugGetWinner" });
     }
 }
 
 export fn start() void {
     render.setupPalette();
-    board.resetGame();
+    board.resetGame(&s.player);
+    board.resetGame(&s.cpu);
 }
 
 export fn update() void {
     s.frame_count += 1;
     const gp = w4.GAMEPAD1.*;
-    const was_game_over = s.game_over;
+    const was_over = s.winner != .none;
 
     if (!s.started) {
-        _ = s.rngNext();
+        _ = s.player.rngNext();
         render.clearBackground();
         render.drawTitle();
         if (input.justPressed(gp, w4.BUTTON_1)) s.started = true;
@@ -40,20 +43,40 @@ export fn update() void {
         return;
     }
 
-    if (!s.game_over) {
+    if (s.winner == .none) {
         input.updateCursorMovement(gp);
-        if (input.justPressed(gp, w4.BUTTON_1)) sim.trySwap();
+        if (input.justPressed(gp, w4.BUTTON_1)) sim.trySwap(&s.player);
         input.updateTouch();
-        sim.simulate();
-        if (!s.boardBusy()) s.chain = 0;
-        board.updateRise();
-        if (s.game_over and !was_game_over) audio.playGameOverSound();
+        cpu_ai.update(&s.cpu);
+
+        sim.simulate(&s.player, &s.cpu);
+        sim.simulate(&s.cpu, &s.player);
+        if (!s.player.boardBusy()) s.player.chain = 0;
+        if (!s.cpu.boardBusy()) s.cpu.chain = 0;
+        board.updateRise(&s.player);
+        board.updateRise(&s.cpu);
+
+        // Whoever's board tops out first loses -- see board.doRise. Both on
+        // the same frame (only possible if both happen to rise into a
+        // topped-out state simultaneously) is a draw.
+        if (s.player.game_over and s.cpu.game_over) {
+            s.winner = .draw;
+        } else if (s.player.game_over) {
+            s.winner = .cpu;
+        } else if (s.cpu.game_over) {
+            s.winner = .player;
+        }
+        if (s.winner != .none and !was_over) audio.playGameOverSound();
     } else {
-        if (input.justPressed(gp, w4.BUTTON_1)) board.resetGame();
+        if (input.justPressed(gp, w4.BUTTON_1)) {
+            board.resetGame(&s.player);
+            board.resetGame(&s.cpu);
+            s.winner = .none;
+        }
     }
 
     render.render();
-    if (s.game_over) render.drawGameOver();
+    if (s.winner != .none) render.drawGameOver();
 
     s.prev_gamepad = gp;
 }

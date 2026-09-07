@@ -11,7 +11,7 @@
 //   const h = await loadCart('zig-out/bin/cart.wasm'); // calls start() for you
 //   h.pressButton1();             // get past the title screen
 //   h.debug.clearBoard();         // only available on a Debug build (src/debug.zig)
-//   h.debug.setCell(5, 0, 1, 1);
+//   h.debug.setCell(0, 5, 0, 1, 1); // board 0 = player, 1 = cpu
 //   h.step(10);
 //   h.screenshot('/tmp/out.png');
 //
@@ -241,13 +241,17 @@ async function loadCart(wasmPath) {
 
   // The debugXxx exports only exist on a Debug build (see src/debug.zig) --
   // exposed here as `.debug` only when present, so scripts can branch on
-  // `if (h.debug)` rather than crashing against a release build.
+  // `if (h.debug)` rather than crashing against a release build. Every
+  // function (other than clearBoard, which resets both) takes a `board`
+  // selector: 0 = player, anything else = cpu (see src/debug.zig).
   const debug = e.debugClearBoard ? {
     clearBoard: () => e.debugClearBoard(),
-    setCell: (row, col, color, state) => e.debugSetCell(row, col, color, state),
-    setCursor: (col, row) => e.debugSetCursor(col, row),
-    getChain: () => e.debugGetChain(),
-    getCellInfo: (row, col) => e.debugGetCellInfo(row, col),
+    setCell: (board, row, col, color, state) => e.debugSetCell(board, row, col, color, state),
+    setCursor: (board, col, row) => e.debugSetCursor(board, col, row),
+    getChain: (board) => e.debugGetChain(board),
+    getCellInfo: (board, row, col) => e.debugGetCellInfo(board, row, col),
+    // 0 = none, 1 = player, 2 = cpu, 3 = draw (see state.Winner)
+    getWinner: () => e.debugGetWinner(),
   } : undefined;
 
   return { e, mem8, view, memory, setGamepad, setMouse, step, pressButton1, screenshot, debug };
