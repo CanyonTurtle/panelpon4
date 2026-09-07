@@ -131,6 +131,16 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   also discourages any *swap* that would leave a column that close to the top, not just raising). Deliberately
   its own small simulator rather than reusing `sim.zig` directly -- see the module's own doc comment for why
   -- tests in the companion `src/cpu_engine_test.zig`.
+- `src/cpu_grid.zig` — the engine's board snapshot (`Grid`), split out into its own file purely so
+  `cpu_engine.zig` and `cpu_engine_garbage.zig` can each depend on it without depending on each other.
+- `src/cpu_engine_garbage.zig` — garbage's rigid-body gravity for the engine's `Grid`, a port of
+  `sim_garbage.zig`'s own algorithm into the engine's instant, no-animation model: a connected garbage
+  body falls and lands as one piece (so a wide slab resting unevenly across towers of different heights
+  settles at the height its *tallest* support dictates, not each column sinking to its own depth), and
+  connectivity is recomputed fresh every settle step, so a body a match has eaten into is free to keep
+  falling as however many independent pieces are left -- cross-validated against the real board's own
+  gravity (for plain falling/landing, where nothing is random) in the companion
+  `src/cpu_engine_garbage_test.zig`.
 - `src/audio.zig` — sound effects.
 - `src/input.zig` — gamepad (cursor movement with DAS, swap triggering, itself one-deep buffered -- a press
   that lands mid-swap is remembered and applied the instant it's possible) and touch (swipe-only: aims
@@ -160,10 +170,11 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 
 ## Testing
 
-`state.zig`, `board.zig`, `sim.zig`/`sim_matches.zig`/`sim_garbage.zig`, `cpu_ai.zig`, and `cpu_engine.zig`
-have Zig `test` blocks — `sim.zig`'s live in the companion `src/sim_test.zig`, garbage-specific ones in
-`src/sim_garbage_test.zig`, and `cpu_engine.zig`'s in `src/cpu_engine_test.zig`, to keep each module under
-~500 lines. These run natively (not compiled into the
+`state.zig`, `board.zig`, `sim.zig`/`sim_matches.zig`/`sim_garbage.zig`, `cpu_ai.zig`, and
+`cpu_engine.zig`/`cpu_engine_garbage.zig` have Zig `test` blocks — `sim.zig`'s live in the companion
+`src/sim_test.zig`, garbage-specific ones in `src/sim_garbage_test.zig`, `cpu_engine.zig`'s in
+`src/cpu_engine_test.zig`, and `cpu_engine_garbage.zig`'s (including its cross-validation against the real
+board) in `src/cpu_engine_garbage_test.zig`, to keep each module under ~500 lines. These run natively (not compiled into the
 cart) and are excluded from `input.zig`/`render.zig`/`render_garbage.zig`/`render_cpu.zig`, which touch
 WASM-4's real host functions and only make sense under an actual WASM-4 host.
 

@@ -9,31 +9,35 @@
 // running it for dozens of frames per candidate or duplicating its state
 // machine anyway.
 //
-// Only reasons about the currently-interactable VISIBLE_ROWS x COLS window
-// (matching the cursor's own legal range -- see input.moveCursor) -- the
-// hidden extra ring-buffer row still rising in is deliberately out of scope,
-// same as it is for the player's own cursor.
+// The board snapshot (Grid) lives in the companion cpu_grid.zig, and
+// garbage's rigid-body gravity in cpu_engine_garbage.zig (both split out to
+// keep this file under the project's ~500-line-per-file guideline, and to
+// let the two depend on the shared Grid without depending on each other --
+// see cpu_grid.zig's own doc comment) -- cross-checked against the real
+// sim.zig/sim_garbage.zig behavior in cpu_engine_garbage_test.zig.
 //
 // Uses a per-color bitboard (one u128 bitmask per color, bit index
 // row*COLS+col) for the structural heuristic (structuralScore below), where
 // shift+AND+popCount tricks are a natural, safe fit (vertical adjacency is a
 // plain row-stride shift with no wraparound risk at all; horizontal
 // adjacency is guarded against wrapping into the next row by H_MASK). Match
-// detection/cascade resolution (findAndClearMatches/applyGravity) stays
-// plain nested-loop array logic instead, mirroring sim_matches.zig's own
-// proven approach -- that logic determines whether the AI ever "sees" a
+// detection/cascade resolution (findAndClearMatches/cpu_engine_garbage.settle)
+// stays plain nested-loop array logic instead, mirroring sim_matches.zig's
+// own proven approach -- that logic determines whether the AI ever "sees" a
 // winning move at all, so it's worth more to keep it simple and obviously
 // correct than to also force it through bit tricks.
 
 const std = @import("std");
 const c = @import("constants.zig");
-const s = @import("state.zig");
+const grid_mod = @import("cpu_grid.zig");
+const garbage = @import("cpu_engine_garbage.zig");
 
-const ROWS: u8 = c.VISIBLE_ROWS;
-const COLS: u8 = c.COLS;
+const ROWS = grid_mod.ROWS;
+const COLS = grid_mod.COLS;
 
-pub const EMPTY: i8 = -1;
-pub const GARBAGE: i8 = -2;
+pub const EMPTY = grid_mod.EMPTY;
+pub const GARBAGE = grid_mod.GARBAGE;
+pub const Grid = grid_mod.Grid;
 
 // How much deeper each of a candidate move's own cascade/structural score is
 // discounted when credited to the move that led into it -- see
@@ -61,30 +65,6 @@ const HEIGHT_WEIGHT: i32 = 2;
 
 pub const Move = struct { row: u8, col: u8 };
 
-pub const Grid = struct {
-    cell: [ROWS][COLS]i8 = [_][COLS]i8{[_]i8{EMPTY} ** COLS} ** ROWS,
-
-    // Snapshots the currently-interactable window of a real board. Only
-    // meaningful while the board is idle (see Board.boardBusy) -- every
-    // occupied cell is then guaranteed to be `.normal`, so there's no
-    // mid-animation state to reason about.
-    pub fn fromBoard(b: *s.Board) Grid {
-        var g: Grid = .{};
-        for (0..ROWS) |lr| {
-            for (0..COLS) |col| {
-                const cell = b.cellAt(@intCast(lr), @intCast(col));
-                g.cell[lr][col] = if (cell.state != .normal)
-                    EMPTY
-                else if (cell.is_garbage)
-                    GARBAGE
-                else
-                    @intCast(cell.color);
-            }
-        }
-        return g;
-    }
-};
-
 fn swappable(v: i8) bool {
     return v == EMPTY or v >= 0;
 }
@@ -103,28 +83,6 @@ fn swap(grid: *Grid, row: u8, col: u8) void {
     const tmp = grid.cell[row][col];
     grid.cell[row][col] = grid.cell[row][col + 1];
     grid.cell[row][col + 1] = tmp;
-}
-
-// Column-independent gravity: every occupied cell (real or garbage) falls
-// straight down to fill empties below it, preserving relative vertical
-// order within the column. Unlike the real game, garbage here falls as
-// individual cells rather than a rigid connected clump -- a deliberate
-// simplification; the AI only needs a plausible logical end state to score,
-// not pixel-perfect physics.
-fn applyGravity(grid: *Grid) void {
-    for (0..COLS) |col| {
-        var vals: [ROWS]i8 = undefined;
-        var n: usize = 0;
-        for (0..ROWS) |row| {
-            const v = grid.cell[row][col];
-            if (v != EMPTY) {
-                vals[n] = v;
-                n += 1;
-            }
-        }
-        for (0..ROWS - n) |row| grid.cell[row][col] = EMPTY;
-        for (0..n) |i| grid.cell[ROWS - n + i][col] = vals[i];
-    }
 }
 
 const MatchResult = struct { real_count: u32 = 0, garbage_count: u32 = 0, any: bool = false };
@@ -212,11 +170,16 @@ fn findAndClearMatches(grid: *Grid) MatchResult {
 // an equally-sized single pop (chain_depth is squared), and a combo (a
 // single pass popping more than the 3-block minimum) adds on top of that --
 // see the module doc comment for the full rationale.
-fn simulateCascade(grid: *Grid) i32 {
+//
+// Public (not just for cpu_ai's move search) so cpu_engine_garbage_test.zig
+// can also use it to resolve a static grid to its final rest state --
+// mutates `grid` in place to that final state, in addition to returning its
+// score, so a test can just inspect the same pointer afterward.
+pub fn simulateCascade(grid: *Grid) i32 {
     var total: i32 = 0;
     var chain_depth: i32 = 0;
     while (true) {
-        applyGravity(grid);
+        garbage.settle(grid);
         const result = findAndClearMatches(grid);
         if (!result.any) break;
         chain_depth += 1;
