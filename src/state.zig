@@ -77,15 +77,16 @@ pub var touch_das_counter: u8 = 0;
 // render.drawMatchPopups. Nothing here affects gameplay, so none of it needs
 // to be exact -- just cleared on reset like everything else.
 //
-// Three phases: it holds at the height of the match's topmost block (`x`/`y`
-// below), then eases up to that same block's own top edge (`edge_y`) -- a
-// small, quick hop meant to catch the eye right at the match itself, not
-// travel anywhere yet -- then eases from there into the score display. See
+// Three phases: it eases up just a couple pixels from the center of the
+// match's topmost block (`x`/`y` below) to that block's own top edge
+// (`edge_y`) -- a small hop meant to catch the eye right at the match, not
+// travel anywhere -- then waits there until the match's own pop animation
+// actually finishes (`pop_end`, in the same elapsed-frame timeline as this
+// popup), then flies from there into the score display. See
 // render.drawMatchPopups for the actual interpolation.
-pub const MATCH_POPUP_HOLD: i16 = 12; // frames sitting at spawn height before rising
-pub const MATCH_POPUP_RISE: i16 = 8; // frames easing up to the match's own top edge
+pub const MATCH_POPUP_RISE: i16 = 6; // frames easing up to the block's own top edge
+pub const MATCH_POPUP_RISE_PX: i32 = 3; // how far up that is -- a couple pixels, not half a tile
 pub const MATCH_POPUP_FLY: i16 = 28; // frames easing from that edge into the score
-pub const MATCH_POPUP_LIFETIME: i16 = MATCH_POPUP_HOLD + MATCH_POPUP_RISE + MATCH_POPUP_FLY;
 const MAX_MATCH_POPUPS = 4;
 const MATCH_POPUP_LABEL_CAP = 16;
 
@@ -94,14 +95,15 @@ pub const MatchPopup = struct {
     label: [MATCH_POPUP_LABEL_CAP]u8 = undefined,
     label_len: u8 = 0,
     x: i32 = 0, // badge center, at spawn -- see sim.checkMatches for how it's picked
-    y: i32 = 0, // height of the match's topmost block, at spawn
-    edge_y: i32 = 0, // that same block's own top edge -- the rise phase's target
+    y: i32 = 0, // center of the match's topmost block, at spawn
+    edge_y: i32 = 0, // a couple pixels above y -- the rise phase's target, and where it waits
+    pop_end: i16 = 0, // elapsed frame (this popup's own timeline) the match's pop finishes; flight starts then
     elapsed: i16 = 0,
 };
 
 pub var match_popups: [MAX_MATCH_POPUPS]MatchPopup = [_]MatchPopup{.{}} ** MAX_MATCH_POPUPS;
 
-pub fn spawnMatchPopup(label: []const u8, x: i32, y: i32, edge_y: i32) void {
+pub fn spawnMatchPopup(label: []const u8, x: i32, y: i32, edge_y: i32, pop_end: i16) void {
     for (&match_popups) |*p| {
         if (!p.active) {
             p.active = true;
@@ -110,6 +112,7 @@ pub fn spawnMatchPopup(label: []const u8, x: i32, y: i32, edge_y: i32) void {
             p.x = x;
             p.y = y;
             p.edge_y = edge_y;
+            p.pop_end = pop_end;
             p.elapsed = 0;
             return;
         }
@@ -123,7 +126,7 @@ pub fn tickMatchPopups() void {
     for (&match_popups) |*p| {
         if (!p.active) continue;
         p.elapsed += 1;
-        if (p.elapsed >= MATCH_POPUP_LIFETIME) p.active = false;
+        if (p.elapsed >= p.pop_end + MATCH_POPUP_FLY) p.active = false;
     }
 }
 

@@ -348,15 +348,17 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                     std.fmt.bufPrint(&label_buf, "{d}", .{member_count}) catch "?";
                 const match_w = (@as(i32, max_col) - @as(i32, min_col) + 1) * c.TILE;
                 const cx = c.BOARD_X + @as(i32, min_col) * c.TILE + @divTrunc(match_w, 2);
-                // Spawn at the height of the match's topmost block (not the
+                // Spawn at the center of the match's topmost block (not the
                 // whole bounding box's center), so it reads as belonging to
-                // the match right where it's most visible. It then rises to
-                // that same block's own top edge (a quick, small "catch the
-                // eye" hop right at the match) before flying off to the
-                // score -- see render.drawMatchPopups.
-                const top_row_y = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(s.scroll_px));
-                const cy = top_row_y + @divTrunc(c.TILE, 2);
-                s.spawnMatchPopup(label, cx, cy, top_row_y);
+                // the match right where it's most visible. It then eases up
+                // just a couple pixels (a small "catch the eye" hop, not a
+                // trip anywhere) and waits there until this match's own pop
+                // animation actually finishes (see group_end above), at
+                // which point it flies off to the score -- see
+                // render.drawMatchPopups.
+                const cy = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(s.scroll_px)) + @divTrunc(c.TILE, 2);
+                const edge_y = cy - s.MATCH_POPUP_RISE_PX;
+                s.spawnMatchPopup(label, cx, cy, edge_y, group_end);
             }
             s.score += @as(u32, @intCast(member_count)) * 10 * multiplier;
             audio.playPopSound(multiplier);

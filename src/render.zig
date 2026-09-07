@@ -421,25 +421,25 @@ fn drawMatchPopups() void {
 
         var cur_x = p.x;
         var cur_y = p.y;
-        const rise_start = s.MATCH_POPUP_HOLD;
-        const fly_start = s.MATCH_POPUP_HOLD + s.MATCH_POPUP_RISE;
-        if (p.elapsed < rise_start) {
-            // Holds at the height of the match's topmost block.
-        } else if (p.elapsed < fly_start) {
-            // Quickly eases straight up to that block's own top edge -- a
-            // small, local hop meant to catch the eye right at the match,
-            // not travel anywhere yet (ease-out: fast start, settling in).
-            const t: i32 = p.elapsed - rise_start;
+        if (p.elapsed < s.MATCH_POPUP_RISE) {
+            // Quickly eases up just a couple pixels -- a small, local hop
+            // meant to catch the eye right at the match, not travel anywhere
+            // (ease-out: fast start, settling in).
+            const t: i32 = p.elapsed;
             const total: i32 = s.MATCH_POPUP_RISE;
             const remain = total - t;
             const num = total * total - remain * remain;
             const den = total * total;
             cur_y = p.y + @divTrunc((p.edge_y - p.y) * num, den);
+        } else if (p.elapsed < p.pop_end) {
+            // Waits right there until the match's own pop animation actually
+            // finishes -- see p.pop_end.
+            cur_y = p.edge_y;
         } else {
             // Ease-in toward the score (t^2, not a constant-speed drift) --
-            // starts slow and accelerates from the match's top edge, reading
-            // as a "magnetic pull" rather than a simple slide.
-            const fly_elapsed: i32 = p.elapsed - fly_start;
+            // starts slow and accelerates now that the match has cleared,
+            // reading as a "magnetic pull" rather than a simple slide.
+            const fly_elapsed: i32 = p.elapsed - p.pop_end;
             const fly_total: i32 = s.MATCH_POPUP_FLY;
             const num = fly_elapsed * fly_elapsed;
             const den = fly_total * fly_total;
