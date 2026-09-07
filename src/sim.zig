@@ -15,6 +15,7 @@ pub fn trySwap() void {
     const a = s.cellAt(s.cursor_row, s.cursor_col);
     const b = s.cellAt(s.cursor_row, s.cursor_col + 1);
     if (!swappable(a.state) or !swappable(b.state)) return;
+    if (a.is_garbage or b.is_garbage) return; // inert -- see Cell.is_garbage
     if (a.state == .empty and b.state == .empty) return;
 
     const a_orig = a.*;
@@ -76,8 +77,37 @@ pub fn simulate() void {
                     }
                     cell.pop_group_end -= 1;
                     if (cell.pop_group_end <= 0) {
-                        cell.* = s.Cell{};
-                        just_cleared[lr][col] = true;
+                        if (cell.is_garbage) {
+                            // Garbage doesn't disappear -- it cracks open
+                            // into a fresh, chainable block, in place, once
+                            // the *whole* connected pop event (which may
+                            // span several garbage cells and/or real matched
+                            // cells -- see the propagation pass in
+                            // checkMatches) finishes together.
+                            //
+                            // Deliberately NOT marked just_settled/settled:
+                            // checkMatches' "spend chainable on an unmatched
+                            // settle" cleanup (for cells that inherited
+                            // chainable from an earlier pop and turned out to
+                            // be a dead end) would otherwise immediately wipe
+                            // the chainable flag this exact reveal just
+                            // granted, if a checkMatches call happened to run
+                            // this same frame for an unrelated reason -- that
+                            // cleanup can't distinguish "freshly granted" from
+                            // "inherited and now proven dead". It'll get
+                            // checked for matches the normal way once it
+                            // actually falls/lands (or something else
+                            // triggers a check) instead.
+                            cell.state = .normal;
+                            cell.is_garbage = false;
+                            cell.color = @intCast(s.randRange(c.NUM_COLORS));
+                            cell.chainable = true;
+                            cell.timer = 0;
+                            cell.pop_group_end = 0;
+                        } else {
+                            cell.* = s.Cell{};
+                            just_cleared[lr][col] = true;
+                        }
                     }
                 },
                 .landing => {
@@ -169,7 +199,10 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
     for (0..c.ROWS) |lr| {
         for (0..c.COLS) |col| {
             const cell = s.cellAt(@intCast(lr), @intCast(col));
-            settled_color[lr][col] = if (cell.state == .normal) @as(i16, cell.color) else -1;
+            // Garbage is colorless: it never seeds or joins a color run on
+            // its own (only via the propagation pass below), so it's
+            // excluded here exactly like an empty/animating cell would be.
+            settled_color[lr][col] = if (cell.state == .normal and !cell.is_garbage) @as(i16, cell.color) else -1;
             settled_chainable[lr][col] = cell.state == .normal and cell.chainable;
         }
     }
@@ -227,6 +260,33 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
             }
         }
         return false;
+    }
+
+    // Garbage has no color of its own, so it never seeds a match -- but a
+    // pop propagates into any garbage cell orthogonally touching a matched
+    // cell, and from there into further garbage cells touching *that* one,
+    // and so on, so a whole connected clump of garbage goes together. A
+    // fixed-point sweep, since propagation can chain through several
+    // garbage cells in a row within the same event.
+    var propagated = true;
+    while (propagated) {
+        propagated = false;
+        for (0..c.ROWS) |lr| {
+            for (0..c.COLS) |col| {
+                if (matched[lr][col]) continue;
+                const cell = s.cellAt(@intCast(lr), @intCast(col));
+                if (cell.state != .normal or !cell.is_garbage) continue;
+                const touches_matched =
+                    (lr > 0 and matched[lr - 1][col]) or
+                    (lr + 1 < c.ROWS and matched[lr + 1][col]) or
+                    (col > 0 and matched[lr][col - 1]) or
+                    (col + 1 < c.COLS and matched[lr][col + 1]);
+                if (touches_matched) {
+                    matched[lr][col] = true;
+                    propagated = true;
+                }
+            }
+        }
     }
 
     // Matched blocks pop one after another rather than all at once (see
@@ -359,6 +419,26 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                 const cy = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(s.scroll_px)) + @divTrunc(c.TILE, 2);
                 const edge_y = cy - s.MATCH_POPUP_RISE_PX;
                 s.spawnMatchPopup(label, cx, cy, edge_y, group_end);
+
+                // Self-inflicted garbage (v1: always the player's own doing,
+                // never an opponent's): a big combo or chain drops garbage
+                // onto this same board. Chain takes priority over combo
+                // sizing when a match is both, mirroring the badge label
+                // precedence just above -- a match doesn't spawn both kinds
+                // at once.
+                if (is_chain) {
+                    // x2 -> 1 row, x3 -> 2 rows, ... (extrapolated linearly;
+                    // only x2/x3 were specified) -- multiplier > 1 here, so
+                    // this never underflows.
+                    const garbage_rows: u8 = multiplier - 1;
+                    spawnGarbage(garbage_rows, c.COLS, 0);
+                } else if (member_count >= 6) {
+                    spawnGarbage(1, c.COLS, 0);
+                } else if (member_count == 5) {
+                    spawnGarbage(1, 4, min_col);
+                } else { // member_count == 4, the only case left under is_combo
+                    spawnGarbage(1, 3, min_col);
+                }
             }
             s.score += @as(u32, @intCast(member_count)) * 10 * multiplier;
             audio.playPopSound(multiplier);
@@ -379,4 +459,27 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
     }
 
     return true;
+}
+
+// Drops `rows` garbage rows (each `width` columns wide, anchored at
+// `anchor_col` -- clamped to fit the board, so callers can pass a match's
+// own min_col without worrying about overflow) onto the board: self-inflicted
+// punishment for a big combo/chain (see the call site in checkMatches). Cells
+// are placed at logical rows 0..rows-1, skipping any that are already
+// occupied rather than overwriting the player's existing blocks -- ordinary
+// gravity then carries the new cells down to rest on top of the stack,
+// exactly like any other block, using the same code path unchanged.
+fn spawnGarbage(rows: u8, width: u8, anchor_col: u8) void {
+    const clamped_rows = @min(rows, c.ROWS);
+    const start_col = if (anchor_col + width > c.COLS) c.COLS - width else anchor_col;
+    var r: u8 = 0;
+    while (r < clamped_rows) : (r += 1) {
+        var col = start_col;
+        while (col < start_col + width) : (col += 1) {
+            const cell = s.cellAt(r, col);
+            if (cell.state == .empty) {
+                cell.* = s.Cell{ .state = .normal, .is_garbage = true };
+            }
+        }
+    }
 }

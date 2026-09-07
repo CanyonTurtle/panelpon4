@@ -46,6 +46,9 @@ npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm --html web/panelpon4.html --t
 - Blocks above a pop fall and can chain into new matches for bonus score. A genuine chain ("x2", "x3", ...)
   or a combo (a single match bigger than 3 blocks, shown as a bare block count) flies a small badge into
   the score display.
+- A big enough combo or chain also drops garbage onto your own board -- self-inflicted risk/reward for
+  aggressive play. Garbage is inert (colorless, unswappable, unmatchable) until a match pops right next to
+  it, which cracks it open into a fresh, chainable block once the whole connected pop finishes.
 - A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
 - The floor rises forever, faster as your score climbs. If blocks reach the top row, it's game over.
 - Press **X** on the title or game-over screen to (re)start.
@@ -65,10 +68,14 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/state.zig` — the board grid, cursor, score/chain, and all other mutable game state, plus the small
   pure helpers (ring-buffer indexing, RNG, board-busy query) that only need that state.
 - `src/board.zig` — row generation, the rising floor, and (re)starting a game.
-- `src/sim.zig` — the core simulation: swaps, pops, landings, gravity, and matching/chaining.
+- `src/sim.zig` — the core simulation: swaps, pops, landings, gravity, matching/chaining, and garbage
+  (spawning on a big combo/chain, propagation into adjacent garbage on a pop, reveal on clear) -- tests in
+  the companion `src/sim_test.zig`.
 - `src/audio.zig` — sound effects.
 - `src/input.zig` — gamepad and touch handling (cursor movement with DAS, swap triggering).
-- `src/render.zig` — all drawing: the board, cursor, panel, and title/game-over screens.
+- `src/render.zig` — most drawing: the board, cursor, panel, and title/game-over screens.
+- `src/render_badge.zig` — the chain/combo popup badge, plus the shared checkerboard-blit dithering
+  primitive it's built on (reusable for any future dithered-highlight effect).
 - `src/debug.zig` — debug-only helpers (set up a board scenario, read back cell/chain state) for scripted
   testing; only exported as WASM functions in Debug builds (see the `comptime` block in `main.zig`) --
   `zig build --release=small` never includes this surface. Used via `tools/wasm4-harness.js`.

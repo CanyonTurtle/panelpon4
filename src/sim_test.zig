@@ -230,3 +230,194 @@ test "a gap stops chainable marking from reaching blocks above it" {
 
     try testing.expect(!s.cellAt(9, 2).chainable);
 }
+
+// ---------------------------------------------------------------------
+// Garbage
+// ---------------------------------------------------------------------
+
+test "a garbage cell is never swappable" {
+    s.resetForTest();
+    s.cellAt(s.cursor_row, s.cursor_col).* = .{ .state = .normal, .is_garbage = true };
+    s.cellAt(s.cursor_row, s.cursor_col + 1).* = .{ .color = 1, .state = .normal };
+    sim.trySwap();
+    try testing.expect(s.cellAt(s.cursor_row, s.cursor_col).is_garbage);
+    try testing.expectEqual(@as(u8, 1), s.cellAt(s.cursor_row, s.cursor_col + 1).color);
+}
+
+test "a pop propagates into an orthogonally adjacent garbage cell" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 3).* = .{ .state = .normal, .is_garbage = true }; // touches col 2
+    _ = sim.checkMatches(no_settled);
+
+    try testing.expectEqual(s.CellState.popping, s.cellAt(5, 3).state);
+}
+
+test "garbage propagation chains transitively through multiple garbage cells" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    s.cellAt(6, 2).* = .{ .state = .normal, .is_garbage = true }; // touches the match
+    s.cellAt(7, 2).* = .{ .state = .normal, .is_garbage = true }; // only touches the garbage above it
+    _ = sim.checkMatches(no_settled);
+
+    try testing.expectEqual(s.CellState.popping, s.cellAt(6, 2).state);
+    try testing.expectEqual(s.CellState.popping, s.cellAt(7, 2).state);
+}
+
+test "an unrelated garbage cell elsewhere does not pop" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    s.cellAt(9, 5).* = .{ .state = .normal, .is_garbage = true }; // far away, untouched
+    _ = sim.checkMatches(no_settled);
+
+    try testing.expectEqual(s.CellState.normal, s.cellAt(9, 5).state);
+    try testing.expect(s.cellAt(9, 5).is_garbage);
+}
+
+test "a popped garbage cell reveals a fresh chainable block only once its whole group finishes" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 3).* = .{ .state = .normal, .is_garbage = true };
+    // A genuine floor directly below the garbage cell -- anchored all the
+    // way to row 10 (the true bottom of the ring buffer), or gravity would
+    // treat the "floor" itself as unsupported and let it fall away, leaving
+    // the revealed block nothing to rest on (the project's standing
+    // test-fixture pitfall). This keeps the revealed block at a known
+    // position (row 5) so the assertions below are unambiguous.
+    s.cellAt(6, 3).* = .{ .color = 3, .state = .normal };
+    s.cellAt(7, 3).* = .{ .color = 4, .state = .normal };
+    s.cellAt(8, 3).* = .{ .color = 3, .state = .normal };
+    s.cellAt(9, 3).* = .{ .color = 4, .state = .normal };
+    s.cellAt(10, 3).* = .{ .color = 3, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+    // (This match's 4 members -- 3 real + 1 propagated garbage -- also cross
+    // the combo threshold and spawn combo garbage at row 0 elsewhere on the
+    // board; that's correct, expected behavior for a match this size, not
+    // something this test needs to isolate against.)
+
+    const member_count = 4; // 3 matched + 1 propagated garbage
+    const group_end: i16 = c.POP_FRAMES + (member_count - 1) * c.POP_STAGGER_FRAMES;
+
+    for (0..@intCast(group_end - 1)) |_| sim.simulate();
+    try testing.expectEqual(s.CellState.popping, s.cellAt(5, 3).state);
+    try testing.expect(s.cellAt(5, 3).is_garbage);
+
+    sim.simulate(); // the final frame: the whole group resolves together
+    try testing.expectEqual(s.CellState.normal, s.cellAt(5, 3).state);
+    try testing.expect(!s.cellAt(5, 3).is_garbage);
+    try testing.expect(s.cellAt(5, 3).chainable);
+}
+
+test "a combo of 4 spawns a 3-wide garbage row anchored at the match" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+
+    for (0..3) |col| try testing.expect(s.cellAt(0, @intCast(col)).is_garbage);
+    try testing.expectEqual(s.CellState.empty, s.cellAt(0, 3).state);
+}
+
+test "a combo of 5 spawns a 4-wide garbage row" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 4).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+
+    for (0..4) |col| try testing.expect(s.cellAt(0, @intCast(col)).is_garbage);
+    try testing.expectEqual(s.CellState.empty, s.cellAt(0, 4).state);
+}
+
+test "a combo of 6 or more spawns a full garbage row" {
+    s.resetForTest();
+    for (0..6) |col| s.cellAt(5, @intCast(col)).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+
+    for (0..c.COLS) |col| try testing.expect(s.cellAt(0, @intCast(col)).is_garbage);
+}
+
+test "the first ordinary 3-match never spawns garbage" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+
+    for (0..c.COLS) |col| try testing.expectEqual(s.CellState.empty, s.cellAt(0, @intCast(col)).state);
+}
+
+test "a chain spawns full garbage rows scaled by the multiplier" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(no_settled); // chain 0 -> 1, ordinary, no garbage
+
+    s.cellAt(8, 3).* = .{ .color = 2, .state = .normal, .chainable = true };
+    s.cellAt(8, 4).* = .{ .color = 2, .state = .normal };
+    s.cellAt(8, 5).* = .{ .color = 2, .state = .normal };
+    _ = sim.checkMatches(no_settled); // chain 1 -> 2 (x2): 1 full row
+    try testing.expectEqual(@as(u8, 2), s.chain);
+    for (0..c.COLS) |col| try testing.expect(s.cellAt(0, @intCast(col)).is_garbage);
+
+    // Clear what the x2 event just spawned so the x3 assertion below is
+    // unambiguous about what *this* event produces.
+    for (0..c.COLS) |col| s.cellAt(0, @intCast(col)).* = .{};
+
+    s.cellAt(9, 0).* = .{ .color = 3, .state = .normal, .chainable = true };
+    s.cellAt(9, 1).* = .{ .color = 3, .state = .normal };
+    s.cellAt(9, 2).* = .{ .color = 3, .state = .normal };
+    _ = sim.checkMatches(no_settled); // chain 2 -> 3 (x3): 2 full rows
+    try testing.expectEqual(@as(u8, 3), s.chain);
+    for (0..2) |row| {
+        for (0..c.COLS) |col| try testing.expect(s.cellAt(@intCast(row), @intCast(col)).is_garbage);
+    }
+}
+
+test "a match that is both a chain and a combo spawns chain-shaped garbage, not combo-shaped" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+
+    // A 4-block chainable match: both is_chain (x2) and is_combo (4 blocks)
+    // are true. Chain-shaped (1 full row) should win, not combo-shaped
+    // (a 3-wide row).
+    s.cellAt(8, 2).* = .{ .color = 2, .state = .normal, .chainable = true };
+    s.cellAt(8, 3).* = .{ .color = 2, .state = .normal };
+    s.cellAt(8, 4).* = .{ .color = 2, .state = .normal };
+    s.cellAt(8, 5).* = .{ .color = 2, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+    try testing.expectEqual(@as(u8, 2), s.chain);
+
+    for (0..c.COLS) |col| try testing.expect(s.cellAt(0, @intCast(col)).is_garbage);
+}
+
+test "garbage spawn skips cells that are already occupied, rather than overwriting them" {
+    s.resetForTest();
+    s.cellAt(0, 1).* = .{ .color = 2, .state = .normal }; // pre-existing, must survive
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(no_settled); // combo of 4 -> width-3 garbage at cols 0-2
+
+    try testing.expectEqual(@as(u8, 2), s.cellAt(0, 1).color);
+    try testing.expect(!s.cellAt(0, 1).is_garbage);
+    try testing.expect(s.cellAt(0, 0).is_garbage);
+    try testing.expect(s.cellAt(0, 2).is_garbage);
+}

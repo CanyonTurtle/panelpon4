@@ -34,6 +34,20 @@ pub const Cell = struct {
     // busy. Reverts to false the moment a block settles back to .normal
     // without being part of a match -- see sim.checkMatches.
     chainable: bool = false,
+    // Garbage: an inert, colorless block dropped by the player's own big
+    // combo/chain (see sim.checkMatches' spawnGarbage). It's `.normal` at
+    // rest -- and falls/lands exactly like any other block, via the same
+    // gravity code, since is_garbage rides along through a plain struct
+    // copy same as every other field -- but is never swappable and never
+    // seeds or joins a color match on its own. It only ever leaves this
+    // state by *popping*: a match adjacent to it (or to another popping
+    // garbage cell -- propagation chains transitively) triggers it into
+    // .popping too, sharing that group's pop_group_end. Where a real match
+    // clears to empty when pop_group_end hits 0, a garbage cell instead
+    // reveals a fresh, chainable, randomly-colored .normal block in place
+    // (is_garbage reset to false) -- see the .popping branch in
+    // sim.simulate.
+    is_garbage: bool = false,
 };
 
 pub var grid: [c.ROWS][c.COLS]Cell = undefined;

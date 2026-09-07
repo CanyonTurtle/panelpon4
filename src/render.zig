@@ -7,6 +7,7 @@ const c = @import("constants.zig");
 const s = @import("state.zig");
 const w4 = @import("wasm4.zig");
 const sym = @import("symbols.zig");
+const badge = @import("render_badge.zig");
 
 // nibble values for DRAW_COLORS color1, one per palette slot (index+1)
 const DC_BG: u16 = 1;
@@ -33,56 +34,6 @@ fn ditherHues(color: u8) ?[2]u8 {
     return DITHER_HUES[color - 3];
 }
 
-// Shared "warning/highlight" dither: red + yellow, the brightest pair
-// available, reading as orange. Used by the cursor outline, the combo-chain
-// flash, and the flying combo popup.
-const WARM_DITHER_HUES = [2]u8{ 0, 2 };
-
-// A checkerboard bitmap big enough to cover the whole board plus a 1px
-// margin on every edge, so any highlight rect up to the full board size can
-// be cut out of it via a single blitSub call instead of plotting a dither
-// pixel by pixel (see drawColorRect/plotDithered above, which still do that
-// for the normal per-tile block fills -- this is a separate, reusable
-// primitive for overlay effects like the combo flash/popup below, and for
-// any future dithered animation that wants the same trick). The 1px margin
-// gives drawDitheredRectBlit's src_x/src_y phase-alignment offset (0 or 1)
-// somewhere to read from without ever running past the edge of this bitmap,
-// for any rect up to the full board's width/height.
-const CHECKER_W: usize = @as(usize, c.COLS) * @as(usize, @intCast(c.TILE)) + 2;
-const CHECKER_H: usize = @as(usize, c.VISIBLE_ROWS) * @as(usize, @intCast(c.TILE)) + 2;
-const CHECKER_BYTES: usize = (CHECKER_W * CHECKER_H + 7) / 8;
-
-const checker_board: [CHECKER_BYTES]u8 = blk: {
-    @setEvalBranchQuota(200_000);
-    var buf: [CHECKER_BYTES]u8 = [_]u8{0} ** CHECKER_BYTES;
-    var bit_index: usize = 0;
-    while (bit_index < CHECKER_W * CHECKER_H) : (bit_index += 1) {
-        const x = bit_index % CHECKER_W;
-        const y = bit_index / CHECKER_W;
-        if ((x + y) % 2 == 0) {
-            const byte_i = bit_index / 8;
-            const shift: u3 = @intCast(7 - (bit_index % 8));
-            buf[byte_i] |= @as(u8, 1) << shift;
-        }
-    }
-    break :blk buf;
-};
-
-// Cuts a w x h dithered rect of two hues out of the checkerboard bitmap via
-// one hardware blit (WASM4's 1BPP blit: bit 0 -> DRAW_COLORS color1, bit 1 ->
-// color2), instead of one Rect() call per pixel. The src_x/src_y offset (0
-// or 1, matching x/y's own parity) keeps the checkerboard's phase anchored
-// to absolute screen coordinates -- the same `(x+y) % 2` rule
-// plotDithered/drawColorRect use -- so adjacent or moving dithered rects
-// stay visually consistent instead of each restarting the pattern at its own
-// top-left corner.
-fn drawDitheredRectBlit(x: i32, y: i32, w: i32, h: i32, hues: [2]u8) void {
-    if (w <= 0 or h <= 0) return;
-    w4.DRAW_COLORS.* = HUE_DRAWCOLOR[hues[0]] | (HUE_DRAWCOLOR[hues[1]] << 4);
-    const src_x: u32 = @intCast(@mod(x, 2));
-    const src_y: u32 = @intCast(@mod(y, 2));
-    w4.BlitSub(&checker_board, x, y, @intCast(w), @intCast(h), src_x, src_y, @intCast(CHECKER_W), w4.BLIT_1BPP);
-}
 
 pub fn setupPalette() void {
     w4.PALETTE[0] = 0x1a1c2c; // background
@@ -186,8 +137,62 @@ fn drawNormalCell(x: i32, y: i32, color: u8) void {
     drawSymbolFor(color, x + sym_off, y + sym_off);
 }
 
-fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
+// Garbage (see Cell.is_garbage) is colorless and inert, so it renders as a
+// muted background+hue checkerboard -- distinct from all 5 real block colors
+// (which are either a solid hue or a hue+hue dither) -- with no symbol, so it
+// reads at a glance as "not a real, matchable color".
+const GARBAGE_HUE: u8 = 1; // teal; arbitrary, just needs to look muted/inert next to DC_BG
+
+fn drawGarbageRect(x: i32, y: i32, w: i32, h: i32) void {
+    if (w <= 0 or h <= 0) return;
+    var dy: i32 = 0;
+    while (dy < h) : (dy += 1) {
+        var dx: i32 = 0;
+        while (dx < w) : (dx += 1) {
+            w4.DRAW_COLORS.* = if (@mod(dx + dy, 2) == 0) DC_BG else HUE_DRAWCOLOR[GARBAGE_HUE];
+            w4.Rect(x + dx, y + dy, 1, 1);
+        }
+    }
+}
+
+fn drawGarbageBlock(x: i32, y: i32, w: i32, h: i32) void {
+    drawGarbageRect(x, y, w, h);
+    if (w <= 2 * BEVEL_RADIUS or h <= 2 * BEVEL_RADIUS) return;
+    w4.DRAW_COLORS.* = DC_BG;
+    var dy: i32 = 0;
+    while (dy < BEVEL_RADIUS) : (dy += 1) {
+        var dx: i32 = 0;
+        while (dx < BEVEL_RADIUS) : (dx += 1) {
+            if (dx + dy < BEVEL_RADIUS) {
+                w4.Rect(x + dx, y + dy, 1, 1);
+                w4.Rect(x + w - 1 - dx, y + dy, 1, 1);
+                w4.Rect(x + dx, y + h - 1 - dy, 1, 1);
+                w4.Rect(x + w - 1 - dx, y + h - 1 - dy, 1, 1);
+            }
+        }
+    }
+}
+
+fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool) void {
     const elapsed = c.POP_FRAMES - timer;
+    if (is_garbage) {
+        // Garbage doesn't shrink away -- it isn't disappearing, it's
+        // revealing a fresh block once the whole connected pop event
+        // finishes (see sim.simulate) -- so it just pulses/cracks in place
+        // for as long as it's popping, at full size right up until the
+        // instant it resolves into a real block.
+        if (elapsed < 0) {
+            drawGarbageBlock(x, y, BLOCK_SIZE, BLOCK_SIZE);
+            return;
+        }
+        const puls: i32 = @intCast(@mod(elapsed, 8));
+        const delta: i32 = if (puls < 4) puls else 8 - puls;
+        const size = BLOCK_SIZE - delta;
+        if (size <= 0) return;
+        const off = @divTrunc(BLOCK_SIZE - size, 2);
+        drawGarbageBlock(x + off, y + off, size, size);
+        return;
+    }
     if (elapsed < 0) {
         // Still waiting its turn in the pop cascade (see POP_STAGGER_FRAMES)
         // -- render exactly like a settled block until then.
@@ -209,10 +214,14 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
     drawHueSquareCentered(x, y, color, size);
 }
 
-fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16) void {
+fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool) void {
     const elapsed = c.LAND_FRAMES - timer;
     const squash: i32 = if (elapsed < 3) (3 - @as(i32, elapsed)) * 2 else 0;
     const height = BLOCK_SIZE - squash;
+    if (is_garbage) {
+        drawGarbageBlock(x, y + squash, BLOCK_SIZE, height);
+        return;
+    }
     drawBevelledBlock(x, y + squash, BLOCK_SIZE, height, color);
     if (squash == 0) {
         const sym_off = @divTrunc(BLOCK_SIZE - SYMBOL_SIZE, 2);
@@ -270,11 +279,14 @@ fn drawBoard() void {
                     // animation (falling/landing/popping/swapping) keep
                     // their own motion undisturbed.
                     const y = if (col_stressed[col]) base_y + bounce else base_y;
-                    drawNormalCell(x, y, cell.color);
+                    if (cell.is_garbage) drawGarbageBlock(x, y, BLOCK_SIZE, BLOCK_SIZE) else drawNormalCell(x, y, cell.color);
                 },
-                .falling => drawNormalCell(x, base_y - cell.fall_off, cell.color),
-                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer),
-                .landing => drawLandingCell(x, base_y, cell.color, cell.timer),
+                .falling => {
+                    const y = base_y - cell.fall_off;
+                    if (cell.is_garbage) drawGarbageBlock(x, y, BLOCK_SIZE, BLOCK_SIZE) else drawNormalCell(x, y, cell.color);
+                },
+                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.is_garbage),
+                .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},
             }
@@ -334,7 +346,7 @@ const CURSOR_PULSE_PERIOD: i32 = 30;
 const CURSOR_PULSE_AMOUNT: i32 = 2;
 
 const CURSOR_PUSH: i32 = 1;
-const CURSOR_DITHER_HUES = WARM_DITHER_HUES;
+const CURSOR_DITHER_HUES = badge.WARM_DITHER_HUES;
 
 fn drawCursor() void {
     if (s.game_over) return;
@@ -389,80 +401,6 @@ fn drawPanel() void {
     }
 }
 
-// Roughly where the score digits sit (see drawPanel) -- popups fly here.
-const MATCH_POPUP_TARGET_X: i32 = c.PANEL_X + 14;
-const MATCH_POPUP_TARGET_Y: i32 = 10;
-
-// Sized snugly around the label (WASM4's font is a fixed 8x8 per glyph) with
-// a couple pixels of padding -- a small, subtle badge rather than something
-// covering the whole match. Extra padding on top keeps the glyph clear of
-// the outline (see drawBadgeOutline) instead of touching it.
-const MATCH_POPUP_CHAR_W: i32 = 8;
-const MATCH_POPUP_PAD_X: i32 = 2;
-const MATCH_POPUP_PAD_TOP: i32 = 2;
-const MATCH_POPUP_PAD_BOTTOM: i32 = 1;
-
-// A 1px background-colored outline around the badge, with the 4 corner
-// pixels left unpainted (showing the dithered fill underneath) -- the same
-// chamfer idea as drawBevelledBlock's corner punch, giving the badge a
-// subtly rounded, beveled edge instead of a harsh flat rectangle.
-fn drawBadgeOutline(x: i32, y: i32, w: i32, h: i32) void {
-    if (w <= 2 or h <= 2) return;
-    w4.DRAW_COLORS.* = DC_BG;
-    w4.Rect(x + 1, y, @intCast(w - 2), 1); // top
-    w4.Rect(x + 1, y + h - 1, @intCast(w - 2), 1); // bottom
-    w4.Rect(x, y + 1, 1, @intCast(h - 2)); // left
-    w4.Rect(x + w - 1, y + 1, 1, @intCast(h - 2)); // right
-}
-
-fn drawMatchPopups() void {
-    for (s.match_popups) |p| {
-        if (!p.active) continue;
-
-        var cur_x = p.x;
-        var cur_y = p.y;
-        if (p.elapsed < s.MATCH_POPUP_RISE) {
-            // Quickly eases up just a couple pixels -- a small, local hop
-            // meant to catch the eye right at the match, not travel anywhere
-            // (ease-out: fast start, settling in).
-            const t: i32 = p.elapsed;
-            const total: i32 = s.MATCH_POPUP_RISE;
-            const remain = total - t;
-            const num = total * total - remain * remain;
-            const den = total * total;
-            cur_y = p.y + @divTrunc((p.edge_y - p.y) * num, den);
-        } else if (p.elapsed < p.pop_end) {
-            // Waits right there until the match's own pop animation actually
-            // finishes -- see p.pop_end.
-            cur_y = p.edge_y;
-        } else {
-            // Ease-in toward the score (t^2, not a constant-speed drift) --
-            // starts slow and accelerates now that the match has cleared,
-            // reading as a "magnetic pull" rather than a simple slide.
-            const fly_elapsed: i32 = p.elapsed - p.pop_end;
-            const fly_total: i32 = s.MATCH_POPUP_FLY;
-            const num = fly_elapsed * fly_elapsed;
-            const den = fly_total * fly_total;
-            cur_x = p.x + @divTrunc((MATCH_POPUP_TARGET_X - p.x) * num, den);
-            cur_y = p.edge_y + @divTrunc((MATCH_POPUP_TARGET_Y - p.edge_y) * num, den);
-        }
-
-        const label = p.label[0..p.label_len];
-        const badge_w = @as(i32, @intCast(label.len)) * MATCH_POPUP_CHAR_W + 2 * MATCH_POPUP_PAD_X;
-        const badge_h = MATCH_POPUP_CHAR_W + MATCH_POPUP_PAD_TOP + MATCH_POPUP_PAD_BOTTOM;
-        const badge_x = cur_x - @divTrunc(badge_w, 2);
-        const badge_y = cur_y - @divTrunc(badge_h, 2);
-
-        drawDitheredRectBlit(badge_x, badge_y, badge_w, badge_h, WARM_DITHER_HUES);
-        drawBadgeOutline(badge_x, badge_y, badge_w, badge_h);
-        // Black text directly on the bright orange block reads clearly on
-        // its own -- the same technique drawSymbolFor uses for symbols on a
-        // block color -- so no separate outline pass is needed here.
-        w4.DRAW_COLORS.* = DC_BG;
-        w4.Text(label, badge_x + MATCH_POPUP_PAD_X, badge_y + MATCH_POPUP_PAD_TOP);
-    }
-}
-
 pub fn drawTitle() void {
     w4.DRAW_COLORS.* = 0x0003;
     w4.Text("PANELPON4", 40, 60);
@@ -485,5 +423,5 @@ pub fn render() void {
     drawFrame();
     drawCursor();
     drawPanel();
-    drawMatchPopups();
+    badge.drawMatchPopups();
 }
