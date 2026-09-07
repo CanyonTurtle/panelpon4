@@ -78,7 +78,9 @@ the side panel. Both run the exact same rules and physics.
   its pick and play a random legal swap instead, a shallower search, and a slower reaction time), not a
   different kind of AI. The engine can also choose to raise its own floor by a row instead of swapping (see
   the Z button below) when it's running low on real blocks to work with -- weighed the same way as any
-  swap, so it only does this when it's actually short on material, not just because nothing else looks great.
+  swap, so it only does this when it's actually short on material, not just because nothing else looks great
+  -- and never when its own stack (or, after the raise, what its own stack would become) is already
+  dangerously close to the top, however short on material it is.
 - **Z**: manually raise your own floor by one row right away (finishes in a third of a second instead of
   waiting for the automatic pace) -- useful for deliberately forcing a rise when you want fresh blocks, or
   to bail out of a bad board shape. On a cooldown (two thirds of a second) so it can't be spammed -- hold it
@@ -123,9 +125,12 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   levels, rewarding a setup move that enables a strong reply over a shallow immediate pop. Also weighs
   raising the stack (see `raiseValue`) against the best available swap: worth more the fewer real blocks
   are left on the board, worth less than any real match regardless, so it only wins when the board is
-  genuinely short on material and has nothing better to do. Deliberately its own small simulator rather
-  than reusing `sim.zig` directly -- see the module's own doc comment for why -- tests in the companion
-  `src/cpu_engine_test.zig`.
+  genuinely short on material and has nothing better to do -- and it's judged against the height a raise
+  would actually leave the tallest column at, not the current one, so a materially-poor but dangerously
+  tall, skinny stack doesn't get raised straight into topping out (the same steep height-danger penalty
+  also discourages any *swap* that would leave a column that close to the top, not just raising). Deliberately
+  its own small simulator rather than reusing `sim.zig` directly -- see the module's own doc comment for why
+  -- tests in the companion `src/cpu_engine_test.zig`.
 - `src/audio.zig` — sound effects.
 - `src/input.zig` — gamepad (cursor movement with DAS, swap triggering, itself one-deep buffered -- a press
   that lands mid-swap is remembered and applied the instant it's possible) and touch (swipe-only: aims

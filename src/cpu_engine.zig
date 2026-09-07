@@ -247,6 +247,48 @@ const H_MASK: u128 = blk: {
 // always maps a cell to the one directly above/below it, never sideways),
 // and penalizes tall stacks (each column's height alone, not relative to its
 // neighbors -- simple and enough to discourage building dangerously high).
+// A column's height in rows -- 0 if it's empty, up to ROWS if it's occupied
+// all the way to the very top. Shared by structuralScore's own mild, linear
+// per-column penalty (below) and heightDangerPenalty's much sharper one,
+// which only kicks in once the *tallest* column gets genuinely close to
+// topping out (see raiseValue).
+fn columnHeight(grid: *const Grid, col: u8) i32 {
+    for (0..ROWS) |row| {
+        if (grid.cell[row][col] != EMPTY) return @as(i32, ROWS) - @as(i32, @intCast(row));
+    }
+    return 0;
+}
+
+fn maxColumnHeight(grid: *const Grid) i32 {
+    var max_h: i32 = 0;
+    for (0..COLS) |col| max_h = @max(max_h, columnHeight(grid, @intCast(col)));
+    return max_h;
+}
+
+// Once the tallest column gets within DANGER_MARGIN rows of the top, every
+// row closer than that counts steeply against whatever pushed it there --
+// on top of (not instead of) structuralScore's own mild per-column height
+// penalty above, which alone was too weak to ever outweigh a low-material
+// board's incentive to raise (see raiseValue's own doc comment for why this
+// matters: a board can be real-cell-poor and still have a dangerously tall,
+// skinny pillar of blocks, and raising always pushes every column up by one
+// more row, so the two need to be weighed against each other, not just
+// material shortage against nothing).
+const DANGER_MARGIN: i32 = 3; // rows of headroom below which danger starts counting
+// Deliberately much steeper than every other weight in this file: topping
+// out ends the game outright, a cost no ordinary structural or material
+// consideration comes close to, so once a column is genuinely this close to
+// the top, nothing else should be able to outweigh backing off from it --
+// see raiseValue's own doc comment for the scenario (a skinny, materially-
+// poor pillar) that a gentler penalty failed to actually stop.
+const DANGER_WEIGHT: i32 = 200; // per row closer than that
+
+fn heightDangerPenalty(height: i32) i32 {
+    const danger = height - (ROWS - DANGER_MARGIN);
+    if (danger <= 0) return 0;
+    return danger * DANGER_WEIGHT;
+}
+
 fn structuralScore(grid: *const Grid) i32 {
     var masks: [c.NUM_COLORS]u128 = [_]u128{0} ** c.NUM_COLORS;
     for (0..ROWS) |row| {
@@ -260,16 +302,13 @@ fn structuralScore(grid: *const Grid) i32 {
         score += @as(i32, @popCount(m & (m >> 1) & H_MASK)) * ADJACENCY_WEIGHT;
         score += @as(i32, @popCount(m & (m >> COLS))) * ADJACENCY_WEIGHT;
     }
+    var tallest: i32 = 0;
     for (0..COLS) |col| {
-        var height: i32 = 0;
-        for (0..ROWS) |row| {
-            if (grid.cell[row][col] != EMPTY) {
-                height = @as(i32, ROWS) - @as(i32, @intCast(row));
-                break;
-            }
-        }
+        const height = columnHeight(grid, @intCast(col));
         score -= height * HEIGHT_WEIGHT;
+        tallest = @max(tallest, height);
     }
+    score -= heightDangerPenalty(tallest);
     return score;
 }
 
@@ -363,9 +402,20 @@ const LOW_MATERIAL_WEIGHT: i32 = 4; // per real cell short of the threshold
 // against a swap's own (unpenalized) score means raising only ever wins
 // because material is actually low, never just because every available swap
 // happens to be mediocre with material to spare -- see bestAction.
+//
+// Also weighs the *danger* of raising: a raise always pushes every column up
+// by exactly one row (see board.doRise), so it's judged against the height
+// that would result, not the current one -- a board can be desperately short
+// on real material (rewarding a raise by the reasoning above) while also
+// having a tall, skinny pillar of blocks in one column (from garbage, an
+// awkward stack, or just bad luck), and pushing that pillar even closer to
+// the top is exactly how naively chasing material gets the CPU killed.
+// heightDangerPenalty grows steeply enough once that pillar is genuinely
+// close to the top to overrule any amount of material shortage.
 pub fn raiseValue(grid: Grid) i32 {
     const shortfall = LOW_MATERIAL_THRESHOLD - realCellCount(&grid);
-    return shortfall * LOW_MATERIAL_WEIGHT;
+    const value = shortfall * LOW_MATERIAL_WEIGHT;
+    return value - heightDangerPenalty(maxColumnHeight(&grid) + 1);
 }
 
 pub const Action = union(enum) { swap: Move, raise };

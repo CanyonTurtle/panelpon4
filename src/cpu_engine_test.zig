@@ -138,3 +138,32 @@ test "bestAction still takes an obvious winning swap even with scarce material" 
     const action = engine.bestAction(grid, 1);
     try testing.expectEqual(engine.Action{ .swap = .{ .row = 5, .col = 2 } }, action);
 }
+
+test "bestAction refuses to raise a skinny pillar that's already dangerously tall, even with scarce material" {
+    var b: s.Board = .{};
+    // A single column stacked 10 rows high (alternating colors, so nothing
+    // matches on its own) and nothing else on the board at all: real
+    // material is far below the low-material threshold (which alone would
+    // strongly favor raising -- see the previous tests), but the column is
+    // already within a few rows of the top, and raising always pushes every
+    // column up by one more row (see board.doRise) -- exactly the situation
+    // that used to make the engine kill itself chasing material.
+    var lr: u8 = 2;
+    while (lr < 12) : (lr += 1) {
+        b.cellAt(lr, 0).* = .{ .color = @intCast(lr % 2), .state = .normal };
+    }
+
+    const grid = engine.Grid.fromBoard(&b);
+    const action = engine.bestAction(grid, 1);
+    try testing.expect(action != .raise);
+}
+
+test "raiseValue penalizes a dangerously tall column enough to outweigh scarce material" {
+    var b: s.Board = .{};
+    var lr: u8 = 2;
+    while (lr < 12) : (lr += 1) {
+        b.cellAt(lr, 0).* = .{ .color = @intCast(lr % 2), .state = .normal };
+    }
+    const grid = engine.Grid.fromBoard(&b);
+    try testing.expect(engine.raiseValue(grid) < 0);
+}
