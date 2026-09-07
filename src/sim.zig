@@ -347,9 +347,13 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                 else
                     std.fmt.bufPrint(&label_buf, "{d}", .{member_count}) catch "?";
                 const match_w = (@as(i32, max_col) - @as(i32, min_col) + 1) * c.TILE;
-                const match_h = (@as(i32, max_row) - @as(i32, min_row) + 1) * c.TILE;
                 const cx = c.BOARD_X + @as(i32, min_col) * c.TILE + @divTrunc(match_w, 2);
-                const cy = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(s.scroll_px)) + @divTrunc(match_h, 2);
+                // Spawn at the height of the match's topmost block (not the
+                // whole bounding box's center), so it reads as belonging to
+                // the match right where it's most visible -- see
+                // render.drawMatchPopups for the rise-then-fly animation
+                // that follows.
+                const cy = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(s.scroll_px)) + @divTrunc(c.TILE, 2);
                 s.spawnMatchPopup(label, cx, cy);
             }
             s.score += @as(u32, @intCast(member_count)) * 10 * multiplier;

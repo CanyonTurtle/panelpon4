@@ -76,9 +76,15 @@ pub var touch_das_counter: u8 = 0;
 // tickMatchPopups (called from sim.simulate), and drawn by
 // render.drawMatchPopups. Nothing here affects gameplay, so none of it needs
 // to be exact -- just cleared on reset like everything else.
-pub const MATCH_POPUP_HOLD: i16 = 12; // frames sitting in place before flying
-pub const MATCH_POPUP_FLY: i16 = 28; // frames spent flying to the score
-pub const MATCH_POPUP_LIFETIME: i16 = MATCH_POPUP_HOLD + MATCH_POPUP_FLY;
+//
+// Three phases: it holds at the height of the match's topmost block (`x`/`y`
+// below), then eases up to the top edge of the board, then eases (from
+// there) into the score display -- see render.drawMatchPopups for the actual
+// interpolation.
+pub const MATCH_POPUP_HOLD: i16 = 12; // frames sitting at spawn height before rising
+pub const MATCH_POPUP_RISE: i16 = 8; // frames easing up to the board's top edge
+pub const MATCH_POPUP_FLY: i16 = 28; // frames easing from the top edge into the score
+pub const MATCH_POPUP_LIFETIME: i16 = MATCH_POPUP_HOLD + MATCH_POPUP_RISE + MATCH_POPUP_FLY;
 const MAX_MATCH_POPUPS = 4;
 const MATCH_POPUP_LABEL_CAP = 16;
 
@@ -87,7 +93,7 @@ pub const MatchPopup = struct {
     label: [MATCH_POPUP_LABEL_CAP]u8 = undefined,
     label_len: u8 = 0,
     x: i32 = 0, // badge center, at spawn -- see sim.checkMatches for how it's picked
-    y: i32 = 0,
+    y: i32 = 0, // height of the match's topmost block, at spawn
     elapsed: i16 = 0,
 };
 

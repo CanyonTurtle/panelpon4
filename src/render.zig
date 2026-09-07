@@ -392,13 +392,18 @@ fn drawPanel() void {
 // Roughly where the score digits sit (see drawPanel) -- popups fly here.
 const MATCH_POPUP_TARGET_X: i32 = c.PANEL_X + 14;
 const MATCH_POPUP_TARGET_Y: i32 = 10;
+// The board's top edge -- badges rise here before the main flight to the
+// score (see drawMatchPopups).
+const MATCH_POPUP_EDGE_Y: i32 = c.BOARD_Y;
 
 // Sized snugly around the label (WASM4's font is a fixed 8x8 per glyph) with
 // a couple pixels of padding -- a small, subtle badge rather than something
-// covering the whole match.
+// covering the whole match. Extra padding on top keeps the glyph clear of
+// the outline (see drawBadgeOutline) instead of touching it.
 const MATCH_POPUP_CHAR_W: i32 = 8;
 const MATCH_POPUP_PAD_X: i32 = 2;
-const MATCH_POPUP_PAD_Y: i32 = 1;
+const MATCH_POPUP_PAD_TOP: i32 = 2;
+const MATCH_POPUP_PAD_BOTTOM: i32 = 1;
 
 // A 1px background-colored outline around the badge, with the 4 corner
 // pixels left unpainted (showing the dithered fill underneath) -- the same
@@ -419,21 +424,36 @@ fn drawMatchPopups() void {
 
         var cur_x = p.x;
         var cur_y = p.y;
-        if (p.elapsed >= s.MATCH_POPUP_HOLD) {
+        const rise_start = s.MATCH_POPUP_HOLD;
+        const fly_start = s.MATCH_POPUP_HOLD + s.MATCH_POPUP_RISE;
+        if (p.elapsed < rise_start) {
+            // Holds at the height of the match's topmost block.
+        } else if (p.elapsed < fly_start) {
+            // Quickly eases straight up to the board's top edge -- a short
+            // "lift off" before the main flight, proportional to how far
+            // above the top edge it already spawned (ease-out: fast start,
+            // settling in).
+            const t: i32 = p.elapsed - rise_start;
+            const total: i32 = s.MATCH_POPUP_RISE;
+            const remain = total - t;
+            const num = total * total - remain * remain;
+            const den = total * total;
+            cur_y = p.y + @divTrunc((MATCH_POPUP_EDGE_Y - p.y) * num, den);
+        } else {
             // Ease-in toward the score (t^2, not a constant-speed drift) --
-            // starts slow and accelerates, reading as a "magnetic pull"
-            // rather than a simple slide.
-            const fly_elapsed: i32 = p.elapsed - s.MATCH_POPUP_HOLD;
+            // starts slow and accelerates from the top edge, reading as a
+            // "magnetic pull" rather than a simple slide.
+            const fly_elapsed: i32 = p.elapsed - fly_start;
             const fly_total: i32 = s.MATCH_POPUP_FLY;
             const num = fly_elapsed * fly_elapsed;
             const den = fly_total * fly_total;
             cur_x = p.x + @divTrunc((MATCH_POPUP_TARGET_X - p.x) * num, den);
-            cur_y = p.y + @divTrunc((MATCH_POPUP_TARGET_Y - p.y) * num, den);
+            cur_y = MATCH_POPUP_EDGE_Y + @divTrunc((MATCH_POPUP_TARGET_Y - MATCH_POPUP_EDGE_Y) * num, den);
         }
 
         const label = p.label[0..p.label_len];
         const badge_w = @as(i32, @intCast(label.len)) * MATCH_POPUP_CHAR_W + 2 * MATCH_POPUP_PAD_X;
-        const badge_h = MATCH_POPUP_CHAR_W + 2 * MATCH_POPUP_PAD_Y;
+        const badge_h = MATCH_POPUP_CHAR_W + MATCH_POPUP_PAD_TOP + MATCH_POPUP_PAD_BOTTOM;
         const badge_x = cur_x - @divTrunc(badge_w, 2);
         const badge_y = cur_y - @divTrunc(badge_h, 2);
 
@@ -443,7 +463,7 @@ fn drawMatchPopups() void {
         // its own -- the same technique drawSymbolFor uses for symbols on a
         // block color -- so no separate outline pass is needed here.
         w4.DRAW_COLORS.* = DC_BG;
-        w4.Text(label, badge_x + MATCH_POPUP_PAD_X, badge_y + MATCH_POPUP_PAD_Y);
+        w4.Text(label, badge_x + MATCH_POPUP_PAD_X, badge_y + MATCH_POPUP_PAD_TOP);
     }
 }
 

@@ -11,7 +11,7 @@ pub const BOARD_X: i32 = 4;
 pub const BOARD_Y: i32 = 0;
 pub const PANEL_X: i32 = 108;
 
-pub const POP_FRAMES: i16 = 26;
+pub const POP_FRAMES: i16 = 34; // per-block pop duration; longer gives big combos/chains more time to read
 pub const POP_FLASH_FRAMES: i16 = 10;
 pub const POP_STAGGER_FRAMES: i16 = 4; // delay between each matched block's pop, so they go one at a time
 pub const LAND_FRAMES: i16 = 8;
