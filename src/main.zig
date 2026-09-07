@@ -24,6 +24,8 @@ comptime {
         @export(&debug.getCursorPos, .{ .name = "debugGetCursorPos" });
         @export(&debug.getScrollPx, .{ .name = "debugGetScrollPx" });
         @export(&debug.getDifficulty, .{ .name = "debugGetDifficulty" });
+        @export(&debug.setDifficulty, .{ .name = "debugSetDifficulty" });
+        @export(&debug.getManualRaiseElapsed, .{ .name = "debugGetManualRaiseElapsed" });
     }
 }
 

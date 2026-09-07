@@ -1,45 +1,44 @@
 // The CPU opponent's move picker, chosen per the difficulty set on the title
-// screen (see state.difficulty). Levels 1-4 are a deliberately simple
-// random-move flipper (the original v1 design -- it just pokes at a random
-// swap every so often, like a distracted player) at increasing speed;
-// levels 5-10 hand off to cpu_engine's actual move search instead, at
-// increasing strength (see configFor for exactly how each level differs).
-// Every level still waits for the board to settle first, like a player
-// naturally would, and picks at most one move per timer interval.
+// screen (see state.difficulty). Every level from 1-10 uses cpu_engine's
+// actual move search (see configFor) -- lower levels are simply worse at it
+// (a much higher chance to ignore the engine's pick and play a random legal
+// swap instead, a shallower search, and a slower reaction time), not a
+// different kind of AI. It still waits for the board to settle first, like a
+// player naturally would, and picks at most one action per timer interval.
 
 const c = @import("constants.zig");
 const s = @import("state.zig");
 const sim = @import("sim.zig");
+const board = @import("board.zig");
 const engine = @import("cpu_engine.zig");
 
 var move_timer: u32 = 0;
 
 const DifficultyConfig = struct {
     move_interval: u32, // frames between moves -- lower is faster/more reactive
-    engine_depth: u8, // 0 = pure random (levels 1-4); otherwise cpu_engine's search depth
+    depth: u8, // cpu_engine's search depth (see cpu_engine.evaluateMove)
     mistake_pct: u8, // 0-100: chance to ignore the engine's pick and play randomly instead
 };
 
-// Levels 1-4: same random flipper, just faster each step. Levels 5-10: the
-// engine, getting both faster and more reliable (less random.y move_interval,
-// deeper search, lower mistake_pct) as level increases, so the difficulty
-// curve is smooth across the random/engine boundary rather than a sudden
-// jump in kind.
+// All ten levels use the same engine (see cpu_engine.bestAction); they only
+// differ in how often they listen to it. mistake_pct falls off steeply from
+// level 1 to 10 so the low end still reads as genuinely weak (mostly
+// flailing, occasionally stumbling into something) rather than merely slow.
 fn configFor(level: u8) DifficultyConfig {
     return switch (level) {
-        1 => .{ .move_interval = 45, .engine_depth = 0, .mistake_pct = 0 },
-        2 => .{ .move_interval = 32, .engine_depth = 0, .mistake_pct = 0 },
-        3 => .{ .move_interval = 20, .engine_depth = 0, .mistake_pct = 0 },
-        4 => .{ .move_interval = 12, .engine_depth = 0, .mistake_pct = 0 },
-        5 => .{ .move_interval = 26, .engine_depth = 1, .mistake_pct = 45 },
-        6 => .{ .move_interval = 22, .engine_depth = 1, .mistake_pct = 30 },
-        7 => .{ .move_interval = 18, .engine_depth = 1, .mistake_pct = 15 },
-        8 => .{ .move_interval = 15, .engine_depth = 2, .mistake_pct = 8 },
-        9 => .{ .move_interval = 11, .engine_depth = 2, .mistake_pct = 3 },
-        10 => .{ .move_interval = 8, .engine_depth = 2, .mistake_pct = 0 },
+        1 => .{ .move_interval = 40, .depth = 1, .mistake_pct = 70 },
+        2 => .{ .move_interval = 32, .depth = 1, .mistake_pct = 55 },
+        3 => .{ .move_interval = 26, .depth = 1, .mistake_pct = 40 },
+        4 => .{ .move_interval = 20, .depth = 1, .mistake_pct = 28 },
+        5 => .{ .move_interval = 17, .depth = 1, .mistake_pct = 18 },
+        6 => .{ .move_interval = 14, .depth = 1, .mistake_pct = 10 },
+        7 => .{ .move_interval = 12, .depth = 2, .mistake_pct = 6 },
+        8 => .{ .move_interval = 11, .depth = 2, .mistake_pct = 3 },
+        9 => .{ .move_interval = 9, .depth = 2, .mistake_pct = 1 },
+        10 => .{ .move_interval = 8, .depth = 2, .mistake_pct = 0 },
         // state.difficulty is always clamped to 1-10 (see main.zig's title
         // screen) -- this is just a defensive fallback, not a real level.
-        else => .{ .move_interval = 20, .engine_depth = 0, .mistake_pct = 0 },
+        else => .{ .move_interval = 20, .depth = 1, .mistake_pct = 40 },
     };
 }
 
@@ -56,17 +55,19 @@ pub fn update(self: *s.Board) void {
     if (move_timer < cfg.move_interval) return;
     move_timer = 0;
 
-    if (cfg.engine_depth == 0 or self.randRange(100) < cfg.mistake_pct) {
+    if (self.randRange(100) < cfg.mistake_pct) {
         randomMove(self);
         return;
     }
+
     const grid = engine.Grid.fromBoard(self);
-    if (engine.bestMove(grid, cfg.engine_depth)) |mv| {
-        self.cursor_row = mv.row;
-        self.cursor_col = mv.col;
-        sim.trySwap(self);
-    } else {
-        randomMove(self);
+    switch (engine.bestAction(grid, cfg.depth)) {
+        .raise => board.tryManualRaise(self),
+        .swap => |mv| {
+            self.cursor_row = mv.row;
+            self.cursor_col = mv.col;
+            sim.trySwap(self);
+        },
     }
 }
 
@@ -74,7 +75,7 @@ const testing = @import("std").testing;
 
 test "cpu AI stays put for the first move_interval-1 idle frames" {
     move_timer = 0;
-    s.difficulty = 3; // move_interval 20, pure random -- see configFor
+    s.difficulty = 6; // move_interval 14 -- see configFor
     var b: s.Board = .{};
     const orig_row = b.cursor_row;
     const orig_col = b.cursor_col;
@@ -85,7 +86,7 @@ test "cpu AI stays put for the first move_interval-1 idle frames" {
 
 test "cpu AI waits while its board is busy" {
     move_timer = 0;
-    s.difficulty = 3;
+    s.difficulty = 6;
     var b: s.Board = .{};
     b.cellAt(0, 0).state = .falling;
     const orig_row = b.cursor_row;
@@ -97,7 +98,7 @@ test "cpu AI waits while its board is busy" {
 
 test "at an engine level, the cpu finds and plays an obvious winning swap" {
     move_timer = 0;
-    s.difficulty = 10; // engine_depth 2, mistake_pct 0 -- deterministic best play
+    s.difficulty = 10; // depth 2, mistake_pct 0 -- deterministic best play
     var b: s.Board = .{};
     // Row 5: 1,1,2,1 -- only swapping columns 2/3 completes a match. Nothing
     // else is on the board, so cpu_engine's own gravity pass (part of
@@ -115,4 +116,14 @@ test "at an engine level, the cpu finds and plays an obvious winning swap" {
     try testing.expectEqual(@as(u8, 5), b.cursor_row);
     try testing.expectEqual(@as(u8, 2), b.cursor_col);
     try testing.expectEqual(s.CellState.swapping, b.cellAt(5, 2).state);
+}
+
+test "at an engine level, the cpu raises instead of swapping on an empty board" {
+    move_timer = 0;
+    s.difficulty = 10;
+    var b: s.Board = .{};
+    // Nothing to swap and nothing to lose -- cpu_engine.bestAction always
+    // raises here (see its own "raises on a completely empty board" test).
+    for (0..configFor(s.difficulty).move_interval) |_| update(&b);
+    try testing.expectEqual(@as(u32, 1), b.manual_raise_elapsed);
 }

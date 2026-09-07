@@ -73,16 +73,17 @@ the side panel. Both run the exact same rules and physics.
   CPU that's playing efficiently is also accelerating its own rise. Whoever's board tops out first loses
   (both at once is a draw).
 - On the title screen, **left/right** sets the CPU's difficulty, 1-10 (fixed for the rest of the session --
-  there's no menu to revisit it mid-match or between replays). Levels 1-4 are a random flipper at
-  increasing speed. Levels 5-10 hand off to an actual move-search engine instead, at increasing strength --
-  see `src/cpu_engine.zig`.
+  there's no menu to revisit it mid-match or between replays). Every level runs the same move-search engine
+  (see `src/cpu_engine.zig`) -- lower levels are simply worse at listening to it (far more likely to ignore
+  its pick and play a random legal swap instead, a shallower search, and a slower reaction time), not a
+  different kind of AI. The engine can also choose to raise its own floor by a row instead of swapping (see
+  the Z button below) when it's running low on real blocks to work with -- weighed the same way as any
+  swap, so it only does this when it's actually short on material, not just because nothing else looks great.
 - **Z**: manually raise your own floor by one row right away (finishes in a third of a second instead of
   waiting for the automatic pace) -- useful for deliberately forcing a rise when you want fresh blocks, or
   to bail out of a bad board shape. On a cooldown (two thirds of a second) so it can't be spammed -- hold it
   down to keep raising row after row as soon as each cooldown clears, instead of having to tap repeatedly.
 - Press **X** on the title or game-over screen to (re)start.
-
-The CPU (v1) just makes random legal swaps every so often -- it isn't yet trying to find or set up matches.
 
 ## Notes on the block colors
 
@@ -111,17 +112,19 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   computed by connectivity fresh every frame) and its spawn placement -- tests in the companion
   `src/sim_garbage_test.zig`.
 - `src/cpu_ai.zig` — the CPU opponent's move picker, branching on `state.difficulty` (see `configFor`):
-  levels 1-4 are a random legal swap every so often, just faster each step; levels 5-10 hand off to
-  `cpu_engine.zig` instead, at increasing search depth/speed and decreasing chance to ignore it and play
-  randomly anyway.
-- `src/cpu_engine.zig` — the actual move-search engine behind the CPU's higher difficulty levels: snapshots
-  the board into a small `Grid`, tries every legal swap on a copy, resolves each one's full logical
-  cascade (gravity, matches, garbage propagation, repeated for chains) to score it, and adds a
-  bitboard-driven structural heuristic (same-color adjacency, column height) so moves that don't pop
-  anything yet are still ranked sensibly -- plus an optional discounted look at the best follow-up move
-  (a shallow best-first search) for the higher levels, rewarding a setup move that enables a strong reply
-  over a shallow immediate pop. Deliberately its own small simulator rather than reusing `sim.zig`
-  directly -- see the module's own doc comment for why -- tests in the companion
+  every level from 1-10 runs `cpu_engine.zig`'s actual search, differing only in how often they listen to
+  it (a steep chance to ignore its pick and play a random legal swap instead at the low end, falling to
+  zero by level 10), search depth, and reaction speed.
+- `src/cpu_engine.zig` — the actual move-search engine behind the CPU: snapshots the board into a small
+  `Grid`, tries every legal swap on a copy, resolves each one's full logical cascade (gravity, matches,
+  garbage propagation, repeated for chains) to score it, and adds a bitboard-driven structural heuristic
+  (same-color adjacency, column height) so moves that don't pop anything yet are still ranked sensibly --
+  plus an optional discounted look at the best follow-up move (a shallow best-first search) for the higher
+  levels, rewarding a setup move that enables a strong reply over a shallow immediate pop. Also weighs
+  raising the stack (see `raiseValue`) against the best available swap: worth more the fewer real blocks
+  are left on the board, worth less than any real match regardless, so it only wins when the board is
+  genuinely short on material and has nothing better to do. Deliberately its own small simulator rather
+  than reusing `sim.zig` directly -- see the module's own doc comment for why -- tests in the companion
   `src/cpu_engine_test.zig`.
 - `src/audio.zig` — sound effects.
 - `src/input.zig` — gamepad (cursor movement with DAS, swap triggering, itself one-deep buffered -- a press

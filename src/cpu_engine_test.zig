@@ -99,3 +99,42 @@ test "bestMove prefers a swap that sets off a chain over an equally-sized flat m
     try testing.expectEqual(@as(u8, 10), mv.row);
     try testing.expectEqual(@as(u8, 2), mv.col);
 }
+
+test "bestAction raises on a completely empty board" {
+    var b: s.Board = .{};
+    const grid = engine.Grid.fromBoard(&b);
+    try testing.expectEqual(engine.Action.raise, engine.bestAction(grid, 1));
+}
+
+test "bestAction raises when material is scarce and no swap accomplishes anything" {
+    var b: s.Board = .{};
+    // Five distinct colors, one cell each, nothing else on the board -- no
+    // swap here can ever complete a run (there's only one of each color),
+    // and there's nowhere near enough material to be worth playing one
+    // anyway (see cpu_engine's LOW_MATERIAL_THRESHOLD).
+    b.cellAt(11, 0).* = .{ .color = 0, .state = .normal };
+    b.cellAt(11, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(11, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(11, 3).* = .{ .color = 3, .state = .normal };
+    b.cellAt(11, 4).* = .{ .color = 4, .state = .normal };
+
+    const grid = engine.Grid.fromBoard(&b);
+    try testing.expectEqual(engine.Action.raise, engine.bestAction(grid, 1));
+}
+
+test "bestAction still takes an obvious winning swap even with scarce material" {
+    var b: s.Board = .{};
+    // Same near-empty setup used elsewhere in this file -- material is far
+    // below the low-material threshold, but a real match (worth several
+    // hundred points -- see simulateCascade/BASE_WEIGHT) always beats
+    // raising by a wide enough margin that scarce material never talks the
+    // engine out of taking a free win.
+    b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
+
+    const grid = engine.Grid.fromBoard(&b);
+    const action = engine.bestAction(grid, 1);
+    try testing.expectEqual(engine.Action{ .swap = .{ .row = 5, .col = 2 } }, action);
+}

@@ -75,3 +75,17 @@ pub fn getScrollPx(board: u32) callconv(.c) u32 {
 pub fn getDifficulty() callconv(.c) u32 {
     return s.difficulty;
 }
+
+// Sets state.difficulty directly, bypassing the title screen's left/right
+// adjustment -- lets a script compare CPU behavior across levels without
+// spending a different number of title-screen frames per level first (each
+// of which advances the player's own RNG stream -- see main.zig -- and so
+// would otherwise skew the player board's row generation differently per
+// level, confounding any side-by-side comparison).
+pub fn setDifficulty(level: u32) callconv(.c) void {
+    s.difficulty = @intCast(level);
+}
+
+pub fn getManualRaiseElapsed(board: u32) callconv(.c) u32 {
+    return boardFor(board).manual_raise_elapsed;
+}

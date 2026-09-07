@@ -305,25 +305,81 @@ fn bestMoveValue(grid: *const Grid, depth: u8) ?i32 {
     return best;
 }
 
-// The engine's entry point (see cpu_ai.update): the best-scoring legal swap
-// in the current grid, searching `depth` moves deep (1 = just this swap's
-// own result; 2 adds a discounted look at the best follow-up -- see
-// evaluateMove). Null only if there's genuinely no legal swap on the board
-// at all (e.g. it's entirely garbage or entirely empty).
-pub fn bestMove(grid: Grid, depth: u8) ?Move {
-    var best_move: ?Move = null;
-    var best_val: i32 = std.math.minInt(i32);
+pub const ScoredMove = struct { move: Move, value: i32 };
+
+// The best-scoring legal swap in the current grid, searching `depth` moves
+// deep (1 = just this swap's own result; 2 adds a discounted look at the
+// best follow-up -- see evaluateMove), together with its own score -- see
+// bestAction, which weighs that score against raiseValue below. Null only if
+// there's genuinely no legal swap on the board at all (e.g. it's entirely
+// garbage or entirely empty).
+pub fn bestSwapScored(grid: Grid, depth: u8) ?ScoredMove {
+    var best: ?ScoredMove = null;
     for (0..ROWS) |r| {
         for (0..COLS - 1) |cl| {
             const row: u8 = @intCast(r);
             const col: u8 = @intCast(cl);
             if (!legalSwap(&grid, row, col)) continue;
             const v = evaluateMove(grid, .{ .row = row, .col = col }, depth);
-            if (best_move == null or v > best_val) {
-                best_val = v;
-                best_move = .{ .row = row, .col = col };
-            }
+            if (best == null or v > best.?.value) best = .{ .move = .{ .row = row, .col = col }, .value = v };
         }
     }
-    return best_move;
+    return best;
+}
+
+// The engine's original entry point -- just the swap, discarding its score.
+// Kept for callers (and tests) that only care about which swap, not whether
+// it's actually worth playing over raising -- see bestAction for that.
+pub fn bestMove(grid: Grid, depth: u8) ?Move {
+    return if (bestSwapScored(grid, depth)) |r| r.move else null;
+}
+
+// How many real (non-garbage, non-empty) cells are on the board -- the
+// engine's notion of how much "ammunition" it has to work with. Garbage
+// doesn't count: it's not swappable or matchable on its own, so a board
+// that's mostly garbage is just as short on real material as one that's
+// mostly empty.
+fn realCellCount(grid: *const Grid) i32 {
+    var n: i32 = 0;
+    for (0..ROWS) |row| {
+        for (0..COLS) |col| {
+            if (grid.cell[row][col] >= 0) n += 1;
+        }
+    }
+    return n;
+}
+
+// Below this many real cells, the board doesn't have enough material left to
+// reliably set up its own matches -- five rows' worth (COLS * 5).
+const LOW_MATERIAL_THRESHOLD: i32 = @as(i32, COLS) * 5;
+const LOW_MATERIAL_WEIGHT: i32 = 4; // per real cell short of the threshold
+
+// The value of raising the stack right now instead of playing a swap.
+// Scales up as real material runs short (rewarding a raise precisely when
+// the board needs more to work with), and goes negative once material is
+// plentiful -- equivalently, a swap is worth relatively less while material
+// is scarce, since it's spending down cells the engine doesn't have much of
+// to begin with. Deliberately never a flat bonus: comparing this directly
+// against a swap's own (unpenalized) score means raising only ever wins
+// because material is actually low, never just because every available swap
+// happens to be mediocre with material to spare -- see bestAction.
+pub fn raiseValue(grid: Grid) i32 {
+    const shortfall = LOW_MATERIAL_THRESHOLD - realCellCount(&grid);
+    return shortfall * LOW_MATERIAL_WEIGHT;
+}
+
+pub const Action = union(enum) { swap: Move, raise };
+
+// The engine's entry point (see cpu_ai.update): either the best legal swap,
+// or a request to raise the stack instead, whichever scores higher right
+// now. A real match/chain (always worth several hundred points -- see
+// simulateCascade/BASE_WEIGHT) will always beat raising by a wide margin
+// regardless of material, so this never passes up an actual win; raising
+// only wins when there's no good swap AND material is genuinely short (see
+// raiseValue), or when there's no legal swap at all.
+pub fn bestAction(grid: Grid, depth: u8) Action {
+    const swap_result = bestSwapScored(grid, depth);
+    const swap_value = if (swap_result) |r| r.value else std.math.minInt(i32);
+    if (raiseValue(grid) > swap_value) return .raise;
+    return .{ .swap = swap_result.?.move };
 }
