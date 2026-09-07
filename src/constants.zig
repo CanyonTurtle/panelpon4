@@ -20,3 +20,10 @@ pub const FALL_SPEED: i16 = 4; // pixels per frame while falling
 
 pub const MOVE_DAS_FIRST: u8 = 12;
 pub const MOVE_DAS_REPEAT: u8 = 6;
+
+// Manual raise (the Z button, see board.tryManualRaise): finishes whatever
+// row is currently rising in 1/3 second instead of waiting for the normal
+// automatic pace, then locks out another manual raise for 2/3 second (WASM-4
+// runs at 60fps, so 20 and 40 frames respectively).
+pub const MANUAL_RAISE_FRAMES: u32 = 20;
+pub const MANUAL_RAISE_COOLDOWN: u32 = 40;

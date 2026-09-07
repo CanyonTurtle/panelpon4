@@ -66,6 +66,9 @@ CPU's at a simplified micro scale in the side panel. Both run the exact same rul
 - A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
 - Each board's floor rises forever, faster as that board's own score climbs. Whoever's board tops out
   first loses (both at once is a draw).
+- **Z**: manually raise your own floor by one row right away (finishes in a third of a second instead of
+  waiting for the automatic pace) -- useful for deliberately forcing a rise when you want fresh blocks, or
+  to bail out of a bad board shape. On a cooldown (two thirds of a second) so it can't be spammed.
 - Press **X** on the title or game-over screen to (re)start.
 
 The CPU (v1) just makes random legal swaps every so often -- it isn't yet trying to find or set up matches.
@@ -86,8 +89,8 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   match-popup pool) plus its small methods (ring-buffer indexing, RNG, board-busy query), and the two live
   instances of it, `player`/`cpu`. Every other module takes an explicit `*Board` rather than reaching into
   an implicit global, so the exact same logic drives both sides of a vs-CPU match.
-- `src/board.zig` — row generation, the rising floor, and (re)starting a game, each taking the `*Board` to
-  act on.
+- `src/board.zig` — row generation, the rising floor (automatic and the Z-button manual raise), and
+  (re)starting a game, each taking the `*Board` to act on.
 - `src/sim.zig` — the core simulation: swaps, pops, landings, and per-cell gravity, each taking `self`
   (and, for simulate, `opponent`) -- tests in the companion `src/sim_test.zig`.
 - `src/sim_matches.zig` — match detection, chain/combo scoring, and garbage spawning (re-exported from

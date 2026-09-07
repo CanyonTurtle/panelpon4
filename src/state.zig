@@ -120,6 +120,22 @@ pub const Board = struct {
     rise_frame_counter: u32 = 0,
     rng_state: u32 = 0x9e3779b9,
 
+    // Manual raise (the Z button -- see board.tryManualRaise/updateRise).
+    // `manual_raise_elapsed` counts 1..MANUAL_RAISE_FRAMES while a manual
+    // raise is in progress (0 = none active), finishing whatever fraction of
+    // the current row is left (`manual_raise_start_scroll` is scroll_px at
+    // the moment it was triggered) over that fixed duration regardless of
+    // how much of the row was already risen -- so it always takes exactly
+    // 1/3 second, never faster or slower depending on timing luck.
+    // `manual_raise_cooldown` is a separate, simpler countdown that starts
+    // the instant the button is pressed and blocks another manual raise
+    // until it reaches 0, ticking down every frame regardless of whether
+    // the board is busy (unlike the raise itself, which -- like the normal
+    // automatic rise -- pauses while busy).
+    manual_raise_elapsed: u32 = 0,
+    manual_raise_start_scroll: u32 = 0,
+    manual_raise_cooldown: u32 = 0,
+
     cursor_col: u8 = 2,
     cursor_row: u8 = c.VISIBLE_ROWS - 3,
 

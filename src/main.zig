@@ -51,6 +51,7 @@ export fn update() void {
     if (s.winner == .none) {
         input.updateCursorMovement(gp);
         if (input.justPressed(gp, w4.BUTTON_1)) sim.trySwap(&s.player);
+        if (input.justPressed(gp, w4.BUTTON_2)) board.tryManualRaise(&s.player);
         input.updateTouch();
         cpu_ai.update(&s.cpu);
 

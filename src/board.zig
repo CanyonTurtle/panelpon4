@@ -82,8 +82,46 @@ pub fn doRise(self: *s.Board) void {
     }
 }
 
+// Requests a manual raise (the Z button): finishes whatever fraction of the
+// current row is left to rise, over a fixed MANUAL_RAISE_FRAMES duration
+// regardless of how much was already risen -- see updateRise, which actually
+// carries it out once per frame from here on. A no-op while still cooling
+// down from the last one or while a raise is already in progress (pressing
+// Z again mid-raise doesn't stack or restart it).
+pub fn tryManualRaise(self: *s.Board) void {
+    if (self.manual_raise_cooldown > 0 or self.manual_raise_elapsed > 0) return;
+    self.manual_raise_start_scroll = self.scroll_px;
+    self.manual_raise_elapsed = 1;
+    self.manual_raise_cooldown = c.MANUAL_RAISE_COOLDOWN;
+}
+
 pub fn updateRise(self: *s.Board) void {
+    // The cooldown is a plain countdown on how often Z can be *pressed* --
+    // ticks every frame regardless of board state, unlike the raise it
+    // gates, which (like the normal automatic rise) pauses while busy.
+    if (self.manual_raise_cooldown > 0) self.manual_raise_cooldown -= 1;
+
     if (self.boardBusy()) return;
+
+    if (self.manual_raise_elapsed > 0) {
+        // Recomputed fresh from start_scroll/elapsed each frame (not
+        // accumulated incrementally) so it lands on exactly TILE at
+        // MANUAL_RAISE_FRAMES with no rounding drift, whatever fraction of
+        // the row was left when it was triggered.
+        const remaining: u32 = @as(u32, @intCast(c.TILE)) - self.manual_raise_start_scroll;
+        self.scroll_px = self.manual_raise_start_scroll + (remaining * self.manual_raise_elapsed) / c.MANUAL_RAISE_FRAMES;
+        if (self.manual_raise_elapsed >= c.MANUAL_RAISE_FRAMES) {
+            self.manual_raise_elapsed = 0;
+        } else {
+            self.manual_raise_elapsed += 1;
+        }
+        if (self.scroll_px >= @as(u32, @intCast(c.TILE))) {
+            self.scroll_px -= @as(u32, @intCast(c.TILE));
+            doRise(self);
+        }
+        return;
+    }
+
     self.rise_frame_counter += 1;
     if (self.rise_frame_counter >= riseSpeedFramesPerPixel(self.score)) {
         self.rise_frame_counter = 0;
@@ -168,4 +206,57 @@ test "riseSpeedFramesPerPixel decreases with score and floors at 4" {
     try testing.expectEqual(@as(u32, 31), riseSpeedFramesPerPixel(1200));
     try testing.expectEqual(@as(u32, 4), riseSpeedFramesPerPixel(33600));
     try testing.expectEqual(@as(u32, 4), riseSpeedFramesPerPixel(60000)); // stays floored well past that
+}
+
+test "a manual raise finishes the current row in exactly MANUAL_RAISE_FRAMES, from a clean boundary" {
+    var b: s.Board = .{};
+    tryManualRaise(&b);
+    // Every frame but the busy-check itself is free (empty board), so this
+    // runs uninterrupted.
+    for (0..c.MANUAL_RAISE_FRAMES - 1) |_| {
+        updateRise(&b);
+        try testing.expectEqual(@as(u8, 0), b.top); // hasn't actually risen yet
+    }
+    const before_top = b.top;
+    updateRise(&b); // the MANUAL_RAISE_FRAMES-th frame: should land exactly on TILE and rise
+    try testing.expectEqual(@as(u8, (before_top + 1) % c.ROWS), b.top);
+    try testing.expectEqual(@as(u32, 0), b.scroll_px); // consumed exactly, no leftover
+    try testing.expectEqual(@as(u32, 0), b.manual_raise_elapsed); // finished, not left dangling
+}
+
+test "a manual raise only finishes the fraction of the row already in progress" {
+    var b: s.Board = .{};
+    b.scroll_px = @intCast(c.TILE - 4); // already 4px away from the next row
+    tryManualRaise(&b);
+    for (0..c.MANUAL_RAISE_FRAMES) |_| updateRise(&b);
+    // Still exactly one row risen (not two), even though far less scroll
+    // distance was needed than a full tile's worth.
+    try testing.expectEqual(@as(u8, 1), b.top);
+    try testing.expectEqual(@as(u32, 0), b.scroll_px);
+}
+
+test "manual raise is blocked by its own cooldown until it elapses" {
+    var b: s.Board = .{};
+    tryManualRaise(&b);
+    for (0..c.MANUAL_RAISE_FRAMES) |_| updateRise(&b);
+    try testing.expectEqual(@as(u8, 1), b.top); // first raise succeeded
+
+    tryManualRaise(&b); // still cooling down -- should be a no-op
+    try testing.expectEqual(@as(u32, 0), b.manual_raise_elapsed);
+
+    // Tick down the remaining cooldown (already spent MANUAL_RAISE_FRAMES of
+    // it during the raise itself above).
+    for (0..c.MANUAL_RAISE_COOLDOWN - c.MANUAL_RAISE_FRAMES) |_| updateRise(&b);
+    tryManualRaise(&b); // cooldown has now fully elapsed -- should work
+    try testing.expectEqual(@as(u32, 1), b.manual_raise_elapsed);
+}
+
+test "manual raise pauses like the automatic rise while the board is busy" {
+    var b: s.Board = .{};
+    b.cellAt(0, 0).state = .falling; // makes boardBusy() true
+    tryManualRaise(&b);
+    for (0..c.MANUAL_RAISE_FRAMES * 2) |_| updateRise(&b);
+    // Never progressed at all while busy.
+    try testing.expectEqual(@as(u32, 1), b.manual_raise_elapsed);
+    try testing.expectEqual(@as(u8, 0), b.top);
 }
