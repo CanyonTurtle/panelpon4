@@ -6,7 +6,13 @@
 
 const c = @import("constants.zig");
 
-pub const CellState = enum(u8) { empty, normal, falling, popping, landing, swapping };
+// `recycling` is garbage's own analog of `popping` (see Cell.is_garbage) --
+// kept as a distinct state, not reusing `popping`, so the two can never be
+// confused: a `.popping` cell is a real matched block genuinely disappearing
+// (flash + shrink); a `.recycling` cell is an inert garbage block on its way
+// to becoming a fresh, inactive normal-looking block, with no animation of
+// its own.
+pub const CellState = enum(u8) { empty, normal, falling, popping, landing, swapping, recycling };
 
 pub const Cell = struct {
     color: u8 = 0,
@@ -40,13 +46,18 @@ pub const Cell = struct {
     // gravity code, since is_garbage rides along through a plain struct
     // copy same as every other field -- but is never swappable and never
     // seeds or joins a color match on its own. It only ever leaves this
-    // state by *popping*: a match adjacent to it (or to another popping
-    // garbage cell -- propagation chains transitively) triggers it into
-    // .popping too, sharing that group's pop_group_end. Where a real match
-    // clears to empty when pop_group_end hits 0, a garbage cell instead
-    // reveals a fresh, chainable, randomly-colored .normal block in place
-    // (is_garbage reset to false) -- see the .popping branch in
-    // sim.simulate.
+    // state by being *recycled*: a match adjacent to it (or to another
+    // recycling garbage cell -- propagation chains transitively) triggers it
+    // into .recycling too, sharing that group's pop_group_end with every
+    // other member (garbage or real) in the same connected event. Unlike a
+    // real match (which animates then clears to empty), a recycling garbage
+    // cell has no animation of its own: it reveals its (already-picked)
+    // color the instant its own staggered turn in the group arrives (see
+    // render.drawRecyclingCell) and then just sits there looking like a
+    // plain normal block -- inactive, unswappable, ineligible to match or
+    // fall -- until the *whole* group finishes and every member becomes
+    // fully active together (is_garbage reset to false, chainable granted --
+    // see the shared .popping/.recycling branch in sim.simulate).
     is_garbage: bool = false,
 };
 
@@ -173,7 +184,7 @@ pub fn boardBusy() bool {
     for (0..c.ROWS) |lr| {
         for (0..c.COLS) |col| {
             const s = cellAt(@intCast(lr), @intCast(col)).state;
-            if (s == .falling or s == .popping or s == .landing or s == .swapping) return true;
+            if (s == .falling or s == .popping or s == .landing or s == .swapping or s == .recycling) return true;
         }
     }
     return false;

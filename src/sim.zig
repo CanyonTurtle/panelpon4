@@ -71,7 +71,13 @@ pub fn simulate() void {
                         just_settled[lr][col] = true;
                     }
                 },
-                .popping => {
+                // A real match (.popping) and a garbage recycle (.recycling)
+                // share this same group-timer mechanism -- see pop_group_end
+                // on Cell -- so both are driven by one shared branch here;
+                // they only differ in what happens once the *whole* group
+                // (every member, of either kind, in this connected pop/
+                // recycle event) finishes together.
+                .popping, .recycling => {
                     cell.timer -= 1;
                     if (cell.timer == 0) {
                         audio.playPopTick();
@@ -81,14 +87,17 @@ pub fn simulate() void {
                         if (cell.is_garbage) {
                             // Garbage doesn't disappear -- it cracks open
                             // into a fresh, chainable block, in place, once
-                            // the *whole* connected pop event (which may
+                            // the *whole* connected recycle event (which may
                             // span several garbage cells and/or real matched
                             // cells -- see the propagation pass in
-                            // checkMatches) finishes together. Its color was
-                            // already picked back when the pop started (see
-                            // checkMatches), so the player has been able to
-                            // see it -- and plan around it -- for the whole
-                            // pop, not just this final instant.
+                            // checkMatches) finishes together. It already
+                            // looks like a plain normal block by now -- see
+                            // render.drawRecyclingCell, which reveals it (no
+                            // animation) the instant its own staggered turn
+                            // arrives, well before the group as a whole
+                            // resolves -- this is just the moment it actually
+                            // becomes interactive (swappable, matchable,
+                            // able to fall).
                             //
                             // Deliberately NOT marked just_settled/settled:
                             // checkMatches' "spend chainable on an unmatched
@@ -149,9 +158,9 @@ pub fn simulate() void {
             const cell = s.cellAt(r, col);
             // Garbage blocks this marking pass like any other non-.normal
             // obstacle: it's inert and never inherits chainable through this
-            // mechanism (only a revealed block does, explicitly, when it
-            // pops -- see the .popping branch above), so it -- and anything
-            // further above it -- is left untouched.
+            // mechanism (only a revealed block does, explicitly, when it's
+            // recycled -- see the .popping/.recycling branch above), so it --
+            // and anything further above it -- is left untouched.
             if (cell.state != .normal or cell.is_garbage) break;
             cell.chainable = true;
             if (r == 0) break;
@@ -416,18 +425,22 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
             for (0..member_count) |i| {
                 const pos = members[i];
                 const cell = s.cellAt(pos[0], pos[1]);
-                cell.state = .popping;
+                // A real matched cell pops (.popping); a garbage cell pulled
+                // in via propagation recycles (.recycling) instead -- see
+                // CellState and render.drawRecyclingCell. Both share the same
+                // per-member stagger (timer) and the same whole-group
+                // resolution timer (pop_group_end).
+                cell.state = if (cell.is_garbage) .recycling else .popping;
                 cell.timer = c.POP_FRAMES + @as(i16, @intCast(i)) * c.POP_STAGGER_FRAMES;
                 cell.pop_group_end = group_end;
                 if (cell.is_garbage) {
-                    // Reveal the color now, at the start of the pop, not at
-                    // the end -- see render.drawPoppingCell, which renders
-                    // any popping cell (garbage-sourced or not) using
-                    // whatever color it already holds. Letting the player
-                    // see the color for the whole pop (not just the instant
-                    // it resolves) is the point: it lets them premeditate a
-                    // matching lineup underneath before the reveal actually
-                    // lands.
+                    // Pick the reveal color now, at the moment the whole
+                    // recycle event is detected, not once this cell's own
+                    // turn arrives or once the group finishes -- it doesn't
+                    // matter when it's *picked*, only when it's *shown* (see
+                    // render.drawRecyclingCell, which withholds it from
+                    // rendering until this cell's own staggered turn in the
+                    // group comes up, one cell at a time).
                     cell.color = @intCast(s.randRange(c.NUM_COLORS));
                 }
             }

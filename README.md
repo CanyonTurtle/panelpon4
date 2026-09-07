@@ -48,9 +48,12 @@ npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm --html web/panelpon4.html --t
   the score display.
 - A big enough combo or chain also drops garbage onto your own board -- self-inflicted risk/reward for
   aggressive play. Garbage is inert (colorless, unswappable, unmatchable) until a match pops right next to
-  it, which cracks it open into a fresh, chainable block once the whole connected pop finishes. A connected
-  clump of garbage falls and lands as one rigid piece (a piece touching down stops the whole clump at once),
-  rendering as a single seamless bezeled slab rather than individual tiles.
+  it, which starts *recycling* it: one garbage block at a time, with a short delay between each, cracks
+  open into a fresh, plain-looking normal block -- no animation of its own, just an instant reveal -- so
+  you can read the color lineup forming and plan your next move before the whole connected group finishes
+  and every recycled block becomes active together. A connected clump of garbage falls and lands as one
+  rigid piece (a piece touching down stops the whole clump at once), rendering as a single seamless
+  bezeled slab rather than individual tiles.
 - A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
 - The floor rises forever, faster as your score climbs. If blocks reach the top row, it's game over.
 - Press **X** on the title or game-over screen to (re)start.
@@ -71,10 +74,11 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   pure helpers (ring-buffer indexing, RNG, board-busy query) that only need that state.
 - `src/board.zig` — row generation, the rising floor, and (re)starting a game.
 - `src/sim.zig` — the core simulation: swaps, pops, landings, per-cell gravity, matching/chaining, and
-  garbage's match-side behavior (spawning on a big combo/chain, propagation into adjacent garbage on a pop,
-  reveal on clear) -- tests in the companion `src/sim_test.zig`.
+  garbage's match-side behavior (spawning on a big combo/chain, propagation into adjacent garbage,
+  recycling into a fresh block) -- tests in the companion `src/sim_test.zig`.
 - `src/sim_garbage.zig` — garbage's rigid-body group gravity (a connected clump falls and lands as one piece,
-  computed by connectivity fresh every frame) and its spawn placement.
+  computed by connectivity fresh every frame) and its spawn placement -- tests in the companion
+  `src/sim_garbage_test.zig`.
 - `src/audio.zig` — sound effects.
 - `src/input.zig` — gamepad and touch handling (cursor movement with DAS, swap triggering).
 - `src/render.zig` — most drawing: the board, cursor, panel, and title/game-over screens.
@@ -91,10 +95,11 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 
 ## Testing
 
-`state.zig`, `board.zig`, and `sim.zig` (matching/chain logic in particular) have Zig `test` blocks —
-`sim.zig`'s live in the companion `src/sim_test.zig` to keep the module itself under ~500 lines. These run
-natively (not compiled into the cart) and are excluded from `input.zig`/`render.zig`, which touch WASM-4's real
-host functions and only make sense under an actual WASM-4 host.
+`state.zig`, `board.zig`, and `sim.zig`/`sim_garbage.zig` (matching/chain/garbage logic in particular) have
+Zig `test` blocks — `sim.zig`'s live in the companion `src/sim_test.zig`, and garbage-specific ones in
+`src/sim_garbage_test.zig`, to keep each module under ~500 lines. These run natively (not compiled into the
+cart) and are excluded from `input.zig`/`render.zig`, which touch WASM-4's real host functions and only make
+sense under an actual WASM-4 host.
 
 ```sh
 zig build test

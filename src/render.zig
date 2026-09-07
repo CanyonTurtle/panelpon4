@@ -166,7 +166,14 @@ const GarbageEdges = struct { up: bool = false, down: bool = false, left: bool =
 
 fn isAttachedGarbage(lr: u8, col: u8) bool {
     const cell = s.cellAt(lr, col);
-    return cell.is_garbage and (cell.state == .normal or cell.state == .falling or cell.state == .landing);
+    if (!cell.is_garbage) return false;
+    if (cell.state == .normal or cell.state == .falling or cell.state == .landing) return true;
+    // A recycling cell only still looks (and counts as) attached garbage
+    // while it hasn't had its own turn yet -- see drawRecyclingCell. The
+    // instant it reveals, it renders as a plain normal block, so the clump
+    // it was part of should visually shrink by one cell right along with it.
+    if (cell.state == .recycling) return c.POP_FRAMES - cell.timer < 0;
+    return false;
 }
 
 fn garbageEdgesAt(lr: u8, col: u8) GarbageEdges {
@@ -195,11 +202,9 @@ fn drawGarbageBlockLinked(x: i32, y: i32, edges: GarbageEdges) void {
     if (!edges.down and !edges.right) w4.Rect(x + w - 1, y + h - 1, 1, 1);
 }
 
-// Also used for a popping garbage cell (see Cell.is_garbage): its color is
-// already picked the moment the pop starts (see sim.checkMatches), so it
-// renders exactly like a real matched cell popping -- the whole point is to
-// let the player see, and plan around, the color it's about to become for
-// the entire pop, not just reveal it at the very end.
+// A real matched block disappearing (see CellState.popping). Garbage never
+// uses this state -- a garbage cell pulled into the same event instead
+// recycles (see drawRecyclingCell below), which has no animation of its own.
 fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
     const elapsed = c.POP_FRAMES - timer;
     if (elapsed < 0) {
@@ -221,6 +226,25 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
         if (size < 0) size = 0;
     }
     drawHueSquareCentered(x, y, color, size);
+}
+
+// A garbage cell being recycled (see CellState.recycling). Unlike a real
+// match's pop, there's no shrink/flash animation: a garbage cell in a
+// recycling group is revealed one at a time, with a delay between each (its
+// own staggered timer, same mechanism as the pop cascade -- see
+// POP_STAGGER_FRAMES), and the instant its own turn comes it just hard-cuts
+// to looking like a plain normal block and stays that way, inactive, doing
+// nothing further, until the whole group resolves (see sim.simulate). Before
+// its own turn, it still looks like part of the not-yet-recycled garbage
+// clump (see isAttachedGarbage, which keys off this same timer to know when
+// to stop treating it as attached).
+fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: GarbageEdges) void {
+    const elapsed = c.POP_FRAMES - timer;
+    if (elapsed < 0) {
+        drawGarbageBlockLinked(x, y, edges);
+        return;
+    }
+    drawNormalCell(x, y, color);
 }
 
 fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool, edges: GarbageEdges) void {
@@ -304,6 +328,7 @@ fn drawBoard() void {
                     if (cell.is_garbage) drawGarbageBlockLinked(x, y, garbageEdgesAt(lr, col)) else drawNormalCell(x, y, cell.color);
                 },
                 .popping => drawPoppingCell(x, base_y, cell.color, cell.timer),
+                .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, garbageEdgesAt(lr, col)),
                 .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, garbageEdgesAt(lr, col)),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},

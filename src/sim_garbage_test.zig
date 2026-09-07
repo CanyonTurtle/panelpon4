@@ -20,7 +20,7 @@ test "a garbage cell is never swappable" {
     try testing.expectEqual(@as(u8, 1), s.cellAt(s.cursor_row, s.cursor_col + 1).color);
 }
 
-test "a pop propagates into an orthogonally adjacent garbage cell" {
+test "a match propagates into an orthogonally adjacent garbage cell, recycling it" {
     s.resetForTest();
     s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
     s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
@@ -28,7 +28,7 @@ test "a pop propagates into an orthogonally adjacent garbage cell" {
     s.cellAt(5, 3).* = .{ .state = .normal, .is_garbage = true }; // touches col 2
     _ = sim.checkMatches(no_settled);
 
-    try testing.expectEqual(s.CellState.popping, s.cellAt(5, 3).state);
+    try testing.expectEqual(s.CellState.recycling, s.cellAt(5, 3).state);
 }
 
 test "garbage propagation chains transitively through multiple garbage cells" {
@@ -40,11 +40,34 @@ test "garbage propagation chains transitively through multiple garbage cells" {
     s.cellAt(7, 2).* = .{ .state = .normal, .is_garbage = true }; // only touches the garbage above it
     _ = sim.checkMatches(no_settled);
 
-    try testing.expectEqual(s.CellState.popping, s.cellAt(6, 2).state);
-    try testing.expectEqual(s.CellState.popping, s.cellAt(7, 2).state);
+    try testing.expectEqual(s.CellState.recycling, s.cellAt(6, 2).state);
+    try testing.expectEqual(s.CellState.recycling, s.cellAt(7, 2).state);
 }
 
-test "an unrelated garbage cell elsewhere does not pop" {
+test "recycling cells in the same group are staggered one at a time, not simultaneous" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    s.cellAt(6, 2).* = .{ .state = .normal, .is_garbage = true }; // touches the match
+    s.cellAt(7, 2).* = .{ .state = .normal, .is_garbage = true }; // touches the garbage above it
+    _ = sim.checkMatches(no_settled);
+
+    // Row-major member ordering puts (6,2) before (7,2), so (6,2) gets an
+    // earlier own-turn timer than (7,2) -- a fixed delay apart (see
+    // POP_STAGGER_FRAMES), not the same instant. This staggered timer is
+    // exactly what render.drawRecyclingCell uses to reveal each one on its
+    // own turn, one cell at a time, rather than all at once.
+    const earlier = s.cellAt(6, 2).timer;
+    const later = s.cellAt(7, 2).timer;
+    try testing.expectEqual(earlier + c.POP_STAGGER_FRAMES, later);
+    // Both members (and the 3 real matched cells) share the same whole-group
+    // resolution timer regardless of their own individual stagger.
+    try testing.expectEqual(s.cellAt(5, 0).pop_group_end, s.cellAt(6, 2).pop_group_end);
+    try testing.expectEqual(s.cellAt(6, 2).pop_group_end, s.cellAt(7, 2).pop_group_end);
+}
+
+test "an unrelated garbage cell elsewhere does not recycle" {
     s.resetForTest();
     s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
     s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
@@ -56,7 +79,7 @@ test "an unrelated garbage cell elsewhere does not pop" {
     try testing.expect(s.cellAt(9, 5).is_garbage);
 }
 
-test "a popped garbage cell reveals a fresh chainable block only once its whole group finishes" {
+test "a recycled garbage cell reveals a fresh chainable block only once its whole group finishes" {
     s.resetForTest();
     s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
     s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
@@ -84,9 +107,10 @@ test "a popped garbage cell reveals a fresh chainable block only once its whole 
     const color_at_start = s.cellAt(5, 3).color;
 
     for (0..@intCast(group_end - 1)) |_| sim.simulate();
-    try testing.expectEqual(s.CellState.popping, s.cellAt(5, 3).state);
+    try testing.expectEqual(s.CellState.recycling, s.cellAt(5, 3).state);
     try testing.expect(s.cellAt(5, 3).is_garbage);
-    // The color doesn't change mid-pop -- it was picked once, at the start.
+    // The color doesn't change while recycling -- it was picked once, up
+    // front, when the whole event was first detected.
     try testing.expectEqual(color_at_start, s.cellAt(5, 3).color);
 
     sim.simulate(); // the final frame: the whole group resolves together
@@ -98,7 +122,7 @@ test "a popped garbage cell reveals a fresh chainable block only once its whole 
     try testing.expectEqual(color_at_start, s.cellAt(5, 3).color);
 }
 
-test "a garbage cell's color is picked the instant it starts popping, not at reveal" {
+test "a garbage cell's color is picked the instant recycling starts, not at reveal" {
     s.resetForTest();
     s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
     s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
@@ -107,9 +131,10 @@ test "a garbage cell's color is picked the instant it starts popping, not at rev
     _ = sim.checkMatches(no_settled);
 
     // Still garbage=true (hasn't resolved yet) but already has a real color
-    // to render with for the whole pop -- not still the zero-valued default
-    // a genuinely-unrevealed cell would have.
-    try testing.expectEqual(s.CellState.popping, s.cellAt(5, 3).state);
+    // ready for the moment its own staggered turn comes up (see
+    // render.drawRecyclingCell) -- not still the zero-valued default a
+    // genuinely-unrevealed cell would have.
+    try testing.expectEqual(s.CellState.recycling, s.cellAt(5, 3).state);
     try testing.expect(s.cellAt(5, 3).is_garbage);
     try testing.expect(s.cellAt(5, 3).color < c.NUM_COLORS);
 }
