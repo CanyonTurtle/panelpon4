@@ -5,10 +5,19 @@
 const c = @import("constants.zig");
 const s = @import("state.zig");
 
+// Frames needed per pixel of rise -- larger is slower. Starts at a quarter
+// of the original pace (32 vs. the old 8) and eases toward the floor much
+// more gradually too (a wider start-to-floor range spread over a bigger
+// per-level score threshold, vs. the old steep ramp that maxed out by score
+// 2400).
+const RISE_START_FRAMES_PER_PIXEL: u32 = 32;
+const RISE_FLOOR_FRAMES_PER_PIXEL: u32 = 4; // fastest/hardest -- unchanged from before
+const RISE_SCORE_PER_LEVEL: u32 = 1200;
+
 pub fn riseSpeedFramesPerPixel(score: u32) u32 {
-    const level = score / 600;
-    const speed = if (level > 4) 4 else 8 - level;
-    return speed;
+    const level = score / RISE_SCORE_PER_LEVEL;
+    if (level >= RISE_START_FRAMES_PER_PIXEL - RISE_FLOOR_FRAMES_PER_PIXEL) return RISE_FLOOR_FRAMES_PER_PIXEL;
+    return RISE_START_FRAMES_PER_PIXEL - level;
 }
 
 pub fn generateRowInto(self: *s.Board, target_phys: u8, logical_r: u8) void {
@@ -155,7 +164,8 @@ test "generateRowInto never produces a 3-in-a-row horizontally" {
 }
 
 test "riseSpeedFramesPerPixel decreases with score and floors at 4" {
-    try testing.expectEqual(@as(u32, 8), riseSpeedFramesPerPixel(0));
-    try testing.expectEqual(@as(u32, 7), riseSpeedFramesPerPixel(600));
-    try testing.expectEqual(@as(u32, 4), riseSpeedFramesPerPixel(6000));
+    try testing.expectEqual(@as(u32, 32), riseSpeedFramesPerPixel(0));
+    try testing.expectEqual(@as(u32, 31), riseSpeedFramesPerPixel(1200));
+    try testing.expectEqual(@as(u32, 4), riseSpeedFramesPerPixel(33600));
+    try testing.expectEqual(@as(u32, 4), riseSpeedFramesPerPixel(60000)); // stays floored well past that
 }

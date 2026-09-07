@@ -283,11 +283,10 @@ fn drawSwappingCell(x: i32, y: i32, color: u8, timer: i16, dir: i8) void {
     drawNormalCell(x + offset, y, color);
 }
 
-// A column with any content in its top few rows is close enough to the rise
+// A column with any content in its very top row is close enough to the rise
 // hazard (see board.doRise's game-over check on logical row 0) that its
-// settled blocks bounce in place as a warning -- 3 rows means a column is
-// flagged as soon as it's within 2 rises of actually topping out.
-const STRESS_WARNING_ROWS: u8 = 3;
+// settled blocks bounce in place as a warning.
+const STRESS_WARNING_ROWS: u8 = 1;
 const STRESS_BOUNCE_PERIOD: i32 = 16;
 const STRESS_BOUNCE_AMOUNT: i32 = 3;
 
