@@ -84,6 +84,7 @@ pub fn resetGame() void {
     s.rise_frame_counter = 0;
     s.cursor_col = 2;
     s.cursor_row = c.VISIBLE_ROWS - 3;
+    s.clearComboPopups();
 
     for (0..c.ROWS) |r| {
         for (0..c.COLS) |col| {

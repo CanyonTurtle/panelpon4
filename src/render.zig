@@ -33,6 +33,57 @@ fn ditherHues(color: u8) ?[2]u8 {
     return DITHER_HUES[color - 3];
 }
 
+// Shared "warning/highlight" dither: red + yellow, the brightest pair
+// available, reading as orange. Used by the cursor outline, the combo-chain
+// flash, and the flying combo popup.
+const WARM_DITHER_HUES = [2]u8{ 0, 2 };
+
+// A checkerboard bitmap big enough to cover the whole board plus a 1px
+// margin on every edge, so any highlight rect up to the full board size can
+// be cut out of it via a single blitSub call instead of plotting a dither
+// pixel by pixel (see drawColorRect/plotDithered above, which still do that
+// for the normal per-tile block fills -- this is a separate, reusable
+// primitive for overlay effects like the combo flash/popup below, and for
+// any future dithered animation that wants the same trick). The 1px margin
+// gives drawDitheredRectBlit's src_x/src_y phase-alignment offset (0 or 1)
+// somewhere to read from without ever running past the edge of this bitmap,
+// for any rect up to the full board's width/height.
+const CHECKER_W: usize = @as(usize, c.COLS) * @as(usize, @intCast(c.TILE)) + 2;
+const CHECKER_H: usize = @as(usize, c.VISIBLE_ROWS) * @as(usize, @intCast(c.TILE)) + 2;
+const CHECKER_BYTES: usize = (CHECKER_W * CHECKER_H + 7) / 8;
+
+const checker_board: [CHECKER_BYTES]u8 = blk: {
+    @setEvalBranchQuota(200_000);
+    var buf: [CHECKER_BYTES]u8 = [_]u8{0} ** CHECKER_BYTES;
+    var bit_index: usize = 0;
+    while (bit_index < CHECKER_W * CHECKER_H) : (bit_index += 1) {
+        const x = bit_index % CHECKER_W;
+        const y = bit_index / CHECKER_W;
+        if ((x + y) % 2 == 0) {
+            const byte_i = bit_index / 8;
+            const shift: u3 = @intCast(7 - (bit_index % 8));
+            buf[byte_i] |= @as(u8, 1) << shift;
+        }
+    }
+    break :blk buf;
+};
+
+// Cuts a w x h dithered rect of two hues out of the checkerboard bitmap via
+// one hardware blit (WASM4's 1BPP blit: bit 0 -> DRAW_COLORS color1, bit 1 ->
+// color2), instead of one Rect() call per pixel. The src_x/src_y offset (0
+// or 1, matching x/y's own parity) keeps the checkerboard's phase anchored
+// to absolute screen coordinates -- the same `(x+y) % 2` rule
+// plotDithered/drawColorRect use -- so adjacent or moving dithered rects
+// stay visually consistent instead of each restarting the pattern at its own
+// top-left corner.
+fn drawDitheredRectBlit(x: i32, y: i32, w: i32, h: i32, hues: [2]u8) void {
+    if (w <= 0 or h <= 0) return;
+    w4.DRAW_COLORS.* = HUE_DRAWCOLOR[hues[0]] | (HUE_DRAWCOLOR[hues[1]] << 4);
+    const src_x: u32 = @intCast(@mod(x, 2));
+    const src_y: u32 = @intCast(@mod(y, 2));
+    w4.BlitSub(&checker_board, x, y, @intCast(w), @intCast(h), src_x, src_y, @intCast(CHECKER_W), w4.BLIT_1BPP);
+}
+
 pub fn setupPalette() void {
     w4.PALETTE[0] = 0x1a1c2c; // background
     w4.PALETTE[1] = 0xf97690; // hue A: red
@@ -135,7 +186,13 @@ fn drawNormalCell(x: i32, y: i32, color: u8) void {
     drawSymbolFor(color, x + sym_off, y + sym_off);
 }
 
-fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
+fn drawWarmDitherSquareCentered(x: i32, y: i32, size: i32) void {
+    if (size <= 0) return;
+    const off = @divTrunc(c.TILE - size, 2);
+    drawDitheredRectBlit(x + off, y + off, size, size, WARM_DITHER_HUES);
+}
+
+fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, combo_flash: bool) void {
     const elapsed = c.POP_FRAMES - timer;
     if (elapsed < 0) {
         // Still waiting its turn in the pop cascade (see POP_STAGGER_FRAMES)
@@ -155,7 +212,14 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16) void {
         size = @divTrunc(BLOCK_SIZE * remain, shrink_total);
         if (size < 0) size = 0;
     }
-    drawHueSquareCentered(x, y, color, size);
+    // A genuine chain pop (see Cell.combo_flash) flashes the shared warm
+    // dither instead of its own color for its whole pop animation, tying it
+    // visually to the flying "xN" combo popup this same match spawned.
+    if (combo_flash) {
+        drawWarmDitherSquareCentered(x, y, size);
+    } else {
+        drawHueSquareCentered(x, y, color, size);
+    }
 }
 
 fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16) void {
@@ -174,7 +238,36 @@ fn drawSwappingCell(x: i32, y: i32, color: u8, timer: i16, dir: i8) void {
     drawNormalCell(x + offset, y, color);
 }
 
+// A column with any content in its top few rows is close enough to the rise
+// hazard (see board.doRise's game-over check on logical row 0) that its
+// settled blocks bounce in place as a warning -- 3 rows means a column is
+// flagged as soon as it's within 2 rises of actually topping out.
+const STRESS_WARNING_ROWS: u8 = 3;
+const STRESS_BOUNCE_PERIOD: i32 = 16;
+const STRESS_BOUNCE_AMOUNT: i32 = 3;
+
+fn isColumnStressed(col: u8) bool {
+    var lr: u8 = 0;
+    while (lr < STRESS_WARNING_ROWS) : (lr += 1) {
+        if (s.cellAt(lr, col).state != .empty) return true;
+    }
+    return false;
+}
+
+fn stressBounceOffset() i32 {
+    // A quick, repeating upward hop -- reads as an agitated wobble, distinct
+    // from the cursor's gentler contract/expand pulse.
+    const half = @divTrunc(STRESS_BOUNCE_PERIOD, 2);
+    const t: i32 = @intCast(@mod(s.frame_count, @as(u32, @intCast(STRESS_BOUNCE_PERIOD))));
+    const tri: i32 = if (t < half) t else STRESS_BOUNCE_PERIOD - t;
+    return -@divTrunc(tri * STRESS_BOUNCE_AMOUNT, half);
+}
+
 fn drawBoard() void {
+    var col_stressed: [c.COLS]bool = undefined;
+    for (0..c.COLS) |ci| col_stressed[ci] = isColumnStressed(@intCast(ci));
+    const bounce = stressBounceOffset();
+
     var lr: u8 = 0;
     while (lr < c.ROWS) : (lr += 1) {
         const base_y = c.BOARD_Y + @as(i32, lr) * c.TILE - @as(i32, @intCast(s.scroll_px));
@@ -185,9 +278,15 @@ fn drawBoard() void {
             if (cell.state == .empty) continue;
             const x = c.BOARD_X + @as(i32, col) * c.TILE;
             switch (cell.state) {
-                .normal => drawNormalCell(x, base_y, cell.color),
+                .normal => {
+                    // Only settled blocks bounce -- cells already mid
+                    // animation (falling/landing/popping/swapping) keep
+                    // their own motion undisturbed.
+                    const y = if (col_stressed[col]) base_y + bounce else base_y;
+                    drawNormalCell(x, y, cell.color);
+                },
                 .falling => drawNormalCell(x, base_y - cell.fall_off, cell.color),
-                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer),
+                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.combo_flash),
                 .landing => drawLandingCell(x, base_y, cell.color, cell.timer),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},
@@ -248,7 +347,7 @@ const CURSOR_PULSE_PERIOD: i32 = 30;
 const CURSOR_PULSE_AMOUNT: i32 = 2;
 
 const CURSOR_PUSH: i32 = 1;
-const CURSOR_DITHER_HUES = [2]u8{ 0, 2 }; // red + yellow
+const CURSOR_DITHER_HUES = WARM_DITHER_HUES;
 
 fn drawCursor() void {
     if (s.game_over) return;
@@ -303,6 +402,54 @@ fn drawPanel() void {
     }
 }
 
+// Draws str once offset by 1px in each cardinal direction in a dark color
+// before the real foreground pass, giving pixel text a readable outline
+// against whatever busy/bright content (like the orange dither) it sits on.
+fn drawOutlinedText(str: []const u8, x: i32, y: i32, fg: u16) void {
+    w4.DRAW_COLORS.* = DC_BG;
+    const offsets = [_][2]i32{ .{ -1, 0 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 1 } };
+    for (offsets) |o| w4.Text(str, x + o[0], y + o[1]);
+    w4.DRAW_COLORS.* = fg;
+    w4.Text(str, x, y);
+}
+
+// Roughly where the score digits sit (see drawPanel) -- popups fly here.
+const COMBO_TARGET_X: i32 = c.PANEL_X + 14;
+const COMBO_TARGET_Y: i32 = 10;
+const COMBO_MIN_SIZE: i32 = 3;
+
+fn drawComboPopups() void {
+    for (s.combo_popups) |p| {
+        if (!p.active) continue;
+
+        var cur_x = p.x;
+        var cur_y = p.y;
+        var cur_w = p.w;
+        var cur_h = p.h;
+
+        if (p.elapsed >= s.COMBO_POPUP_HOLD) {
+            // Ease-in toward the score (t^2, not a constant-speed drift) --
+            // starts slow and accelerates, reading as a "magnetic pull"
+            // rather than a simple slide.
+            const fly_elapsed: i32 = p.elapsed - s.COMBO_POPUP_HOLD;
+            const fly_total: i32 = s.COMBO_POPUP_FLY;
+            const num = fly_elapsed * fly_elapsed;
+            const den = fly_total * fly_total;
+            cur_x = p.x + @divTrunc((COMBO_TARGET_X - p.x) * num, den);
+            cur_y = p.y + @divTrunc((COMBO_TARGET_Y - p.y) * num, den);
+            cur_w = p.w + @divTrunc((COMBO_MIN_SIZE - p.w) * num, den);
+            cur_h = p.h + @divTrunc((COMBO_MIN_SIZE - p.h) * num, den);
+        }
+
+        drawDitheredRectBlit(cur_x, cur_y, cur_w, cur_h, WARM_DITHER_HUES);
+
+        var buf: [4]u8 = undefined;
+        const label = std.fmt.bufPrint(&buf, "x{d}", .{p.multiplier}) catch "x?";
+        const text_x = cur_x + @divTrunc(cur_w, 2) - @as(i32, @intCast(label.len)) * 4;
+        drawOutlinedText(label, text_x, cur_y - 8, HUE_DRAWCOLOR[2]);
+    }
+}
+
 pub fn drawTitle() void {
     w4.DRAW_COLORS.* = 0x0003;
     w4.Text("PANELPON4", 40, 60);
@@ -325,4 +472,5 @@ pub fn render() void {
     drawFrame();
     drawCursor();
     drawPanel();
+    drawComboPopups();
 }

@@ -42,6 +42,8 @@ pub fn trySwap() void {
 }
 
 pub fn simulate() void {
+    s.tickComboPopups();
+
     var settled = false;
     // Cells that completed a .swapping/.landing -> .normal transition this
     // frame. Passed to checkMatches so it only reconsiders *those* cells'
@@ -300,15 +302,29 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
             // very first match of a fresh combo (chain still 0) always
             // counts, since there's nothing to "continue" yet.
             var group_chainable = false;
+            var min_row: u8 = c.ROWS - 1;
+            var max_row: u8 = 0;
+            var min_col: u8 = c.COLS - 1;
+            var max_col: u8 = 0;
             for (0..member_count) |i| {
                 const pos = members[i];
                 if (settled_chainable[pos[0]][pos[1]]) group_chainable = true;
+                if (pos[0] < min_row) min_row = pos[0];
+                if (pos[0] > max_row) max_row = pos[0];
+                if (pos[1] < min_col) min_col = pos[1];
+                if (pos[1] > max_col) max_col = pos[1];
             }
             var multiplier: u8 = 1;
             if (s.chain == 0 or group_chainable) {
                 s.chain += 1;
                 multiplier = s.chain;
             }
+            // A genuine chain (multiplier > 1 -- this match was only possible
+            // because of an earlier break) gets the orange flashing/flying
+            // combo flourish (see state.ComboPopup and Cell.combo_flash). The
+            // very first match of a fresh combo (multiplier == 1) is just an
+            // ordinary pop, nothing to celebrate yet.
+            const is_combo = multiplier > 1;
 
             const group_end: i16 = c.POP_FRAMES + @as(i16, @intCast(member_count - 1)) * c.POP_STAGGER_FRAMES;
             for (0..member_count) |i| {
@@ -317,6 +333,14 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                 cell.state = .popping;
                 cell.timer = c.POP_FRAMES + @as(i16, @intCast(i)) * c.POP_STAGGER_FRAMES;
                 cell.pop_group_end = group_end;
+                cell.combo_flash = is_combo;
+            }
+            if (is_combo) {
+                const px = c.BOARD_X + @as(i32, min_col) * c.TILE;
+                const py = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(s.scroll_px));
+                const pw = (@as(i32, max_col) - @as(i32, min_col) + 1) * c.TILE;
+                const ph = (@as(i32, max_row) - @as(i32, min_row) + 1) * c.TILE;
+                s.spawnComboPopup(multiplier, px, py, pw, ph);
             }
             s.score += @as(u32, @intCast(member_count)) * 10 * multiplier;
             audio.playPopSound(multiplier);

@@ -43,7 +43,9 @@ npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm --html web/panelpon4.html --t
 - **Arrow keys**: move the two-tile cursor.
 - **X**: swap the two blocks under the cursor.
 - Match 3 or more blocks of the same color/pattern in a horizontal or vertical line to pop them.
-- Blocks above a pop fall and can chain into new matches for bonus score.
+- Blocks above a pop fall and can chain into new matches for bonus score -- a genuine chain flashes
+  orange and flies an "xN" badge into the score display.
+- A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
 - The floor rises forever, faster as your score climbs. If blocks reach the top row, it's game over.
 - Press **X** on the title or game-over screen to (re)start.
 

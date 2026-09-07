@@ -34,6 +34,14 @@ pub const Cell = struct {
     // busy. Reverts to false the moment a block settles back to .normal
     // without being part of a match -- see sim.checkMatches.
     chainable: bool = false,
+    // Set true (only ever alongside state = .popping) for every cell in a
+    // match whose multiplier > 1 -- a genuine chain continuation, not just
+    // the first pop of a fresh combo. render.zig reads it to render the
+    // orange dithered flash instead of this cell's normal color while it
+    // pops. Never propagated by gravity (popping cells are never subject to
+    // it) and always reset by the time a fresh Cell{} replaces this one when
+    // the pop clears, so it never leaks onto an unrelated cell.
+    combo_flash: bool = false,
 };
 
 pub var grid: [c.ROWS][c.COLS]Cell = undefined;
@@ -67,6 +75,53 @@ pub var touch_active: bool = false;
 pub var touch_swapped_this_press: bool = false;
 pub var touch_held_dir: u8 = 0;
 pub var touch_das_counter: u8 = 0;
+
+// A floating "xN" + orange-dithered highlight that flashes over a chain
+// match's location, then flies to the score display. Purely cosmetic --
+// spawned by sim.checkMatches on a genuine chain (multiplier > 1), advanced
+// once per frame by tickComboPopups (called from sim.simulate), and drawn by
+// render.drawComboPopups. Nothing here affects gameplay, so none of it needs
+// to be exact -- just cleared on reset like everything else.
+pub const COMBO_POPUP_HOLD: i16 = 12; // frames flashing in place before flying
+pub const COMBO_POPUP_FLY: i16 = 28; // frames spent flying to the score
+pub const COMBO_POPUP_LIFETIME: i16 = COMBO_POPUP_HOLD + COMBO_POPUP_FLY;
+const MAX_COMBO_POPUPS = 4;
+
+pub const ComboPopup = struct {
+    active: bool = false,
+    multiplier: u8 = 0,
+    x: i32 = 0,
+    y: i32 = 0,
+    w: i32 = 0,
+    h: i32 = 0,
+    elapsed: i16 = 0,
+};
+
+pub var combo_popups: [MAX_COMBO_POPUPS]ComboPopup = [_]ComboPopup{.{}} ** MAX_COMBO_POPUPS;
+
+pub fn spawnComboPopup(multiplier: u8, x: i32, y: i32, w: i32, h: i32) void {
+    for (&combo_popups) |*p| {
+        if (!p.active) {
+            p.* = .{ .active = true, .multiplier = multiplier, .x = x, .y = y, .w = w, .h = h, .elapsed = 0 };
+            return;
+        }
+    }
+    // Pool full -- would need 4+ simultaneous chain groups landing in the
+    // same frame. Silently drop rather than crash; missing one flourish is
+    // harmless.
+}
+
+pub fn tickComboPopups() void {
+    for (&combo_popups) |*p| {
+        if (!p.active) continue;
+        p.elapsed += 1;
+        if (p.elapsed >= COMBO_POPUP_LIFETIME) p.active = false;
+    }
+}
+
+pub fn clearComboPopups() void {
+    for (&combo_popups) |*p| p.* = .{};
+}
 
 pub fn rngNext() u32 {
     var x = rng_state;
@@ -115,6 +170,7 @@ pub fn resetForTest() void {
     score = 0;
     chain = 0;
     game_over = false;
+    clearComboPopups();
 }
 
 const testing = @import("std").testing;

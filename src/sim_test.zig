@@ -121,6 +121,41 @@ test "a chainable match while chain > 0 does inflate the chain" {
     try testing.expectEqual(@as(u8, 2), s.chain);
 }
 
+test "the first match of a fresh combo does not spawn a combo popup" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+    try testing.expectEqual(@as(u8, 1), s.chain);
+    try testing.expect(!s.cellAt(5, 0).combo_flash);
+    for (s.combo_popups) |p| try testing.expect(!p.active);
+}
+
+test "a genuine chain match marks combo_flash and spawns a combo popup" {
+    s.resetForTest();
+    s.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
+    s.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+
+    s.cellAt(8, 3).* = .{ .color = 2, .state = .normal, .chainable = true };
+    s.cellAt(8, 4).* = .{ .color = 2, .state = .normal };
+    s.cellAt(8, 5).* = .{ .color = 2, .state = .normal };
+    _ = sim.checkMatches(no_settled);
+    try testing.expectEqual(@as(u8, 2), s.chain);
+
+    try testing.expect(s.cellAt(8, 3).combo_flash);
+    try testing.expect(s.cellAt(8, 4).combo_flash);
+    try testing.expect(s.cellAt(8, 5).combo_flash);
+
+    var found_active = false;
+    for (s.combo_popups) |p| {
+        if (p.active and p.multiplier == 2) found_active = true;
+    }
+    try testing.expect(found_active);
+}
+
 test "simulate marks the whole settled stack above a cleared pop as chainable" {
     s.resetForTest();
     // A column of 3 identical blocks about to pop, with 3 more ordinary
