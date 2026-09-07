@@ -64,6 +64,20 @@ pub fn updateCursorMovement(gp: u8) void {
     stepDas(cur_dir, &s.held_dir, &s.das_counter);
 }
 
+// A fresh press always tries the swap immediately; if the cursor's current
+// pair can't swap yet (still mid-animation from a previous swap), the press
+// is buffered (state.button_pending_swap) instead of dropped, and retried
+// here again every frame until it succeeds -- see canSwapAt below, shared
+// with touch's own buffering. Lets mashing X chain swaps at the fastest rate
+// the swap animation allows, with none silently lost to bad timing.
+pub fn updateSwap(gp: u8) void {
+    if (justPressed(gp, w4.BUTTON_1)) s.button_pending_swap = true;
+    if (s.button_pending_swap and canSwapAt(s.player.cursor_row, s.player.cursor_col)) {
+        sim.trySwap(&s.player);
+        s.button_pending_swap = false;
+    }
+}
+
 // Minimum drag distance (px) before it registers as one discrete swipe --
 // small enough to feel responsive, large enough that a barely-trembling tap
 // never registers as an accidental move.

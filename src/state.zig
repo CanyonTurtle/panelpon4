@@ -232,6 +232,15 @@ pub var prev_gamepad: u8 = 0;
 pub var held_dir: u8 = 0;
 pub var das_counter: u8 = 0;
 
+// One-deep input buffering for the swap button (X), mirroring touch's own
+// buffering (see touch_pending_dir below): a press that lands while the
+// cursor's current pair can't swap yet (e.g. still mid-animation from the
+// *previous* swap) is remembered here instead of silently dropped, and
+// applied automatically the instant it becomes possible -- see
+// input.updateSwap. Only one press is ever remembered; pressing again while
+// one is already pending changes nothing (there's nothing more to buffer).
+pub var button_pending_swap: bool = false;
+
 // True whenever touch is the active input method (see input.updateTouch) --
 // hides the player's cursor (render.drawCursor) until a gamepad button
 // brings it back (see main.zig). Touch aims directly at the block it

@@ -51,7 +51,7 @@ export fn update() void {
 
     if (s.winner == .none) {
         input.updateCursorMovement(gp);
-        if (input.justPressed(gp, w4.BUTTON_1)) sim.trySwap(&s.player);
+        input.updateSwap(gp);
         // Held (not just a fresh press) so the raise keeps going for as long
         // as Z stays down -- tryManualRaise already no-ops on its own while
         // still cooling down or mid-raise, so calling it every held frame

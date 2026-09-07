@@ -45,7 +45,9 @@ each with your own full board -- yours at normal size on the left, the CPU's at 
 the side panel. Both run the exact same rules and physics.
 
 - **Arrow keys**: move the two-tile cursor.
-- **X**: swap the two blocks under the cursor.
+- **X**: swap the two blocks under the cursor. Buffers a single press if the cursor's pair can't swap yet
+  (still animating from the previous swap), firing it automatically the instant it can, so mashing X chains
+  swaps at full speed instead of dropping presses that land at the wrong instant.
 - **Touch/mouse**: swipe-only -- touching down targets the block under your finger directly (the cursor
   hides while you do, since you're aiming at that block, not steering a separate one -- it reappears the
   next time you press a real button); swiping left/right swaps that block with its neighbor in that
@@ -104,10 +106,11 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/cpu_ai.zig` — the CPU opponent's move picker: for now, just a random legal swap every so often (see
   `MOVE_INTERVAL`); actually seeking matches is out of scope for v1.
 - `src/audio.zig` — sound effects.
-- `src/input.zig` — gamepad (cursor movement with DAS, swap triggering) and touch (swipe-only: aims directly
-  at the touched block, swipes left/right swap it, up/down retarget rows -- with one-deep input buffering
-  so a fast continuous drag chains swaps at max speed) -- always drives `state.player`; the CPU has no real
-  input (see `cpu_ai.zig`).
+- `src/input.zig` — gamepad (cursor movement with DAS, swap triggering, itself one-deep buffered -- a press
+  that lands mid-swap is remembered and applied the instant it's possible) and touch (swipe-only: aims
+  directly at the touched block, swipes left/right swap it, up/down retarget rows -- with its own one-deep
+  input buffering so a fast continuous drag chains swaps at max speed) -- always drives `state.player`; the
+  CPU has no real input (see `cpu_ai.zig`).
 - `src/render.zig` — most drawing: the player's board (in full detail) at normal size, the cursor, panel,
   and title/game-over screens.
 - `src/render_garbage.zig` — garbage's full-detail rendering (the muted checkerboard fill and the linked-
