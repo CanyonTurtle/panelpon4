@@ -48,7 +48,9 @@ npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm --html web/panelpon4.html --t
   the score display.
 - A big enough combo or chain also drops garbage onto your own board -- self-inflicted risk/reward for
   aggressive play. Garbage is inert (colorless, unswappable, unmatchable) until a match pops right next to
-  it, which cracks it open into a fresh, chainable block once the whole connected pop finishes.
+  it, which cracks it open into a fresh, chainable block once the whole connected pop finishes. A connected
+  clump of garbage falls and lands as one rigid piece (a piece touching down stops the whole clump at once),
+  rendering as a single seamless bezeled slab rather than individual tiles.
 - A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
 - The floor rises forever, faster as your score climbs. If blocks reach the top row, it's game over.
 - Press **X** on the title or game-over screen to (re)start.
@@ -68,9 +70,11 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/state.zig` — the board grid, cursor, score/chain, and all other mutable game state, plus the small
   pure helpers (ring-buffer indexing, RNG, board-busy query) that only need that state.
 - `src/board.zig` — row generation, the rising floor, and (re)starting a game.
-- `src/sim.zig` — the core simulation: swaps, pops, landings, gravity, matching/chaining, and garbage
-  (spawning on a big combo/chain, propagation into adjacent garbage on a pop, reveal on clear) -- tests in
-  the companion `src/sim_test.zig`.
+- `src/sim.zig` — the core simulation: swaps, pops, landings, per-cell gravity, matching/chaining, and
+  garbage's match-side behavior (spawning on a big combo/chain, propagation into adjacent garbage on a pop,
+  reveal on clear) -- tests in the companion `src/sim_test.zig`.
+- `src/sim_garbage.zig` — garbage's rigid-body group gravity (a connected clump falls and lands as one piece,
+  computed by connectivity fresh every frame) and its spawn placement.
 - `src/audio.zig` — sound effects.
 - `src/input.zig` — gamepad and touch handling (cursor movement with DAS, swap triggering).
 - `src/render.zig` — most drawing: the board, cursor, panel, and title/game-over screens.

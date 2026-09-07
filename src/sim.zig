@@ -6,6 +6,7 @@ const std = @import("std");
 const c = @import("constants.zig");
 const s = @import("state.zig");
 const audio = @import("audio.zig");
+const garbage = @import("sim_garbage.zig");
 
 pub fn swappable(state: s.CellState) bool {
     return state == .empty or state == .normal;
@@ -143,21 +144,29 @@ pub fn simulate() void {
         var r: u8 = tc - 1;
         while (true) {
             const cell = s.cellAt(r, col);
-            if (cell.state != .normal) break;
+            // Garbage blocks this marking pass like any other non-.normal
+            // obstacle: it's inert and never inherits chainable through this
+            // mechanism (only a revealed block does, explicitly, when it
+            // pops -- see the .popping branch above), so it -- and anything
+            // further above it -- is left untouched.
+            if (cell.state != .normal or cell.is_garbage) break;
             cell.chainable = true;
             if (r == 0) break;
             r -= 1;
         }
     }
 
-    // Gravity: scan bottom-to-top per column so falls cascade within a frame.
+    // Gravity: scan bottom-to-top per column so falls cascade within a
+    // frame. Garbage is excluded here (`!above.is_garbage` / `!cur.is_garbage`)
+    // -- it falls and lands as one rigid connected body, not independently
+    // per column, so it's handled separately by updateGarbageGravity below.
     for (0..c.COLS) |ci| {
         const col: u8 = @intCast(ci);
         var r: u8 = c.ROWS - 1;
         while (r >= 1) : (r -= 1) {
             const below = s.cellAt(r, col);
             const above = s.cellAt(r - 1, col);
-            if (below.state == .empty and above.state == .normal) {
+            if (below.state == .empty and above.state == .normal and !above.is_garbage) {
                 below.* = above.*;
                 below.state = .falling;
                 below.fall_off = c.TILE;
@@ -165,7 +174,7 @@ pub fn simulate() void {
             }
 
             const cur = s.cellAt(r, col);
-            if (cur.state == .falling) {
+            if (cur.state == .falling and !cur.is_garbage) {
                 cur.fall_off -= c.FALL_SPEED;
                 if (cur.fall_off <= 0) {
                     cur.fall_off = 0;
@@ -187,6 +196,8 @@ pub fn simulate() void {
             if (r == 0) break;
         }
     }
+
+    garbage.updateGarbageGravity();
 
     if (settled) {
         _ = checkMatches(just_settled);
@@ -431,13 +442,13 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
                     // only x2/x3 were specified) -- multiplier > 1 here, so
                     // this never underflows.
                     const garbage_rows: u8 = multiplier - 1;
-                    spawnGarbage(garbage_rows, c.COLS, 0);
+                    garbage.spawnGarbage(garbage_rows, c.COLS, 0);
                 } else if (member_count >= 6) {
-                    spawnGarbage(1, c.COLS, 0);
+                    garbage.spawnGarbage(1, c.COLS, 0);
                 } else if (member_count == 5) {
-                    spawnGarbage(1, 4, min_col);
+                    garbage.spawnGarbage(1, 4, min_col);
                 } else { // member_count == 4, the only case left under is_combo
-                    spawnGarbage(1, 3, min_col);
+                    garbage.spawnGarbage(1, 3, min_col);
                 }
             }
             s.score += @as(u32, @intCast(member_count)) * 10 * multiplier;
@@ -461,25 +472,3 @@ pub fn checkMatches(just_settled: [c.ROWS][c.COLS]bool) bool {
     return true;
 }
 
-// Drops `rows` garbage rows (each `width` columns wide, anchored at
-// `anchor_col` -- clamped to fit the board, so callers can pass a match's
-// own min_col without worrying about overflow) onto the board: self-inflicted
-// punishment for a big combo/chain (see the call site in checkMatches). Cells
-// are placed at logical rows 0..rows-1, skipping any that are already
-// occupied rather than overwriting the player's existing blocks -- ordinary
-// gravity then carries the new cells down to rest on top of the stack,
-// exactly like any other block, using the same code path unchanged.
-fn spawnGarbage(rows: u8, width: u8, anchor_col: u8) void {
-    const clamped_rows = @min(rows, c.ROWS);
-    const start_col = if (anchor_col + width > c.COLS) c.COLS - width else anchor_col;
-    var r: u8 = 0;
-    while (r < clamped_rows) : (r += 1) {
-        var col = start_col;
-        while (col < start_col + width) : (col += 1) {
-            const cell = s.cellAt(r, col);
-            if (cell.state == .empty) {
-                cell.* = s.Cell{ .state = .normal, .is_garbage = true };
-            }
-        }
-    }
-}

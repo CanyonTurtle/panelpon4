@@ -421,3 +421,73 @@ test "garbage spawn skips cells that are already occupied, rather than overwriti
     try testing.expect(s.cellAt(0, 0).is_garbage);
     try testing.expect(s.cellAt(0, 2).is_garbage);
 }
+
+test "linked garbage falls and lands as one rigid body, not per column independently" {
+    s.resetForTest();
+    // A 3-wide garbage row dropping onto an UNEVEN floor: col 1 has a
+    // taller obstacle (row 8) than col 0/col 2 (nothing until row 10). The
+    // whole group must stop the instant col 1 makes contact, landing
+    // together at row 7 -- not col 0/col 2 continuing on down past it.
+    s.cellAt(0, 0).* = .{ .state = .normal, .is_garbage = true };
+    s.cellAt(0, 1).* = .{ .state = .normal, .is_garbage = true };
+    s.cellAt(0, 2).* = .{ .state = .normal, .is_garbage = true };
+    // The obstacle itself needs anchoring all the way to row 10 (the true
+    // bottom of the ring buffer) or ordinary gravity treats it as
+    // unsupported and lets it fall away too, silently flattening the
+    // "uneven floor" this test depends on (a recurring test-fixture
+    // pitfall in this project).
+    s.cellAt(8, 1).* = .{ .color = 2, .state = .normal };
+    s.cellAt(9, 1).* = .{ .color = 3, .state = .normal };
+    s.cellAt(10, 1).* = .{ .color = 2, .state = .normal };
+
+    for (0..100) |_| sim.simulate();
+
+    try testing.expectEqual(s.CellState.normal, s.cellAt(7, 0).state);
+    try testing.expect(s.cellAt(7, 0).is_garbage);
+    try testing.expectEqual(s.CellState.normal, s.cellAt(7, 1).state);
+    try testing.expect(s.cellAt(7, 1).is_garbage);
+    try testing.expectEqual(s.CellState.normal, s.cellAt(7, 2).state);
+    try testing.expect(s.cellAt(7, 2).is_garbage);
+    // Col 0/2 did NOT continue past row 7 down toward the true floor.
+    try testing.expectEqual(s.CellState.empty, s.cellAt(8, 0).state);
+    try testing.expectEqual(s.CellState.empty, s.cellAt(8, 2).state);
+}
+
+test "a resting garbage group re-falls together once its support disappears" {
+    s.resetForTest();
+    // Note this deliberately doesn't route the support's removal through an
+    // actual match/pop -- a garbage clump resting directly on a match would
+    // correctly propagate into it once triggered (see the propagation tests
+    // above), which is a different scenario than what this test is after:
+    // pure gravity re-evaluating a resting body once whatever was under it
+    // is simply gone, regardless of why.
+    s.cellAt(0, 0).* = .{ .state = .normal, .is_garbage = true };
+    s.cellAt(0, 1).* = .{ .state = .normal, .is_garbage = true };
+    s.cellAt(0, 2).* = .{ .state = .normal, .is_garbage = true };
+    s.cellAt(9, 0).* = .{ .color = 3, .state = .normal }; // temporary support
+    s.cellAt(9, 1).* = .{ .color = 4, .state = .normal };
+    s.cellAt(9, 2).* = .{ .color = 3, .state = .normal };
+    s.cellAt(10, 0).* = .{ .color = 3, .state = .normal }; // true floor
+    s.cellAt(10, 1).* = .{ .color = 4, .state = .normal };
+    s.cellAt(10, 2).* = .{ .color = 3, .state = .normal };
+
+    // The garbage falls and rests at row 8, on top of the (unrelated,
+    // non-matching, never-triggered) support.
+    for (0..60) |_| sim.simulate();
+    try testing.expectEqual(s.CellState.normal, s.cellAt(8, 0).state);
+    try testing.expect(s.cellAt(8, 0).is_garbage);
+
+    // Remove the support and let gravity respond: the garbage group above
+    // should fall as one body into the new gap and land on the true floor.
+    s.cellAt(9, 0).* = s.Cell{};
+    s.cellAt(9, 1).* = s.Cell{};
+    s.cellAt(9, 2).* = s.Cell{};
+    for (0..60) |_| sim.simulate();
+
+    try testing.expectEqual(s.CellState.normal, s.cellAt(9, 0).state);
+    try testing.expect(s.cellAt(9, 0).is_garbage);
+    try testing.expectEqual(s.CellState.normal, s.cellAt(9, 1).state);
+    try testing.expect(s.cellAt(9, 1).is_garbage);
+    try testing.expectEqual(s.CellState.normal, s.cellAt(9, 2).state);
+    try testing.expect(s.cellAt(9, 2).is_garbage);
+}

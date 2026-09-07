@@ -155,6 +155,46 @@ fn drawGarbageRect(x: i32, y: i32, w: i32, h: i32) void {
     }
 }
 
+// Which of a garbage cell's 4 orthogonal neighbors are themselves garbage,
+// still attached (see sim.zig's group-based gravity -- connected garbage
+// always falls/lands in lockstep, so a neighbor in any of these states is
+// guaranteed to be moving the same way this cell is, not just coincidentally
+// adjacent). Used to render a connected clump as one seamless slab: no gap
+// or bevel on the sides facing an attached neighbor, only on the outer
+// boundary of the whole clump.
+const GarbageEdges = struct { up: bool = false, down: bool = false, left: bool = false, right: bool = false };
+
+fn isAttachedGarbage(lr: u8, col: u8) bool {
+    const cell = s.cellAt(lr, col);
+    return cell.is_garbage and (cell.state == .normal or cell.state == .falling or cell.state == .landing);
+}
+
+fn garbageEdgesAt(lr: u8, col: u8) GarbageEdges {
+    var e = GarbageEdges{};
+    if (lr > 0) e.up = isAttachedGarbage(lr - 1, col);
+    if (lr + 1 < c.ROWS) e.down = isAttachedGarbage(lr + 1, col);
+    if (col > 0) e.left = isAttachedGarbage(lr, col - 1);
+    if (col + 1 < c.COLS) e.right = isAttachedGarbage(lr, col + 1);
+    return e;
+}
+
+// Like drawGarbageBlock, but extends the fill into an attached right/down
+// neighbor's tile (closing the 1px gap normal blocks leave there -- an
+// attached left/up neighbor closes the gap on *its* side instead, so this
+// cell doesn't need to touch its own left/top) and only bevels a corner
+// where both adjacent edges are unattached -- a true exterior corner of the
+// whole connected clump, not a seam between two of its own cells.
+fn drawGarbageBlockLinked(x: i32, y: i32, edges: GarbageEdges) void {
+    const w: i32 = if (edges.right) BLOCK_SIZE + 1 else BLOCK_SIZE;
+    const h: i32 = if (edges.down) BLOCK_SIZE + 1 else BLOCK_SIZE;
+    drawGarbageRect(x, y, w, h);
+    w4.DRAW_COLORS.* = DC_BG;
+    if (!edges.up and !edges.left) w4.Rect(x, y, 1, 1);
+    if (!edges.up and !edges.right) w4.Rect(x + w - 1, y, 1, 1);
+    if (!edges.down and !edges.left) w4.Rect(x, y + h - 1, 1, 1);
+    if (!edges.down and !edges.right) w4.Rect(x + w - 1, y + h - 1, 1, 1);
+}
+
 fn drawGarbageBlock(x: i32, y: i32, w: i32, h: i32) void {
     drawGarbageRect(x, y, w, h);
     if (w <= 2 * BEVEL_RADIUS or h <= 2 * BEVEL_RADIUS) return;
@@ -214,12 +254,21 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool) void
     drawHueSquareCentered(x, y, color, size);
 }
 
-fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool) void {
+fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool, edges: GarbageEdges) void {
     const elapsed = c.LAND_FRAMES - timer;
     const squash: i32 = if (elapsed < 3) (3 - @as(i32, elapsed)) * 2 else 0;
     const height = BLOCK_SIZE - squash;
     if (is_garbage) {
-        drawGarbageBlock(x, y + squash, BLOCK_SIZE, height);
+        // A connected clump lands (and squash-bounces) in lockstep -- see
+        // sim.zig's group-based gravity -- so this stays a seamless slab
+        // through the bounce too, not just at rest.
+        const w: i32 = if (edges.right) BLOCK_SIZE + 1 else BLOCK_SIZE;
+        drawGarbageRect(x, y + squash, w, height);
+        w4.DRAW_COLORS.* = DC_BG;
+        if (!edges.up and !edges.left) w4.Rect(x, y + squash, 1, 1);
+        if (!edges.up and !edges.right) w4.Rect(x + w - 1, y + squash, 1, 1);
+        if (!edges.down and !edges.left) w4.Rect(x, y + squash + height - 1, 1, 1);
+        if (!edges.down and !edges.right) w4.Rect(x + w - 1, y + squash + height - 1, 1, 1);
         return;
     }
     drawBevelledBlock(x, y + squash, BLOCK_SIZE, height, color);
@@ -279,14 +328,14 @@ fn drawBoard() void {
                     // animation (falling/landing/popping/swapping) keep
                     // their own motion undisturbed.
                     const y = if (col_stressed[col]) base_y + bounce else base_y;
-                    if (cell.is_garbage) drawGarbageBlock(x, y, BLOCK_SIZE, BLOCK_SIZE) else drawNormalCell(x, y, cell.color);
+                    if (cell.is_garbage) drawGarbageBlockLinked(x, y, garbageEdgesAt(lr, col)) else drawNormalCell(x, y, cell.color);
                 },
                 .falling => {
                     const y = base_y - cell.fall_off;
-                    if (cell.is_garbage) drawGarbageBlock(x, y, BLOCK_SIZE, BLOCK_SIZE) else drawNormalCell(x, y, cell.color);
+                    if (cell.is_garbage) drawGarbageBlockLinked(x, y, garbageEdgesAt(lr, col)) else drawNormalCell(x, y, cell.color);
                 },
                 .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.is_garbage),
-                .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage),
+                .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, garbageEdgesAt(lr, col)),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},
             }
