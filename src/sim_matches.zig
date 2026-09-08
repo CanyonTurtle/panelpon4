@@ -104,29 +104,36 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
     }
 
     // Garbage has no color of its own, so it never seeds a match -- but a
-    // pop propagates into any garbage cell orthogonally touching a matched
-    // cell, and from there into further garbage cells touching *that* one,
-    // and so on, so a whole connected clump of garbage goes together. A
-    // fixed-point sweep, since propagation can chain through several
-    // garbage cells in a row within the same event.
-    var propagated = true;
-    while (propagated) {
-        propagated = false;
-        for (0..c.ROWS) |lr| {
-            for (0..c.COLS) |col| {
-                if (matched[lr][col]) continue;
-                const cell = self.cellAt(@intCast(lr), @intCast(col));
-                if (cell.state != .normal or !cell.is_garbage) continue;
-                const touches_matched =
-                    (lr > 0 and matched[lr - 1][col]) or
-                    (lr + 1 < c.ROWS and matched[lr + 1][col]) or
-                    (col > 0 and matched[lr][col - 1]) or
-                    (col + 1 < c.COLS and matched[lr][col + 1]);
-                if (touches_matched) {
-                    matched[lr][col] = true;
-                    propagated = true;
-                }
-            }
+    // pop pulls in every cell of any garbage *piece* (see Cell.garbage_group
+    // -- one persistent id per combo/chain that spawned it) that has at
+    // least one member orthogonally touching a matched real cell. This is
+    // about retained groupings, not transient spatial touching: two
+    // different pieces sitting right next to each other never merge into
+    // one event just because they're adjacent -- a piece only ever gets
+    // pulled in by actually touching the real match itself, never by
+    // touching some *other* garbage piece that happens to be nearby (even
+    // one that's itself being pulled in this same event). Once a piece is
+    // triggered, its whole group comes along together, wherever its other
+    // cells happen to be -- so, unlike the old spatial flood-fill this
+    // replaces, a single pass suffices: nothing here chains group-to-group.
+    var triggered_groups: [256]bool = std.mem.zeroes([256]bool);
+    for (0..c.ROWS) |lr| {
+        for (0..c.COLS) |col| {
+            const cell = self.cellAt(@intCast(lr), @intCast(col));
+            if (cell.state != .normal or !cell.is_garbage) continue;
+            const touches_matched =
+                (lr > 0 and matched[lr - 1][col]) or
+                (lr + 1 < c.ROWS and matched[lr + 1][col]) or
+                (col > 0 and matched[lr][col - 1]) or
+                (col + 1 < c.COLS and matched[lr][col + 1]);
+            if (touches_matched) triggered_groups[cell.garbage_group] = true;
+        }
+    }
+    for (0..c.ROWS) |lr| {
+        for (0..c.COLS) |col| {
+            const cell = self.cellAt(@intCast(lr), @intCast(col));
+            if (cell.state != .normal or !cell.is_garbage) continue;
+            if (triggered_groups[cell.garbage_group]) matched[lr][col] = true;
         }
     }
 
@@ -264,15 +271,22 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
                 cell.pre_pop_timer = c.PRE_POP_TOTAL_FRAMES;
                 cell.pop_group_end = group_end;
                 if (cell.is_garbage) {
-                    // A clump taller than one row only ever converts its
-                    // bottom-most (per column) row per event: if there's
-                    // ANOTHER matched garbage cell directly below this one,
-                    // that one is closer to the bottom, so this cell just
-                    // flashes along with the rest of its clump and reverts
-                    // to plain garbage once the group resolves (see
-                    // sim.simulate) rather than actually converting.
-                    const below_pops = pos[0] + 1 < c.ROWS and matched[pos[0] + 1][pos[1]] and self.cellAt(pos[0] + 1, pos[1]).is_garbage;
-                    cell.garbage_reveals = !below_pops;
+                    // A piece taller than one row only ever converts its
+                    // bottom-most (per column) row per event -- decided per
+                    // PIECE (Cell.garbage_group), not by whatever this
+                    // event's overall touching shape looks like: if there's
+                    // another cell of THIS SAME piece directly below (on the
+                    // board right now, not merely "also matched"), that
+                    // one's closer to the bottom, so this cell just flashes
+                    // along with the rest of its piece and reverts to plain
+                    // garbage once the group resolves (see sim.simulate)
+                    // rather than actually converting. A different piece
+                    // resting below (or on top) doesn't count, even if it's
+                    // being pulled into this same event for its own reasons.
+                    const below_same_piece = pos[0] + 1 < c.ROWS and
+                        self.cellAt(pos[0] + 1, pos[1]).is_garbage and
+                        self.cellAt(pos[0] + 1, pos[1]).garbage_group == cell.garbage_group;
+                    cell.garbage_reveals = !below_same_piece;
                 }
             }
 

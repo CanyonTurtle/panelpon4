@@ -70,11 +70,14 @@ the side panel. Both run the exact same rules and physics.
   cracks open into a fresh, plain-looking normal block -- no animation beyond that, just an instant reveal,
   and never in a color that would complete an accidental 3-in-a-row -- so you can read the color lineup
   forming and plan your next move before the whole connected group finishes and every recycled block
-  becomes active together. A clump taller than one row only ever converts its bottom row per match --
-  the rest just flashes the same heads-up and stays garbage, falling to rest on the newly-revealed row
-  below it, ready to be peeled again by a future match. A connected clump of garbage falls and lands as one
-  rigid piece (a piece touching down stops the whole clump at once), rendering as a single seamless bezeled
-  slab rather than individual tiles.
+  becomes active together. Each garbage drop is its own piece for the rest of its life, however it ends up
+  sitting on the board -- a match only ever pulls in a piece it's actually touching, never a *different*
+  piece just because the two happen to be resting against each other -- and a piece taller than one row only
+  ever converts its own bottom row per match, independent of anything else nearby: the rest just flashes the
+  same heads-up and stays garbage, falling to rest on the newly-revealed row below it, ready to be peeled
+  again by a future match. A connected clump of garbage falls and lands as one rigid piece (a piece touching
+  down stops the whole clump at once), rendering as a single seamless bezeled slab rather than individual
+  tiles.
 - A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
 - Each board's floor rises forever, faster as that board's own score climbs -- true for the CPU too, so a
   CPU that's playing efficiently is also accelerating its own rise. Topping out isn't instant, though: once
@@ -122,10 +125,14 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   (and, for simulate, `opponent`) -- tests in the companion `src/sim_test.zig`.
 - `src/sim_matches.zig` — match detection, chain/combo scoring, and garbage queueing (re-exported from
   `sim.zig` as `checkMatches`); a big enough combo/chain on `self` queues garbage for `opponent`, never
-  `self` -- garbage is never self-inflicted in vs-CPU play. Also decides, per recycle event, which garbage
-  cells actually convert (only a clump's bottom row per column, see `Cell.garbage_reveals`) and picks each
-  converting cell's color to never complete a run of 3, mirroring `board.generateRowInto`'s own reasoning --
-  tests for both, plus the bottom-right-to-top-left stagger order, in the companion `src/sim_recycle_test.zig`.
+  `self` -- garbage is never self-inflicted in vs-CPU play. A pop pulls in a whole garbage *piece* (see
+  `Cell.garbage_group` -- one persistent id per combo/chain that spawned it, assigned in
+  `sim_garbage.spawnGarbage`) if any of its cells touches the match, regardless of what else that piece
+  happens to be touching -- retained groupings, not transient spatial adjacency, decide both this and which
+  cells actually convert (only a piece's own bottom row per column, see `Cell.garbage_reveals`, evaluated per
+  piece rather than by the event's overall touching shape). Also picks each converting cell's color to never
+  complete a run of 3, mirroring `board.generateRowInto`'s own reasoning -- tests for all of this, plus the
+  bottom-right-to-top-left stagger order, in the companion `src/sim_recycle_test.zig`.
 - `src/sim_garbage.zig` — garbage's rigid-body group gravity (a connected clump falls and lands as one piece,
   computed by connectivity fresh every frame), its spawn placement, and the queueing lifecycle between the
   two (`queueChainGarbage`/`queueComboGarbage` record what a combo or a still-growing chain would send,

@@ -1,9 +1,11 @@
 // Tests for the recycle-specific behavior added to sim_matches.zig/sim.zig:
-// bottom-right-to-top-left stagger order, a clump taller than one row only
-// converting its bottom-most (per column) row per event, and recycled
-// colors never completing a run of 3 -- kept in a separate file so
-// sim_garbage_test.zig itself stays under the project's ~500-line-per-file
-// guideline.
+// bottom-right-to-top-left stagger order, garbage *pieces* (Cell.garbage_group
+// -- one persistent id per combo/chain that spawned it, retained regardless
+// of what a piece happens to be touching) rather than transient spatial
+// adjacency deciding both what a match pulls in and the "only the bottom row
+// per piece converts" rule, and recycled colors never completing a run of 3
+// -- kept in a separate file so sim_garbage_test.zig itself stays under the
+// project's ~500-line-per-file guideline.
 
 const std = @import("std");
 const testing = std.testing;
@@ -48,6 +50,55 @@ test "a garbage clump taller than one row only marks its bottom row (per column)
 
     try testing.expect(!b.cellAt(8, 2).garbage_reveals); // top: flash-only
     try testing.expect(b.cellAt(9, 2).garbage_reveals); // bottom: converts
+}
+
+test "a match does not propagate into a different garbage piece just because it's touching the triggered one" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    // Two SEPARATE pieces stacked on top of each other: piece 1 touches the
+    // real match directly; piece 2 (a different origin) just happens to be
+    // resting on top of it, touching it, but isn't touched by the match
+    // itself. Only piece 1 should be pulled into this event at all.
+    b.cellAt(9, 2).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 1 };
+    b.cellAt(8, 2).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 2 };
+    b.cellAt(10, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 2).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(&b, &opp, no_settled);
+
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(9, 2).state); // piece 1: pulled in
+    try testing.expect(b.cellAt(9, 2).garbage_reveals); // and converts -- nothing of ITS piece below it
+
+    // Piece 2 is a completely different origin -- untouched, still plain
+    // inert garbage, not even part of this event.
+    try testing.expectEqual(s.CellState.normal, b.cellAt(8, 2).state);
+    try testing.expect(b.cellAt(8, 2).is_garbage);
+}
+
+test "two separate 1-row pieces stacked together each convert on their own -- the rule is per piece, not per event" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    // Piece 1 (row 9) touches a match below it; piece 2 (row 8), a
+    // different origin sitting directly on top of piece 1, touches its own
+    // separate match above it. Both are genuinely only 1 row tall on their
+    // own, even though they're touching each other -- so both should
+    // convert, not just the lower one (the bug this test guards against:
+    // treating the touching stack as one 2-tall clump and only letting the
+    // bottom-most cell overall convert).
+    b.cellAt(7, 0).* = .{ .color = 2, .state = .normal };
+    b.cellAt(7, 1).* = .{ .color = 2, .state = .normal };
+    b.cellAt(7, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(8, 2).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 2 };
+    b.cellAt(9, 2).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 1 };
+    b.cellAt(10, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 2).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(&b, &opp, no_settled);
+
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(8, 2).state);
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(9, 2).state);
+    try testing.expect(b.cellAt(8, 2).garbage_reveals);
+    try testing.expect(b.cellAt(9, 2).garbage_reveals);
 }
 
 test "each column of a wider clump converts independently -- a 1-tall column still converts even next to a 2-tall one" {
@@ -157,3 +208,4 @@ test "a recycled color also avoids completing a run with pre-existing settled re
     try testing.expect(b.cellAt(9, 2).garbage_reveals);
     try testing.expect(b.cellAt(9, 2).color != 2);
 }
+

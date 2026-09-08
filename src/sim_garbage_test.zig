@@ -33,14 +33,20 @@ test "a match propagates into an orthogonally adjacent garbage cell, recycling i
     try testing.expectEqual(s.CellState.recycling, b.cellAt(5, 3).state);
 }
 
-test "garbage propagation chains transitively through multiple garbage cells" {
+test "a match pulls in a whole garbage piece even if only one of its cells actually touches the match" {
     var b: s.Board = .{};
     var opp: s.Board = .{};
+    // Both cells belong to the SAME piece (garbage_group defaults to 0 for
+    // both here, same as one spawnGarbage call would give them) -- only
+    // (6,2) actually touches the match, but (7,2) comes along too because
+    // it's part of the same piece, not because of transitive spatial
+    // touching (see sim_recycle_test.zig for the case where two DIFFERENT
+    // pieces touch each other and must NOT both get pulled in this way).
     b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
     b.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
     b.cellAt(6, 2).* = .{ .state = .normal, .is_garbage = true }; // touches the match
-    b.cellAt(7, 2).* = .{ .state = .normal, .is_garbage = true }; // only touches the garbage above it
+    b.cellAt(7, 2).* = .{ .state = .normal, .is_garbage = true }; // same piece, doesn't touch the match itself
     _ = sim.checkMatches(&b, &opp, no_settled);
 
     try testing.expectEqual(s.CellState.recycling, b.cellAt(6, 2).state);

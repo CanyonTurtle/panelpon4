@@ -91,6 +91,19 @@ pub const Cell = struct {
     // once the group resolves (see sim.simulate), regardless of which way
     // it went.
     garbage_reveals: bool = false,
+    // Which garbage *piece* this cell belongs to -- one persistent id per
+    // combo/chain that spawned it (see sim_garbage.spawnGarbage, which
+    // assigns a fresh one, and Board.next_garbage_group below), completely
+    // independent of where the cell physically ends up or what it happens
+    // to be touching. A match only pulls in a garbage piece if one of its
+    // cells actually touches the match; from there the *whole* piece
+    // (every cell sharing this id, wherever it is) comes along together --
+    // never a *different* piece just because the two happen to be sitting
+    // right next to each other (see sim_matches.checkMatches' propagation
+    // pass, and Cell.garbage_reveals' own per-piece "only the bottom row"
+    // rule, both keyed off this rather than transient spatial adjacency).
+    // Meaningless once is_garbage is false.
+    garbage_group: u8 = 0,
 };
 
 // A small floating text badge (an orange-dithered block with black text)
@@ -179,6 +192,15 @@ pub const Board = struct {
     // stops holding, so a close call that gets cleared in time never
     // carries over into the next one.
     danger_timer: u32 = 0,
+
+    // The next id sim_garbage.spawnGarbage will hand out (see
+    // Cell.garbage_group) -- incremented (wrapping) once per spawn call, so
+    // every cell placed by that ONE call shares an id no other piece has
+    // recently used. Cyclical rather than ever-growing: a u8 is plenty of
+    // distinct ids for any garbage piece actually still around waiting to
+    // be recycled at once, and wrapping means it never needs anything
+    // bigger than a single byte per board no matter how long a match runs.
+    next_garbage_group: u8 = 0,
 
     // A chain still in progress on THIS board keeps overwriting this with
     // whatever the latest step's garbage would be (see

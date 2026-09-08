@@ -21,17 +21,22 @@ const s = @import("state.zig");
 // skipping any that are already occupied rather than overwriting the
 // player's existing blocks. They start out connected (a solid rectangle), so
 // updateGarbageGravity below picks them up as a single rigid body from the
-// very next frame.
+// very next frame -- and all share one fresh Cell.garbage_group id (this is
+// the *only* place a new one is handed out), so a match recycling any part
+// of this piece later always pulls in the whole thing, and never bleeds
+// into some other piece it merely happens to be touching by then.
 pub fn spawnGarbage(target: *s.Board, rows: u8, width: u8, anchor_col: u8) void {
     const clamped_rows = @min(rows, c.ROWS);
     const start_col = if (anchor_col + width > c.COLS) c.COLS - width else anchor_col;
+    const group = target.next_garbage_group;
+    target.next_garbage_group +%= 1;
     var r: u8 = 0;
     while (r < clamped_rows) : (r += 1) {
         var col = start_col;
         while (col < start_col + width) : (col += 1) {
             const cell = target.cellAt(r, col);
             if (cell.state == .empty) {
-                cell.* = s.Cell{ .state = .normal, .is_garbage = true };
+                cell.* = s.Cell{ .state = .normal, .is_garbage = true, .garbage_group = group };
             }
         }
     }

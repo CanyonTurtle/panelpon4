@@ -50,13 +50,14 @@ pub fn getScore(board: u32) callconv(.c) u32 {
 }
 
 // Packed as state(8) | color(8) | chainable(1) | is_garbage(1), least-
-// significant byte first.
+// significant byte first, then garbage_group(8) at bit 18.
 pub fn getCellInfo(board: u32, logical_row: u32, col: u32) callconv(.c) u32 {
     const cell = boardFor(board).cellAt(@intCast(logical_row), @intCast(col));
     var v: u32 = @intFromEnum(cell.state);
     v |= @as(u32, cell.color) << 8;
     v |= @as(u32, if (cell.chainable) 1 else 0) << 16;
     v |= @as(u32, if (cell.is_garbage) 1 else 0) << 17;
+    v |= @as(u32, cell.garbage_group) << 18;
     return v;
 }
 
