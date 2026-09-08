@@ -88,24 +88,32 @@ the side panel. Both run the exact same rules and physics.
   again, resets it) -- a real beat to recover from a close call rather than an instant loss the moment a
   rise happens to touch the top. Whoever's forgiveness timer runs out first loses (both on the same frame
   is a draw).
-- On the title screen, **left/right** sets the CPU's difficulty, 1-10 (fixed for the rest of the session --
-  there's no menu to revisit it mid-match or between replays). Every level runs the same move-search engine
-  (see `src/cpu_engine.zig`) -- lower levels are simply worse at listening to it (far more likely to ignore
-  its pick and play a random legal swap instead, a shallower search, and a slower reaction time), not a
-  different kind of AI. The engine can also choose to raise its own floor by a row instead of swapping (see
-  the Z button below) when it's running low on real blocks to work with -- weighed the same way as any
-  swap, so it only does this when it's actually short on material, not just because nothing else looks great
-  -- and never when its own stack (or, after the raise, what its own stack would become) is already
-  dangerously close to the top, however short on material it is.
 - **Z**: manually raise your own floor by one row right away (finishes in a third of a second instead of
   waiting for the automatic pace) -- useful for deliberately forcing a rise when you want fresh blocks, or
   to bail out of a bad board shape. On a cooldown (two thirds of a second) so it can't be spammed -- hold it
   down to keep raising row after row as soon as each cooldown clears, instead of having to tap repeatedly.
-- Press **X** on the title or game-over screen to (re)start -- both boards reset immediately, but simulation
-  stays frozen behind a brief "3 2 1 START" countdown first (each number rises up a couple pixels then holds
-  for about a second; "START" rises the same way but then blinks a few times) before the match actually
-  begins. Losing plays out the same way in reverse: once someone tops out, every row pops top to bottom
-  across both boards before a "MATCH OVER" screen names the winner.
+- A match is a best of 3 -- first to 2 match wins takes the whole series (see `constants.POINTS_TO_WIN`). A
+  small row of pips next to each side's own score fills in as they win matches; losing a match doesn't end
+  the series, just that one match -- press X to move straight into the next one, same difficulty, running
+  score carried over as pips, not reset.
+- Two screens lead into a series: a branded **title** screen (press X to continue), then a **setup** screen
+  where **left/right** sets the CPU's difficulty, 1-10, shown as a filled-in bar rather than a bare number
+  (press X to begin). Every level runs the same move-search engine (see `src/cpu_engine.zig`) -- lower levels
+  are simply worse at listening to it (far more likely to ignore its pick and play a random legal swap
+  instead, a shallower search, and a slower reaction time), not a different kind of AI. The engine can also
+  choose to raise its own floor by a row instead of swapping (see the Z button above) when it's running low
+  on real blocks to work with -- weighed the same way as any swap, so it only does this when it's actually
+  short on material, not just because nothing else looks great -- and never when its own stack (or, after
+  the raise, what its own stack would become) is already dangerously close to the top, however short on
+  material it is. Difficulty is fixed for the whole series, but revisitable in setup again once one
+  concludes. Both screens share the same bezeled menu panel, gently bobbing over a slow diagonal-scrolling
+  background of faint drifting blocks.
+- Press **X** to (re)start a match -- both boards reset immediately, but simulation stays frozen behind a
+  brief "3 2 1 START" countdown first (each number rises up a couple pixels then holds for about a second;
+  "START" rises the same way but then blinks a few times) before the match actually begins. Losing plays out
+  the same way in reverse: once someone tops out, every row pops top to bottom across both boards before a
+  "MATCH OVER" screen names the winner and the running series score -- and, once the series itself is
+  decided, who took it, before returning all the way back to the title screen.
 
 ## Notes on the block colors
 
@@ -234,17 +242,24 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   garbage attack (`Board.incoming_garbage`), width scaled to the attack's own column width -- a lightweight
   heads-up that an attack is about to land the instant that board goes idle, visible without reading the
   board itself. Drawn for the player in the gap between its frame and the panel column, and for the CPU in
-  the panel's own leftover width to the right of its mini board.
+  the panel's own leftover width to the right of its mini board. `drawPoints` (best-of-N series pips, next to
+  each side's own score) lives here too, shared between `render.zig` and `render_cpu.zig`.
+- `src/render_bg.zig` — the slow diagonal-drifting background behind the title/setup menu screens: faint
+  speckled squares in a fixed, comptime-shuffled layout (no runtime RNG involved, since nothing ever reads it
+  back), independent of every other RNG stream in the game.
 - `src/debug.zig` — debug-only helpers (set up a board scenario, read back cell/chain/winner state) for
   scripted testing, each taking a `board` selector (0 = player, else = cpu); only exported as WASM functions
   in Debug builds (see the `comptime` block in `main.zig`) -- `zig build --release=small` never includes
   this surface. Used via `tools/wasm4-harness.js`.
 - `src/main.zig` — wires the above together behind the WASM-4 `start`/`update` entry points: drives both
-  boards' input/simulation/rise each frame, and tracks who wins once either tops out. Between the title
-  screen and real gameplay sits a frozen "3 2 1 START" countdown (`state.countdown_timer`, started by
-  `board.beginCountdown`); between a match ending and the winner overlay sits a frozen closing wipe
-  (`state.closing_timer`, started by `board.beginClosing`) -- both gate simulation entirely, only ever
-  calling `render.render()` (which reads board state passively) plus their own overlay on top.
+  boards' input/simulation/rise each frame, and tracks who wins once either tops out. Before a series begins,
+  `state.menu_phase` steps through the title and setup screens (see `render.drawTitleScreen`/
+  `drawSetupScreen`); between a countdown and real gameplay sits a frozen "3 2 1 START" overlay
+  (`state.countdown_timer`, started by `board.beginCountdown`); between a match ending and the winner overlay
+  sits a frozen closing wipe (`state.closing_timer`, started by `board.beginClosing`) -- both gate simulation
+  entirely, only ever calling `render.render()` (which reads board state passively) plus their own overlay on
+  top. `board.awardMatchPoint` tallies the best-of-N series score and decides `state.set_winner` once one
+  side has won enough matches to take the whole series.
 - `build.zig` / `build.zig.zon` — builds `src/main.zig` into a freestanding `wasm32` cart with the memory layout
   WASM-4 expects, and wires up `zig build test`.
 - `tools/wasm4-harness.js` — a shared Node harness for driving a compiled cart headlessly (scripted board

@@ -253,6 +253,23 @@ pub fn beginClosing() void {
     s.closing_timer = c.CLOSING_TOTAL_FRAMES;
 }
 
+// Awards this match's point to whoever won it (a draw awards neither side
+// one), then checks whether that's enough to take the whole best-of-N
+// series -- see constants.POINTS_TO_WIN/state.set_winner. Called once, at
+// the same moment as beginClosing (see main.zig).
+pub fn awardMatchPoint(winner: s.Winner) void {
+    switch (winner) {
+        .player => s.player_points += 1,
+        .cpu => s.cpu_points += 1,
+        .draw, .none => {},
+    }
+    if (s.player_points >= c.POINTS_TO_WIN) {
+        s.set_winner = .player;
+    } else if (s.cpu_points >= c.POINTS_TO_WIN) {
+        s.set_winner = .cpu;
+    }
+}
+
 const testing = @import("std").testing;
 
 test "doRise no longer ends the game directly -- see updateDangerTimer's forgiveness timer" {
@@ -431,4 +448,22 @@ test "manual raise pauses like the automatic rise while the board is busy" {
     // Never progressed at all while busy.
     try testing.expectEqual(@as(u32, 1), b.manual_raise_elapsed);
     try testing.expectEqual(@as(u8, 0), b.top);
+}
+
+test "awardMatchPoint tallies points and declares a set winner at POINTS_TO_WIN" {
+    s.player_points = 0;
+    s.cpu_points = 0;
+    s.set_winner = .none;
+
+    awardMatchPoint(.player);
+    try testing.expectEqual(@as(u8, 1), s.player_points);
+    try testing.expectEqual(s.Winner.none, s.set_winner); // not enough yet (POINTS_TO_WIN=2)
+
+    awardMatchPoint(.draw); // awards nobody
+    try testing.expectEqual(@as(u8, 1), s.player_points);
+    try testing.expectEqual(@as(u8, 0), s.cpu_points);
+
+    awardMatchPoint(.player);
+    try testing.expectEqual(@as(u8, 2), s.player_points);
+    try testing.expectEqual(s.Winner.player, s.set_winner);
 }

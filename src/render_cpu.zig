@@ -277,6 +277,10 @@ fn plotDithered(x: i32, y: i32) void {
 pub fn draw() void {
     w4.DRAW_COLORS.* = 0x0002;
     w4.Text("CPU", c.PANEL_X, LABEL_Y);
+    // Best-of-N series score (see constants.POINTS_TO_WIN) -- next to the
+    // "CPU" label, in the label row's own leftover width (mirrors the
+    // player's own pips next to their score in render.drawPanel).
+    badge.drawPoints(c.PANEL_X + 3 * 8 + 4, LABEL_Y, s.cpu_points);
     var buf: [12]u8 = undefined;
     const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.cpu.score}) catch "0";
     w4.Text(score_str, c.PANEL_X, SCORE_Y);

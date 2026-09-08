@@ -16,6 +16,7 @@ const sym = @import("symbols.zig");
 const badge = @import("render_badge.zig");
 const render_cpu = @import("render_cpu.zig");
 const rgarbage = @import("render_garbage.zig");
+const bg = @import("render_bg.zig");
 
 // nibble values for DRAW_COLORS color1, one per palette slot (index+1)
 const DC_BG: u16 = 1;
@@ -506,19 +507,88 @@ fn drawPanel() void {
         w4.DRAW_COLORS.* = 0x0004;
         w4.Text("COMBO", c.PANEL_X, 28);
     }
+
+    // Best-of-N series score (see constants.POINTS_TO_WIN) -- the CPU's own
+    // pips are drawn next to its score in render_cpu.draw instead.
+    badge.drawPoints(c.PANEL_X, 38, s.player_points);
 }
 
-pub fn drawTitle() void {
+// A slow sine-wave offset -- gives the menu panel below a gentle, alive
+// bobbing motion ("personality") rather than sitting dead still, distinct
+// from every other motion in the game (which all use a triangle-wave/linear
+// ease -- see stressBounceOffset, drawCursor's pulse -- since a menu panel
+// idling for a long time is the one place a true sinusoid's smoothness is
+// worth the float math over the cheaper approximations used elsewhere).
+fn menuSinOffset(period_frames: i32, amplitude_px: i32) i32 {
+    const t: f32 = @floatFromInt(@mod(s.frame_count, @as(u32, @intCast(period_frames))));
+    const phase = t / @as(f32, @floatFromInt(period_frames)) * std.math.tau;
+    return @intFromFloat(@sin(phase) * @as(f32, @floatFromInt(amplitude_px)));
+}
+
+const MENU_PANEL_X: i32 = 20;
+const MENU_PANEL_W: i32 = 120;
+const MENU_PANEL_H: i32 = 100;
+const MENU_SIN_PERIOD: i32 = 180; // 3s
+const MENU_SIN_AMOUNT: i32 = 4;
+
+fn menuPanelY() i32 {
+    return 30 + menuSinOffset(MENU_SIN_PERIOD, MENU_SIN_AMOUNT);
+}
+
+// Common backdrop for both pre-game screens: the parallaxing background
+// (see render_bg.zig) plus the bezeled panel itself, gently bobbing (see
+// menuPanelY) -- callers just draw their own content into the returned Y.
+fn drawMenuPanel() i32 {
+    bg.draw();
+    const y = menuPanelY();
+    w4.DRAW_COLORS.* = 0x0001;
+    w4.Rect(MENU_PANEL_X, y, MENU_PANEL_W, MENU_PANEL_H);
+    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, MENU_PANEL_H);
+    return y;
+}
+
+pub fn drawTitleScreen() void {
+    const y = drawMenuPanel();
     w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("PANELPON4", 40, 44);
+    w4.Text("PANELPON4", 40, y + 24);
     w4.DRAW_COLORS.* = 0x0002;
+    w4.Text("PRESS X", 52, y + 64);
+}
+
+// One filled-in segment per difficulty level (1-10), replacing the old
+// plain "LEVEL {d}" text with something that reads at a glance without
+// needing to parse a number.
+fn drawDifficultyBar(x: i32, y: i32) void {
+    var i: u8 = 1;
+    while (i <= 10) : (i += 1) {
+        const px = x + @as(i32, i - 1) * 8;
+        if (i <= s.difficulty) {
+            w4.DRAW_COLORS.* = 0x0004;
+            w4.Rect(px, y, 6, 6);
+        } else {
+            w4.DRAW_COLORS.* = 0x0002;
+            w4.Rect(px, y, 6, 1);
+            w4.Rect(px, y + 5, 6, 1);
+            w4.Rect(px, y, 1, 6);
+            w4.Rect(px + 5, y, 1, 6);
+        }
+    }
+}
+
+pub fn drawSetupScreen() void {
+    const y = drawMenuPanel();
+    w4.DRAW_COLORS.* = 0x0003;
+    w4.Text("SETUP", 58, y + 12);
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text("DIFFICULTY", 40, y + 32);
+    drawDifficultyBar(40, y + 44);
     var buf: [24]u8 = undefined;
     // Every level runs cpu_engine's actual move search -- see
     // cpu_ai.configFor -- lower levels just listen to it far less reliably.
     const label = std.fmt.bufPrint(&buf, "LEVEL {d}", .{s.difficulty}) catch "LEVEL ?";
-    w4.Text(label, 58, 68);
-    w4.Text("<-      ->", 40, 80);
-    w4.Text("PRESS X", 52, 100);
+    w4.Text(label, 58, y + 56);
+    w4.Text("<-      ->", 40, y + 68);
+    w4.Text("PRESS X", 52, y + 82);
 }
 
 // Bezeled orange border for a full-screen overlay panel (the countdown and
@@ -544,7 +614,10 @@ fn drawPanelBorder(x: i32, y: i32, w: i32, h: i32) void {
 // Only ever shown once the closing wipe (state.closing_timer, see
 // board.beginClosing) has finished popping every row -- see main.zig, which
 // gates the call on that -- so the loss reads as "board clears, then the
-// verdict appears", not both at once.
+// verdict appears", not both at once. Shows this one match's own result
+// plus the running series score always, and -- once state.set_winner says
+// the whole best-of-N series is decided (see board.awardMatchPoint) -- who
+// took the series instead of just prompting to continue it.
 pub fn drawGameOver() void {
     const text: []const u8 = switch (s.winner) {
         .player => "YOU WIN",
@@ -555,15 +628,29 @@ pub fn drawGameOver() void {
     const x = 20;
     const y = 52;
     const w = 120;
-    const h = 56;
+    const h = 68;
     w4.DRAW_COLORS.* = 0x0001;
     w4.Rect(x, y, w, h);
     drawPanelBorder(x, y, w, h);
     w4.DRAW_COLORS.* = 0x0004;
     w4.Text("MATCH OVER", 40, 58);
     w4.Text(text, 32, 74);
+
+    var buf: [16]u8 = undefined;
+    const pts = std.fmt.bufPrint(&buf, "{d} - {d}", .{ s.player_points, s.cpu_points }) catch "";
     w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("PRESS X", 40, 90);
+    w4.Text(pts, 64, 84);
+
+    if (s.set_winner != .none) {
+        const set_text: []const u8 = if (s.set_winner == .player) "YOU WIN THE SET!" else "CPU WINS THE SET!";
+        w4.DRAW_COLORS.* = 0x0004;
+        w4.Text(set_text, 12, 96);
+        w4.DRAW_COLORS.* = 0x0002;
+        w4.Text("PRESS X", 40, 106);
+    } else {
+        w4.DRAW_COLORS.* = 0x0002;
+        w4.Text("PRESS X", 40, 98);
+    }
 }
 
 // "3 2 1 START" shown once per match, right after resetGame -- see

@@ -356,7 +356,28 @@ pub var shared_rows_count: u32 = 0;
 pub const Winner = enum { none, player, cpu, draw };
 pub var winner: Winner = .none;
 
+// Best-of-N match points (see constants.POINTS_TO_WIN and
+// board.awardMatchPoint, the only place these change): a draw awards no
+// point to either side. `set_winner` is set the instant either side reaches
+// POINTS_TO_WIN and drives main.zig's choice between "next match, same
+// series" (press X -> board.beginCountdown, points untouched) and "series
+// decided" (press X -> back to the title screen, points reset) -- see
+// render.drawGameOver for the two different overlays this produces.
+pub var player_points: u8 = 0;
+pub var cpu_points: u8 = 0;
+pub var set_winner: Winner = .none;
+
 pub var started: bool = false;
+
+// Which of the two pre-game screens is showing while `!started` and no
+// countdown is active -- see main.zig. `title` is the branded splash
+// ("PRESS X" to continue); `setup` is where the CPU difficulty is actually
+// adjusted before a series begins. Reset to `.title` only when a full
+// series concludes (see set_winner above) -- mid-series, pressing X on a
+// match's own game-over screen skips straight back into a countdown, never
+// back through either menu screen.
+pub const MenuPhase = enum { title, setup };
+pub var menu_phase: MenuPhase = .title;
 
 // A brief "3 2 1 START" overlay shown once per match, right after both
 // boards (and the shared row cache) reset but before real simulation

@@ -110,6 +110,30 @@ pub fn drawGarbageQueueIcons(x: i32, top_y: i32, board: *const s.Board) void {
     }
 }
 
+// Best-of-N match-point pips (see constants.POINTS_TO_WIN/state.set_winner)
+// -- one per point needed to take the series, filled solid once earned,
+// just an outline otherwise. Used by both render.drawPanel (the player) and
+// render_cpu.draw (the CPU), next to each side's own score.
+const POINT_PIP_SIZE: i32 = 4;
+const POINT_PIP_GAP: i32 = 2;
+
+pub fn drawPoints(x: i32, y: i32, points: u8) void {
+    var i: u8 = 0;
+    while (i < c.POINTS_TO_WIN) : (i += 1) {
+        const px = x + @as(i32, i) * (POINT_PIP_SIZE + POINT_PIP_GAP);
+        if (i < points) {
+            w4.DRAW_COLORS.* = 0x0004;
+            w4.Rect(px, y, POINT_PIP_SIZE, POINT_PIP_SIZE);
+        } else {
+            w4.DRAW_COLORS.* = 0x0002;
+            w4.Rect(px, y, POINT_PIP_SIZE, 1);
+            w4.Rect(px, y + POINT_PIP_SIZE - 1, POINT_PIP_SIZE, 1);
+            w4.Rect(px, y, 1, POINT_PIP_SIZE);
+            w4.Rect(px + POINT_PIP_SIZE - 1, y, 1, POINT_PIP_SIZE);
+        }
+    }
+}
+
 pub fn drawMatchPopups(match_popups: []const s.MatchPopup) void {
     for (match_popups) |p| {
         if (!p.active) continue;

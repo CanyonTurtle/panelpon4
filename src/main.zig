@@ -65,14 +65,22 @@ export fn update() void {
     if (!s.started) {
         _ = s.player.rngNext();
         board.perturbSharedRng();
-        render.clearBackground();
-        render.drawTitle();
-        // Sets the CPU's difficulty for the whole match (see state.difficulty
-        // and cpu_ai.configFor) -- there's no menu to revisit it later, so
-        // this is the only place it's adjustable.
-        if (input.justPressed(gp, w4.BUTTON_LEFT) and s.difficulty > 1) s.difficulty -= 1;
-        if (input.justPressed(gp, w4.BUTTON_RIGHT) and s.difficulty < 10) s.difficulty += 1;
-        if (input.justPressed(gp, w4.BUTTON_1)) board.beginCountdown();
+        switch (s.menu_phase) {
+            .title => {
+                render.drawTitleScreen();
+                if (input.justPressed(gp, w4.BUTTON_1)) s.menu_phase = .setup;
+            },
+            .setup => {
+                render.drawSetupScreen();
+                // Sets the CPU's difficulty for the whole series (see
+                // state.difficulty and cpu_ai.configFor) -- revisitable here
+                // again once a series concludes and this screen comes back
+                // around, but fixed for the whole series in between.
+                if (input.justPressed(gp, w4.BUTTON_LEFT) and s.difficulty > 1) s.difficulty -= 1;
+                if (input.justPressed(gp, w4.BUTTON_RIGHT) and s.difficulty < 10) s.difficulty += 1;
+                if (input.justPressed(gp, w4.BUTTON_1)) board.beginCountdown();
+            },
+        }
         s.prev_gamepad = gp;
         return;
     }
@@ -121,6 +129,7 @@ export fn update() void {
         if (s.winner != .none and !was_over) {
             audio.playGameOverSound();
             board.beginClosing();
+            board.awardMatchPoint(s.winner);
         }
     } else if (s.closing_timer > 0) {
         // The closing wipe (state.closing_timer) is ticked down here, before
@@ -131,7 +140,18 @@ export fn update() void {
         s.closing_timer -= 1;
     } else {
         if (input.justPressed(gp, w4.BUTTON_1)) {
-            board.beginCountdown();
+            if (s.set_winner != .none) {
+                // The series itself is decided -- back to the title/setup
+                // screens (see state.menu_phase) rather than straight into
+                // another countdown, with the whole series' state reset.
+                s.player_points = 0;
+                s.cpu_points = 0;
+                s.set_winner = .none;
+                s.menu_phase = .title;
+                s.started = false;
+            } else {
+                board.beginCountdown();
+            }
             s.winner = .none;
         }
     }

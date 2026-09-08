@@ -40,6 +40,7 @@ pub const PRE_POP_PAUSE_FRAMES: i16 = 12;
 pub const PRE_POP_TOTAL_FRAMES: i16 = PRE_POP_BLINK_FRAMES + PRE_POP_PAUSE_FRAMES;
 pub const LAND_FRAMES: i16 = 8;
 pub const COMBO_DISPLAY_FRAMES: u16 = 90; // 1.5s -- how long the panel's "COMBO" label lingers
+pub const POINTS_TO_WIN: u8 = 2; // best of 3 -- first to 2 match wins takes the series
 
 // The "3 2 1 START" countdown overlay at match start (see
 // board.beginCountdown/state.countdown_timer/render.drawCountdown): "3",
