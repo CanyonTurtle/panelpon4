@@ -140,11 +140,15 @@ fn drawMicroPopping(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16, c
     fillCell(x + off, y + off, size, size, color, false, clip_top, clip_bottom);
 }
 
-// A garbage cell being recycled -- mirrors render.drawRecyclingCell: still
-// looks like inert garbage until its own staggered turn (same timer/formula
-// as the full-scale version), then hard-cuts to a plain revealed block (with
-// its icon) and stays that way -- no animation of its own.
-fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16, clip_top: i32, clip_bottom: i32) void {
+// A garbage cell being recycled -- mirrors render.drawRecyclingCell: a
+// converting cell (see Cell.garbage_reveals) still looks like inert garbage
+// until its own staggered turn (same timer/formula as the full-scale
+// version), then hard-cuts to a plain revealed block (with its icon) and
+// stays that way -- no animation of its own; a non-converting one (the rest
+// of a clump taller than one row -- only its bottom row per event ever
+// converts) just keeps looking like inert garbage, having only played the
+// shared flash/pause preamble as a heads-up.
+fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16, garbage_reveals: bool, clip_top: i32, clip_bottom: i32) void {
     if (pre_pop_timer > 0) {
         // Mirrors render.drawRecyclingCell's own pre-pop blink+pause
         // preamble, shared in lockstep by the whole group.
@@ -154,6 +158,10 @@ fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16,
         } else {
             fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
         }
+        return;
+    }
+    if (!garbage_reveals) {
+        fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
         return;
     }
     const elapsed = c.POP_FRAMES - timer;
@@ -194,7 +202,7 @@ fn drawMicroBoard(b: *s.Board, origin_x: i32, origin_y: i32) void {
                 },
                 .landing => fillCellFull(x, base_y, cell.*, clip_top, clip_bottom),
                 .popping => drawMicroPopping(x, base_y, cell.color, cell.timer, cell.pre_pop_timer, clip_top, clip_bottom),
-                .recycling => drawMicroRecycling(x, base_y, cell.color, cell.timer, cell.pre_pop_timer, clip_top, clip_bottom),
+                .recycling => drawMicroRecycling(x, base_y, cell.color, cell.timer, cell.pre_pop_timer, cell.garbage_reveals, clip_top, clip_bottom),
                 .empty => {},
             }
         }

@@ -189,16 +189,22 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16) vo
 
 // A garbage cell being recycled (see CellState.recycling). Unlike a real
 // match's pop, there's no shrink/flash animation: a garbage cell in a
-// recycling group is revealed one at a time, with a delay between each (its
-// own staggered timer, same mechanism as the pop cascade -- see
-// POP_STAGGER_FRAMES), and the instant its own turn comes it just hard-cuts
-// to looking like a plain normal block and stays that way, inactive, doing
-// nothing further, until the whole group resolves (see sim.simulate). Before
-// its own turn (including the pre-pop blink+pause preamble -- see
-// PRE_POP_TOTAL_FRAMES), it still looks like part of the not-yet-recycled
-// garbage clump (see render_garbage's isAttached, which keys off this same
-// timer to know when to stop treating it as attached).
-fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: rgarbage.Edges, pre_pop_timer: i16) void {
+// recycling group that's actually going to convert (see Cell.garbage_reveals
+// -- a clump taller than one row only ever converts its bottom-most row per
+// event, see sim.checkMatches) is revealed one at a time, with a delay
+// between each (its own staggered timer, same mechanism as the pop cascade
+// -- see POP_STAGGER_FRAMES), and the instant its own turn comes it just
+// hard-cuts to looking like a plain normal block and stays that way,
+// inactive, doing nothing further, until the whole group resolves (see
+// sim.simulate). A non-converting cell (the rest of a taller clump) never
+// reaches that reveal at all -- it just keeps looking like inert garbage
+// through its own staggered turn and beyond, having only ever played the
+// shared flash/pause preamble as a heads-up. Before its own turn (including
+// the pre-pop blink+pause preamble -- see PRE_POP_TOTAL_FRAMES), it still
+// looks like part of the not-yet-recycled garbage clump (see
+// render_garbage's isAttached, which keys off this same timer -- and
+// garbage_reveals -- to know when to stop treating it as attached).
+fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: rgarbage.Edges, pre_pop_timer: i16, garbage_reveals: bool) void {
     if (pre_pop_timer > 0) {
         // The whole group's shared pre-pop preamble (see Cell.pre_pop_timer
         // and drawPoppingCell above) -- blink (hard on/off every frame) then
@@ -211,6 +217,10 @@ fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: rgarbage.Edge
         } else {
             rgarbage.drawLinked(x, y, edges);
         }
+        return;
+    }
+    if (!garbage_reveals) {
+        rgarbage.drawLinked(x, y, edges);
         return;
     }
     const elapsed = c.POP_FRAMES - timer;
@@ -313,7 +323,7 @@ fn drawBoard(b: *s.Board) void {
                     if (cell.is_garbage) rgarbage.drawLinked(x, y, rgarbage.edgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color);
                 },
                 .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.pre_pop_timer),
-                .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, rgarbage.edgesAt(b, lr, col), cell.pre_pop_timer),
+                .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, rgarbage.edgesAt(b, lr, col), cell.pre_pop_timer, cell.garbage_reveals),
                 .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, rgarbage.edgesAt(b, lr, col)),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},

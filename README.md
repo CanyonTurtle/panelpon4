@@ -65,12 +65,16 @@ the side panel. Both run the exact same rules and physics.
   end), and a still-growing chain only hands over its final size once the whole chain concludes -- an x4
   chain drops one block sized for x4 alone, not the sum of every step along the way. Garbage is inert
   (colorless, unswappable, unmatchable) until a match pops right next to it, which starts *recycling* it:
-  one garbage block at a time, with a short delay between each (after the same blink-then-pause heads-up as
-  a real pop), cracks open into a fresh, plain-looking normal block -- no animation beyond that, just an
-  instant reveal -- so you can read the color lineup forming and plan your next move before the whole
-  connected group finishes and every recycled block becomes active together. A connected clump of garbage
-  falls and lands as one rigid piece (a piece touching down stops the whole clump at once), rendering as a
-  single seamless bezeled slab rather than individual tiles.
+  one garbage block at a time, bottom-right to top-left (rows first) so the block nearest your active area
+  reads first, with a short delay between each (after the same blink-then-pause heads-up as a real pop),
+  cracks open into a fresh, plain-looking normal block -- no animation beyond that, just an instant reveal,
+  and never in a color that would complete an accidental 3-in-a-row -- so you can read the color lineup
+  forming and plan your next move before the whole connected group finishes and every recycled block
+  becomes active together. A clump taller than one row only ever converts its bottom row per match --
+  the rest just flashes the same heads-up and stays garbage, falling to rest on the newly-revealed row
+  below it, ready to be peeled again by a future match. A connected clump of garbage falls and lands as one
+  rigid piece (a piece touching down stops the whole clump at once), rendering as a single seamless bezeled
+  slab rather than individual tiles.
 - A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
 - Each board's floor rises forever, faster as that board's own score climbs -- true for the CPU too, so a
   CPU that's playing efficiently is also accelerating its own rise. Topping out isn't instant, though: once
@@ -118,7 +122,10 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   (and, for simulate, `opponent`) -- tests in the companion `src/sim_test.zig`.
 - `src/sim_matches.zig` — match detection, chain/combo scoring, and garbage queueing (re-exported from
   `sim.zig` as `checkMatches`); a big enough combo/chain on `self` queues garbage for `opponent`, never
-  `self` -- garbage is never self-inflicted in vs-CPU play.
+  `self` -- garbage is never self-inflicted in vs-CPU play. Also decides, per recycle event, which garbage
+  cells actually convert (only a clump's bottom row per column, see `Cell.garbage_reveals`) and picks each
+  converting cell's color to never complete a run of 3, mirroring `board.generateRowInto`'s own reasoning --
+  tests for both, plus the bottom-right-to-top-left stagger order, in the companion `src/sim_recycle_test.zig`.
 - `src/sim_garbage.zig` — garbage's rigid-body group gravity (a connected clump falls and lands as one piece,
   computed by connectivity fresh every frame), its spawn placement, and the queueing lifecycle between the
   two (`queueChainGarbage`/`queueComboGarbage` record what a combo or a still-growing chain would send,
@@ -192,9 +199,11 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 
 `state.zig`, `board.zig`, `sim.zig`/`sim_matches.zig`/`sim_garbage.zig`, `cpu_ai.zig`, and
 `cpu_engine.zig`/`cpu_engine_garbage.zig` have Zig `test` blocks — `sim.zig`'s live in the companion
-`src/sim_test.zig`, garbage-specific ones in `src/sim_garbage_test.zig`, `cpu_engine.zig`'s in
-`src/cpu_engine_test.zig`, and `cpu_engine_garbage.zig`'s (including its cross-validation against the real
-board) in `src/cpu_engine_garbage_test.zig`, to keep each module under ~500 lines. These run natively (not compiled into the
+`src/sim_test.zig`, garbage-specific ones in `src/sim_garbage_test.zig`, recycle-specific ones (stagger
+order, the bottom-row-only-converts rule, and the no-accidental-match color guarantee) in
+`src/sim_recycle_test.zig`, `cpu_engine.zig`'s in `src/cpu_engine_test.zig`, and `cpu_engine_garbage.zig`'s
+(including its cross-validation against the real board) in `src/cpu_engine_garbage_test.zig`, to keep each
+module under ~500 lines. These run natively (not compiled into the
 cart) and are excluded from `input.zig`/`render.zig`/`render_garbage.zig`/`render_cpu.zig`, which touch
 WASM-4's real host functions and only make sense under an actual WASM-4 host.
 

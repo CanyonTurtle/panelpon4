@@ -57,13 +57,14 @@ test "recycling cells in the same group are staggered one at a time, not simulta
     b.cellAt(7, 2).* = .{ .state = .normal, .is_garbage = true }; // touches the garbage above it
     _ = sim.checkMatches(&b, &opp, no_settled);
 
-    // Row-major member ordering puts (6,2) before (7,2), so (6,2) gets an
-    // earlier own-turn timer than (7,2) -- a fixed delay apart (see
+    // Member ordering sweeps bottom-right to top-left (rows first -- see
+    // checkMatches), so the lower cell (7,2) gets an earlier own-turn timer
+    // than the one above it (6,2) -- a fixed delay apart (see
     // POP_STAGGER_FRAMES), not the same instant. This staggered timer is
     // exactly what render.drawRecyclingCell uses to reveal each one on its
     // own turn, one cell at a time, rather than all at once.
-    const earlier = b.cellAt(6, 2).timer;
-    const later = b.cellAt(7, 2).timer;
+    const earlier = b.cellAt(7, 2).timer;
+    const later = b.cellAt(6, 2).timer;
     try testing.expectEqual(earlier + c.POP_STAGGER_FRAMES, later);
     // Both members (and the 3 real matched cells) share the same whole-group
     // resolution timer regardless of their own individual stagger.

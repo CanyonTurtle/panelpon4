@@ -71,14 +71,26 @@ pub const Cell = struct {
     // into .recycling too, sharing that group's pop_group_end with every
     // other member (garbage or real) in the same connected event. Unlike a
     // real match (which animates then clears to empty), a recycling garbage
-    // cell has no animation of its own: it reveals its (already-picked)
-    // color the instant its own staggered turn in the group arrives (see
+    // cell has no animation of its own: if it's going to convert at all (see
+    // garbage_reveals below), it reveals its (already-picked) color the
+    // instant its own staggered turn in the group arrives (see
     // render.drawRecyclingCell) and then just sits there looking like a
     // plain normal block -- inactive, unswappable, ineligible to match or
-    // fall -- until the *whole* group finishes and every member becomes
-    // fully active together (is_garbage reset to false, chainable granted --
-    // see the shared .popping/.recycling branch in sim.simulate).
+    // fall -- until the *whole* group finishes and every converting member
+    // becomes fully active together (is_garbage reset to false, chainable
+    // granted -- see the shared .popping/.recycling branch in sim.simulate).
     is_garbage: bool = false,
+    // Only meaningful while state == .recycling: whether this particular
+    // garbage cell will actually convert to a real block once the group
+    // resolves, as opposed to just flashing along with the rest of its
+    // clump and then reverting to plain inert garbage. A garbage clump
+    // taller than one row only ever converts its bottom-most (per column)
+    // row per recycle event -- see sim.checkMatches, which sets this -- so
+    // a tall clump peels off one row at a time across successive matches
+    // rather than the whole thing cashing in at once. Reset to false again
+    // once the group resolves (see sim.simulate), regardless of which way
+    // it went.
+    garbage_reveals: bool = false,
 };
 
 // A small floating text badge (an orange-dithered block with black text)

@@ -50,8 +50,9 @@ fn isAttached(b: *s.Board, lr: u8, col: u8) bool {
     // that now comes before the reveal, in lockstep across the whole group.
     // The instant it reveals, it renders as a plain normal block, so the
     // clump it was part of should visually shrink by one cell right along
-    // with it.
-    if (cell.state == .recycling) return cell.pre_pop_timer > 0 or c.POP_FRAMES - cell.timer < 0;
+    // with it. A non-converting cell (see Cell.garbage_reveals) never
+    // reaches that reveal at all, so it stays attached for the entire event.
+    if (cell.state == .recycling) return !cell.garbage_reveals or cell.pre_pop_timer > 0 or c.POP_FRAMES - cell.timer < 0;
     return false;
 }
 

@@ -156,7 +156,21 @@ fn findAndClearMatches(grid: *Grid) MatchResult {
     for (0..ROWS) |lr| {
         for (0..COLS) |col| {
             if (!matched[lr][col]) continue;
-            if (grid.cell[lr][col] == GARBAGE) result.garbage_count += 1 else result.real_count += 1;
+            if (grid.cell[lr][col] == GARBAGE) {
+                // A clump taller than one row only ever converts its
+                // bottom-most (per column) row per event -- mirrors
+                // sim_matches.zig's own real rule (see Cell.garbage_reveals
+                // there): if there's another matched garbage cell directly
+                // below, that one's closer to the bottom, so this one just
+                // stays garbage instead of clearing -- it'll be swept up
+                // again once gravity pulls the now-shorter clump down onto
+                // whatever's left.
+                const below_pops = lr + 1 < ROWS and matched[lr + 1][col] and grid.cell[lr + 1][col] == GARBAGE;
+                if (below_pops) continue;
+                result.garbage_count += 1;
+            } else {
+                result.real_count += 1;
+            }
             grid.cell[lr][col] = EMPTY;
         }
     }

@@ -28,6 +28,13 @@ pub fn setCell(board: u32, logical_row: u32, col: u32, color: u32, state: u32) c
     cell.* = s.Cell{ .color = @intCast(color), .state = @enumFromInt(@as(u8, @intCast(state))) };
 }
 
+// Like setCell, but also marks the cell as garbage -- setCell alone can't,
+// since Cell's is_garbage isn't one of its parameters.
+pub fn setGarbageCell(board: u32, logical_row: u32, col: u32) callconv(.c) void {
+    const cell = boardFor(board).cellAt(@intCast(logical_row), @intCast(col));
+    cell.* = s.Cell{ .state = .normal, .is_garbage = true };
+}
+
 pub fn setCursor(board: u32, col: u32, row: u32) callconv(.c) void {
     const b = boardFor(board);
     b.cursor_col = @intCast(col);
@@ -42,12 +49,14 @@ pub fn getScore(board: u32) callconv(.c) u32 {
     return boardFor(board).score;
 }
 
-// Packed as state(8) | color(8) | chainable(1), least-significant byte first.
+// Packed as state(8) | color(8) | chainable(1) | is_garbage(1), least-
+// significant byte first.
 pub fn getCellInfo(board: u32, logical_row: u32, col: u32) callconv(.c) u32 {
     const cell = boardFor(board).cellAt(@intCast(logical_row), @intCast(col));
     var v: u32 = @intFromEnum(cell.state);
     v |= @as(u32, cell.color) << 8;
     v |= @as(u32, if (cell.chainable) 1 else 0) << 16;
+    v |= @as(u32, if (cell.is_garbage) 1 else 0) << 17;
     return v;
 }
 

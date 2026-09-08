@@ -10,6 +10,30 @@ const s = @import("state.zig");
 const audio = @import("audio.zig");
 const garbage = @import("sim_garbage.zig");
 
+fn colorAt(grid: *const [c.ROWS][c.COLS]i16, row: i32, col: i32) i16 {
+    if (row < 0 or row >= c.ROWS or col < 0 or col >= c.COLS) return -1;
+    return grid[@intCast(row)][@intCast(col)];
+}
+
+// True if placing `chosen` at (row, col) would complete a run of 3+ with
+// whatever colors are already known at its neighbors -- checked both ways
+// (two-before, straddling, two-after) in each axis so it catches a run
+// forming on either side, not just behind a fixed scan direction. A neighbor
+// still undecided (an as-yet-unprocessed recycling cell, or plain garbage/
+// empty) reads as -1 here and never blocks anything -- see the caller for
+// why processing in a fixed scan order still makes this fully reliable.
+fn wouldCompleteRun(grid: *const [c.ROWS][c.COLS]i16, row: u8, col: u8, chosen: i16) bool {
+    const r: i32 = row;
+    const cl: i32 = col;
+    if (colorAt(grid, r, cl - 1) == chosen and colorAt(grid, r, cl - 2) == chosen) return true;
+    if (colorAt(grid, r, cl - 1) == chosen and colorAt(grid, r, cl + 1) == chosen) return true;
+    if (colorAt(grid, r, cl + 1) == chosen and colorAt(grid, r, cl + 2) == chosen) return true;
+    if (colorAt(grid, r - 1, cl) == chosen and colorAt(grid, r - 2, cl) == chosen) return true;
+    if (colorAt(grid, r - 1, cl) == chosen and colorAt(grid, r + 1, cl) == chosen) return true;
+    if (colorAt(grid, r + 1, cl) == chosen and colorAt(grid, r + 2, cl) == chosen) return true;
+    return false;
+}
+
 pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c.COLS]bool) bool {
     var settled_color: [c.ROWS][c.COLS]i16 = undefined;
     var settled_chainable: [c.ROWS][c.COLS]bool = undefined;
@@ -156,15 +180,18 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
                 }
             }
 
-            // Flood-fill visits cells in an arbitrary (DFS) order; sort into
-            // row-major order first so the stagger sweeps predictably
-            // top-to-bottom, left-to-right instead of looking scattered.
+            // Flood-fill visits cells in an arbitrary (DFS) order; sort so
+            // the stagger sweeps predictably bottom-right to top-left, rows
+            // first, instead of looking scattered -- this is what a garbage
+            // clump recycles in too (see the garbage_reveals pass below),
+            // so the row about to become playable is always the one nearest
+            // the player's own active area, read first rather than last.
             var oi: usize = 1;
             while (oi < member_count) : (oi += 1) {
                 const key = members[oi];
                 var oj: usize = oi;
-                while (oj > 0 and (members[oj - 1][0] > key[0] or
-                    (members[oj - 1][0] == key[0] and members[oj - 1][1] > key[1])))
+                while (oj > 0 and (members[oj - 1][0] < key[0] or
+                    (members[oj - 1][0] == key[0] and members[oj - 1][1] < key[1])))
                 {
                     members[oj] = members[oj - 1];
                     oj -= 1;
@@ -237,14 +264,52 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
                 cell.pre_pop_timer = c.PRE_POP_TOTAL_FRAMES;
                 cell.pop_group_end = group_end;
                 if (cell.is_garbage) {
-                    // Pick the reveal color now, at the moment the whole
-                    // recycle event is detected, not once this cell's own
-                    // turn arrives or once the group finishes -- it doesn't
-                    // matter when it's *picked*, only when it's *shown* (see
-                    // render.drawRecyclingCell, which withholds it from
-                    // rendering until this cell's own staggered turn in the
-                    // group comes up, one cell at a time).
-                    cell.color = @intCast(self.randRange(c.NUM_COLORS));
+                    // A clump taller than one row only ever converts its
+                    // bottom-most (per column) row per event: if there's
+                    // ANOTHER matched garbage cell directly below this one,
+                    // that one is closer to the bottom, so this cell just
+                    // flashes along with the rest of its clump and reverts
+                    // to plain garbage once the group resolves (see
+                    // sim.simulate) rather than actually converting.
+                    const below_pops = pos[0] + 1 < c.ROWS and matched[pos[0] + 1][pos[1]] and self.cellAt(pos[0] + 1, pos[1]).is_garbage;
+                    cell.garbage_reveals = !below_pops;
+                }
+            }
+
+            // Pick reveal colors now, at the moment the whole recycle event
+            // is detected, not once each cell's own turn arrives or the
+            // group finishes -- it doesn't matter when it's *picked*, only
+            // when it's *shown* (see render.drawRecyclingCell, which
+            // withholds it from rendering until this cell's own staggered
+            // turn in the group comes up). Only cells that will actually
+            // convert (garbage_reveals) need one at all -- a flash-only cell
+            // never shows a color. Scanned top-to-bottom, left-to-right
+            // here regardless of the group's own bottom-right-to-top-left
+            // stagger order above (unrelated concerns): picking each color
+            // to avoid completing a run of 3 with whatever's already
+            // decided to its left/above (already-settled real blocks, or an
+            // earlier cell in this same pass) is only reliable if every
+            // decision is made in a fixed, consistent scan order -- exactly
+            // mirroring board.generateRowInto's own reasoning for a
+            // freshly-generated row.
+            for (0..c.ROWS) |lr| {
+                for (0..c.COLS) |col| {
+                    if (!matched[lr][col]) continue;
+                    const cell = self.cellAt(@intCast(lr), @intCast(col));
+                    if (!cell.is_garbage or !cell.garbage_reveals) continue;
+                    var chosen: i16 = 0;
+                    var tries: u8 = 0;
+                    while (true) {
+                        chosen = @intCast(self.randRange(c.NUM_COLORS));
+                        tries += 1;
+                        if (!wouldCompleteRun(&settled_color, @intCast(lr), @intCast(col), chosen) or tries > 20) break;
+                    }
+                    cell.color = @intCast(chosen);
+                    // So a later cell in this same pass (or the vertical
+                    // check on a cell below it) sees this as already
+                    // decided, the same way settled_color already reflects
+                    // pre-existing real blocks.
+                    settled_color[lr][col] = chosen;
                 }
             }
             if (is_chain or is_combo) {

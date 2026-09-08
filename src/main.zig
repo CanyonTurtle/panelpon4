@@ -17,6 +17,7 @@ comptime {
     if (builtin.mode == .Debug) {
         @export(&debug.clearBoard, .{ .name = "debugClearBoard" });
         @export(&debug.setCell, .{ .name = "debugSetCell" });
+        @export(&debug.setGarbageCell, .{ .name = "debugSetGarbageCell" });
         @export(&debug.setCursor, .{ .name = "debugSetCursor" });
         @export(&debug.getChain, .{ .name = "debugGetChain" });
         @export(&debug.getScore, .{ .name = "debugGetScore" });

@@ -107,7 +107,10 @@ pub fn simulate(self: *s.Board, opponent: *s.Board) void {
                     cell.pop_group_end -= 1;
                     if (cell.pop_group_end <= 0) {
                         if (cell.is_garbage) {
-                            // Garbage doesn't disappear -- it cracks open
+                            // A converting cell (see Cell.garbage_reveals --
+                            // set once per event in checkMatches: only a
+                            // clump's bottom-most row per column ever
+                            // converts) doesn't disappear -- it cracks open
                             // into a fresh, chainable block, in place, once
                             // the *whole* connected recycle event (which may
                             // span several garbage cells and/or real matched
@@ -121,25 +124,39 @@ pub fn simulate(self: *s.Board, opponent: *s.Board) void {
                             // becomes interactive (swappable, matchable,
                             // able to fall).
                             //
-                            // Deliberately NOT marked just_settled/settled:
-                            // checkMatches' "spend chainable on an unmatched
-                            // settle" cleanup (for cells that inherited
-                            // chainable from an earlier pop and turned out to
-                            // be a dead end) would otherwise immediately wipe
-                            // the chainable flag this exact reveal just
-                            // granted, if a checkMatches call happened to run
-                            // this same frame for an unrelated reason -- that
-                            // cleanup can't distinguish "freshly granted" from
+                            // A non-converting cell (the rest of a taller
+                            // clump) just played the same flash/pause
+                            // preamble as everything else in the group, then
+                            // reverts to plain, inert, still-garbage --
+                            // exactly its pre-event state, ready to be swept
+                            // into some future recycle event (most likely
+                            // once whatever converted out from under it
+                            // leaves this now-shorter clump unsupported and
+                            // gravity pulls it down to be touched again).
+                            //
+                            // Deliberately NOT marked just_settled/settled
+                            // even when it does convert: checkMatches' "spend
+                            // chainable on an unmatched settle" cleanup (for
+                            // cells that inherited chainable from an earlier
+                            // pop and turned out to be a dead end) would
+                            // otherwise immediately wipe the chainable flag
+                            // this exact reveal just granted, if a
+                            // checkMatches call happened to run this same
+                            // frame for an unrelated reason -- that cleanup
+                            // can't distinguish "freshly granted" from
                             // "inherited and now proven dead". It'll get
                             // checked for matches the normal way once it
                             // actually falls/lands (or something else
                             // triggers a check) instead.
+                            if (cell.garbage_reveals) {
+                                cell.is_garbage = false;
+                                cell.chainable = true;
+                            }
                             cell.state = .normal;
-                            cell.is_garbage = false;
-                            cell.chainable = true;
                             cell.timer = 0;
                             cell.pre_pop_timer = 0;
                             cell.pop_group_end = 0;
+                            cell.garbage_reveals = false;
                         } else {
                             cell.* = s.Cell{};
                             just_cleared[lr][col] = true;
