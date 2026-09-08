@@ -444,3 +444,71 @@ test "a resting garbage group re-falls together once its support disappears" {
     try testing.expectEqual(s.CellState.normal, b.cellAt(19, 2).state);
     try testing.expect(b.cellAt(19, 2).is_garbage);
 }
+
+test "a real block still mid-landing-bounce still matches, and pulls in an adjacent garbage cell that's also still bouncing" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    // Real-block gravity and garbage's own rigid-body gravity are
+    // independent systems, so two pieces that land "together" from the
+    // player's perspective rarely finish their landing bounce on the exact
+    // same frame -- checkMatches must still catch this: a cell that's
+    // already touched down and just finishing its cosmetic bounce
+    // (.landing) is as settled as .normal for match purposes.
+    b.cellAt(15, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 2).* = .{ .color = 1, .state = .landing, .timer = 3 }; // still bouncing
+    b.cellAt(15, 3).* = .{ .state = .landing, .is_garbage = true, .timer = 5 }; // also still bouncing
+
+    try testing.expect(sim.checkMatches(&b, &opp, no_settled));
+    try testing.expectEqual(s.CellState.popping, b.cellAt(15, 0).state);
+    try testing.expectEqual(s.CellState.popping, b.cellAt(15, 1).state);
+    try testing.expectEqual(s.CellState.popping, b.cellAt(15, 2).state);
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(15, 3).state);
+}
+
+test "a garbage cell that finishes falling after an adjacent match already started popping still joins it, instead of being missed forever" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    // First call: an ordinary match with nothing touching it yet -- pops on
+    // its own, same as always.
+    b.cellAt(15, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 2).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(&b, &opp, no_settled);
+    try testing.expectEqual(s.CellState.popping, b.cellAt(15, 0).state);
+    const group_end_before = b.cellAt(15, 0).pop_group_end;
+
+    // A garbage cell then lands right next to it a few frames later (its
+    // own gravity is a separate system, so it wasn't ready on the first
+    // call) -- a second checkMatches call (as simulate would trigger once
+    // ITS OWN landing bounce finishes) should still sweep it into the SAME
+    // still-active group, not miss it because the match it touches is
+    // already .popping rather than freshly color-matched.
+    b.cellAt(15, 3).* = .{ .state = .normal, .is_garbage = true };
+    _ = sim.checkMatches(&b, &opp, no_settled);
+
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(15, 3).state);
+    try testing.expectEqual(group_end_before, b.cellAt(15, 3).pop_group_end);
+    try testing.expect(b.cellAt(15, 3).garbage_reveals);
+}
+
+test "a late-joining garbage cell still follows the per-piece bottom-row rule, not just whatever group it visually joins" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    b.cellAt(15, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 2).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(&b, &opp, no_settled);
+
+    // A 2-tall garbage piece (one group) lands late next to the still-active
+    // match: only its bottom cell (row 16) should convert, exactly as if it
+    // had been caught on the very first call.
+    b.cellAt(15, 3).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 7 };
+    b.cellAt(16, 3).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 7 };
+    _ = sim.checkMatches(&b, &opp, no_settled);
+
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(15, 3).state);
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(16, 3).state);
+    try testing.expect(!b.cellAt(15, 3).garbage_reveals);
+    try testing.expect(b.cellAt(16, 3).garbage_reveals);
+}

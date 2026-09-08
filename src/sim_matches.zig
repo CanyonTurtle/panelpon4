@@ -10,6 +10,28 @@ const s = @import("state.zig");
 const audio = @import("audio.zig");
 const garbage = @import("sim_garbage.zig");
 
+// `.landing` is the short cosmetic bounce right after a cell's own gravity
+// stops it -- its color/position/is_garbage are already final, only the
+// bounce's own timer is still counting down before it flips to `.normal`.
+// Treating it as match-eligible here (not just `.normal`) is what lets a
+// real block and an adjacent garbage cell that land one frame apart (real-
+// block gravity and garbage's rigid-body gravity are independent systems,
+// so even a "simultaneous" landing rarely finishes on the exact same tick)
+// still resolve as one match instead of the earlier one popping alone while
+// the later one is still bouncing, and by the time *it* finishes, the match
+// that would have pulled it in has already cleared. Whichever cell(s) get
+// pulled into a match this way simply have their bounce cut short and go
+// straight into the pop/recycle animation instead -- see checkMatches below,
+// which unconditionally overwrites `state`/`timer` for every matched member
+// regardless of what it was doing before.
+fn matchEligible(state: s.CellState) bool {
+    return state == .normal or state == .landing;
+}
+
+fn isActivePop(state: s.CellState) bool {
+    return state == .popping or state == .recycling;
+}
+
 fn colorAt(grid: *const [c.ROWS][c.COLS]i16, row: i32, col: i32) i16 {
     if (row < 0 or row >= c.ROWS or col < 0 or col >= c.COLS) return -1;
     return grid[@intCast(row)][@intCast(col)];
@@ -43,8 +65,82 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
             // Garbage is colorless: it never seeds or joins a color run on
             // its own (only via the propagation pass below), so it's
             // excluded here exactly like an empty/animating cell would be.
-            settled_color[lr][col] = if (cell.state == .normal and !cell.is_garbage) @as(i16, cell.color) else -1;
-            settled_chainable[lr][col] = cell.state == .normal and cell.chainable;
+            settled_color[lr][col] = if (matchEligible(cell.state) and !cell.is_garbage) @as(i16, cell.color) else -1;
+            settled_chainable[lr][col] = matchEligible(cell.state) and cell.chainable;
+        }
+    }
+
+    // Sweeps a garbage cell that only *just* became match-eligible (it
+    // finished its own landing bounce, or just settled, this frame) into an
+    // ALREADY-ACTIVE pop/recycle group from an earlier call this same
+    // cascade -- distinct from the propagation pass further below, which
+    // only pulls a garbage cell into a match *newly* detected THIS call.
+    // Real-block gravity and garbage's own rigid-body gravity are
+    // independent systems, so even two pieces that "land together" from the
+    // player's perspective rarely finish on the exact same frame: without
+    // this, whichever one settles first pops alone, and by the time the
+    // other one finishes falling, the match that should have caught it has
+    // already moved on to `.popping`/`.recycling` -- no longer color-
+    // matchable, so ordinary propagation (which only looks at *this* call's
+    // freshly-matched cells) can never reach it either. A late joiner simply
+    // inherits whatever's left of the group it touches (same shared
+    // pop_group_end, same current timer/pre_pop_timer) rather than tacking
+    // its own fresh preamble onto an already-progressed countdown, so it
+    // resolves in lockstep with the rest. A fixed-point sweep, same idea as
+    // the propagation pass below, since a whole newly-landed clump can chain
+    // into the active group one cell at a time.
+    var late_joined = true;
+    while (late_joined) {
+        late_joined = false;
+        for (0..c.ROWS) |lr| {
+            for (0..c.COLS) |col| {
+                const cell = self.cellAt(@intCast(lr), @intCast(col));
+                if (!cell.is_garbage or !matchEligible(cell.state)) continue;
+
+                var anchor: ?*s.Cell = null;
+                if (lr > 0) {
+                    const n = self.cellAt(@intCast(lr - 1), @intCast(col));
+                    if (isActivePop(n.state)) anchor = n;
+                }
+                if (anchor == null and lr + 1 < c.ROWS) {
+                    const n = self.cellAt(@intCast(lr + 1), @intCast(col));
+                    if (isActivePop(n.state)) anchor = n;
+                }
+                if (anchor == null and col > 0) {
+                    const n = self.cellAt(@intCast(lr), @intCast(col - 1));
+                    if (isActivePop(n.state)) anchor = n;
+                }
+                if (anchor == null and col + 1 < c.COLS) {
+                    const n = self.cellAt(@intCast(lr), @intCast(col + 1));
+                    if (isActivePop(n.state)) anchor = n;
+                }
+                const a = anchor orelse continue;
+
+                cell.pop_group_end = a.pop_group_end;
+                cell.timer = a.timer;
+                cell.pre_pop_timer = a.pre_pop_timer;
+                cell.state = .recycling;
+                // Same per-piece bottom-row rule as an ordinary recycle
+                // event (see the main pass below) -- keyed off this cell's
+                // own garbage_group, independent of whichever group it's
+                // visually joining.
+                const below_same_piece = lr + 1 < c.ROWS and
+                    self.cellAt(@intCast(lr + 1), @intCast(col)).is_garbage and
+                    self.cellAt(@intCast(lr + 1), @intCast(col)).garbage_group == cell.garbage_group;
+                cell.garbage_reveals = !below_same_piece;
+                if (cell.garbage_reveals) {
+                    var chosen: i16 = 0;
+                    var tries: u8 = 0;
+                    while (true) {
+                        chosen = @intCast(self.randRange(c.NUM_COLORS));
+                        tries += 1;
+                        if (!wouldCompleteRun(&settled_color, @intCast(lr), @intCast(col), chosen) or tries > 20) break;
+                    }
+                    cell.color = @intCast(chosen);
+                    settled_color[lr][col] = chosen;
+                }
+                late_joined = true;
+            }
         }
     }
 
@@ -121,7 +217,7 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
             for (0..c.COLS) |col| {
                 if (matched[lr][col]) continue;
                 const cell = self.cellAt(@intCast(lr), @intCast(col));
-                if (cell.state != .normal or !cell.is_garbage) continue;
+                if (!matchEligible(cell.state) or !cell.is_garbage) continue;
                 const touches_matched =
                     (lr > 0 and matched[lr - 1][col]) or
                     (lr + 1 < c.ROWS and matched[lr + 1][col]) or

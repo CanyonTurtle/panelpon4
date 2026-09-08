@@ -141,7 +141,14 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   bottom row per column converts (`Cell.garbage_reveals`), independent of whatever other piece happens to be
   touching it. Also picks each converting cell's color to never complete a run of 3, mirroring
   `board.generateRowInto`'s own reasoning -- tests for all of this, plus the bottom-right-to-top-left stagger
-  order, in the companion `src/sim_recycle_test.zig`.
+  order, in the companion `src/sim_recycle_test.zig`. A cell is match-eligible as soon as it's `.landing`, not
+  only once it fully settles to `.normal` -- real-block gravity and garbage's rigid-body gravity are
+  independent systems, so two pieces that land "together" rarely finish on the exact same frame, and without
+  this a match could be detected and pop before an adjacent, still-bouncing cell was ever considered. A
+  separate late-join sweep additionally lets a garbage cell that finishes falling *after* an adjacent match
+  has already started popping still join that same still-active group (inheriting its current
+  timer/pop_group_end rather than being missed forever because the match it touches is no longer a fresh
+  color-run, just an ongoing `.popping`/`.recycling` one).
 - `src/sim_garbage.zig` — garbage's rigid-body group gravity (a connected clump falls and lands as one piece,
   computed by connectivity fresh every frame), its spawn placement, and the queueing lifecycle between the
   two (`queueChainGarbage`/`queueComboGarbage` record what a combo or a still-growing chain would send,
