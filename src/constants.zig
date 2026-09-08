@@ -39,6 +39,32 @@ pub const PRE_POP_BLINK_FRAMES: i16 = 24;
 pub const PRE_POP_PAUSE_FRAMES: i16 = 12;
 pub const PRE_POP_TOTAL_FRAMES: i16 = PRE_POP_BLINK_FRAMES + PRE_POP_PAUSE_FRAMES;
 pub const LAND_FRAMES: i16 = 8;
+pub const COMBO_DISPLAY_FRAMES: u16 = 90; // 1.5s -- how long the panel's "COMBO" label lingers
+
+// The "3 2 1 START" countdown overlay at match start (see
+// board.beginCountdown/state.countdown_timer/render.drawCountdown): "3",
+// "2", "1" each rise a couple pixels then hold steady for about a second;
+// "START" rises the same way but then blinks a few times instead of
+// holding steady.
+pub const COUNTDOWN_RISE_FRAMES: i32 = 10;
+pub const COUNTDOWN_RISE_PX: i32 = 10;
+pub const COUNTDOWN_HOLD_FRAMES: i32 = 50; // ~1s hold for "3"/"2"/"1"
+pub const COUNTDOWN_NUMBER_FRAMES: i32 = COUNTDOWN_RISE_FRAMES + COUNTDOWN_HOLD_FRAMES;
+pub const COUNTDOWN_BLINK_HALF_FRAMES: i32 = 10; // one on/off half-cycle for START
+pub const COUNTDOWN_BLINK_COUNT: i32 = 3;
+pub const COUNTDOWN_START_FRAMES: i32 = COUNTDOWN_RISE_FRAMES + COUNTDOWN_BLINK_HALF_FRAMES * 2 * COUNTDOWN_BLINK_COUNT;
+pub const COUNTDOWN_TOTAL_FRAMES: i32 = COUNTDOWN_NUMBER_FRAMES * 3 + COUNTDOWN_START_FRAMES;
+
+// The closing "wipe" once a match ends (see main.zig/render.drawBoard's
+// wipe skip): every visible row pops, one at a time from the ceiling down,
+// before the match-over overlay appears (render.drawGameOver). Covers
+// RING_SIZE rows (VISIBLE_ROWS plus the one hidden rise-buffer row), not
+// just VISIBLE_ROWS -- that hidden row can be partially on-screen during a
+// mid-scroll frame (see render.BOARD_BOTTOM's own comment), so stopping the
+// wipe one row short of it would leave a sliver of un-popped content
+// visible at the very bottom right up until the overlay appears.
+pub const CLOSING_FRAMES_PER_ROW: i32 = 4;
+pub const CLOSING_TOTAL_FRAMES: i32 = @as(i32, RING_SIZE) * CLOSING_FRAMES_PER_ROW;
 pub const SWAP_FRAMES: i16 = 6;
 pub const FALL_SPEED: i16 = 4; // pixels per frame while falling
 

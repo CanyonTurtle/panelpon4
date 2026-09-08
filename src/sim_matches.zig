@@ -343,6 +343,16 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
             const is_chain = multiplier > 1;
             const is_combo = real_count > 3;
 
+            // A combo (unlike a chain) has no ongoing Board state of its own
+            // to read back later -- it's a single instantaneous event -- so
+            // give the panel something to display for a little while after
+            // the fact (see render.drawPanel), the same way `chain` itself
+            // just naturally persists on Board for chain's own display.
+            if (is_combo) {
+                self.combo_display = @intCast(real_count);
+                self.combo_display_timer = c.COMBO_DISPLAY_FRAMES;
+            }
+
             // The whole group's resolution timer includes the shared pre-pop
             // blink+pause preamble (PRE_POP_TOTAL_FRAMES) on top of the
             // ordinary staggered pop duration, so the group doesn't resolve

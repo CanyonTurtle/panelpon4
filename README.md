@@ -59,7 +59,8 @@ the side panel. Both run the exact same rules and physics.
   starts popping (or, for garbage, recycling) -- a brief moment to read what's about to go before it does.
 - Blocks above a pop fall and can chain into new matches for bonus score. A genuine chain ("x2", "x3", ...)
   or a combo (a single match bigger than 3 blocks, shown as a bare block count) flies a small badge into
-  the score display.
+  the score display. A chain multiplier also shows continuously next to the score for as long as it holds;
+  a combo (having no ongoing state of its own to display) instead flashes a brief "COMBO" callout there.
 - A big enough combo or chain drops garbage onto the *opponent's* board -- never your own -- but not
   immediately: it queues, and only actually lands once *both* sides are idle (never mid-match, on either
   end), and a still-growing chain only hands over its final size once the whole chain concludes -- an x4
@@ -100,7 +101,11 @@ the side panel. Both run the exact same rules and physics.
   waiting for the automatic pace) -- useful for deliberately forcing a rise when you want fresh blocks, or
   to bail out of a bad board shape. On a cooldown (two thirds of a second) so it can't be spammed -- hold it
   down to keep raising row after row as soon as each cooldown clears, instead of having to tap repeatedly.
-- Press **X** on the title or game-over screen to (re)start.
+- Press **X** on the title or game-over screen to (re)start -- both boards reset immediately, but simulation
+  stays frozen behind a brief "3 2 1 START" countdown first (each number rises up a couple pixels then holds
+  for about a second; "START" rises the same way but then blinks a few times) before the match actually
+  begins. Losing plays out the same way in reverse: once someone tops out, every row pops top to bottom
+  across both boards before a "MATCH OVER" screen names the winner.
 
 ## Notes on the block colors
 
@@ -235,7 +240,11 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   in Debug builds (see the `comptime` block in `main.zig`) -- `zig build --release=small` never includes
   this surface. Used via `tools/wasm4-harness.js`.
 - `src/main.zig` — wires the above together behind the WASM-4 `start`/`update` entry points: drives both
-  boards' input/simulation/rise each frame, and tracks who wins once either tops out.
+  boards' input/simulation/rise each frame, and tracks who wins once either tops out. Between the title
+  screen and real gameplay sits a frozen "3 2 1 START" countdown (`state.countdown_timer`, started by
+  `board.beginCountdown`); between a match ending and the winner overlay sits a frozen closing wipe
+  (`state.closing_timer`, started by `board.beginClosing`) -- both gate simulation entirely, only ever
+  calling `render.render()` (which reads board state passively) plus their own overlay on top.
 - `build.zig` / `build.zig.zon` — builds `src/main.zig` into a freestanding `wasm32` cart with the memory layout
   WASM-4 expects, and wires up `zig build test`.
 - `tools/wasm4-harness.js` — a shared Node harness for driving a compiled cart headlessly (scripted board

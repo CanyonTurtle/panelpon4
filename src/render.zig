@@ -313,18 +313,35 @@ fn stressBounceOffset() i32 {
 // height regardless of where board_bottom falls across it.
 const BOARD_BOTTOM: i32 = c.BOARD_Y + @as(i32, c.VISIBLE_ROWS) * c.TILE;
 
+// How many rows (from the ceiling down) the closing "match over" wipe has
+// already popped -- see state.closing_timer/board.beginClosing, ticked down
+// once per frame in main.zig once `winner` leaves .none. `.none` outside
+// that window keeps this permanently 0, so drawBoard/drawMicroBoard's own
+// wipe check below is a no-op during ordinary gameplay. Purely a rendering
+// skip -- nothing here ever touches either Board's actual grid, so there's
+// no risk of this interfering with (or surviving past) the match itself.
+pub fn closingWipedRows() u8 {
+    if (s.winner == .none) return 0;
+    const elapsed = c.CLOSING_TOTAL_FRAMES - s.closing_timer;
+    if (elapsed <= 0) return 0;
+    const rows = @divTrunc(elapsed, c.CLOSING_FRAMES_PER_ROW);
+    return @intCast(@min(rows, c.RING_SIZE));
+}
+
 // Full-detail board rendering -- always `s.player`, at the normal board
 // position/scale. See render_cpu.zig for the CPU's simplified equivalent.
 fn drawBoard(b: *s.Board) void {
     var col_stressed: [c.COLS]bool = undefined;
     for (0..c.COLS) |ci| col_stressed[ci] = isColumnStressed(b, @intCast(ci));
     const bounce = stressBounceOffset();
+    const wiped = closingWipedRows();
 
     // Starts at SPAWN_ROWS, not 0 -- rows before that are the offscreen
     // garbage staging area (see constants.SPAWN_ROWS/Board.physRow), never
     // meant to be drawn at all.
     var lr: u8 = c.SPAWN_ROWS;
     while (lr < c.ROWS) : (lr += 1) {
+        if (lr - c.SPAWN_ROWS < wiped) continue; // already "popped" by the closing wipe
         const base_y = c.BOARD_Y + @as(i32, lr - c.SPAWN_ROWS) * c.TILE - @as(i32, @intCast(b.scroll_px));
         if (base_y + c.TILE <= c.BOARD_Y or base_y >= BOARD_BOTTOM) continue;
         var col: u8 = 0;
@@ -478,6 +495,16 @@ fn drawPanel() void {
         w4.DRAW_COLORS.* = 0x0004;
         w4.Text(chain_str, c.PANEL_X, 28);
     }
+
+    // A combo has no ongoing Board state the way chain does -- just a
+    // recent-event flag (Board.combo_display_timer, ticked down once per
+    // frame in sim.simulate) -- so this reads as a lingering callout rather
+    // than something that stays up for as long as a condition holds, unlike
+    // the chain multiplier above it.
+    if (s.player.combo_display_timer > 0) {
+        w4.DRAW_COLORS.* = 0x0004;
+        w4.Text("COMBO", c.PANEL_X, 38);
+    }
 }
 
 pub fn drawTitle() void {
@@ -493,6 +520,10 @@ pub fn drawTitle() void {
     w4.Text("PRESS X", 52, 100);
 }
 
+// Only ever shown once the closing wipe (state.closing_timer, see
+// board.beginClosing) has finished popping every row -- see main.zig, which
+// gates the call on that -- so the loss reads as "board clears, then the
+// verdict appears", not both at once.
 pub fn drawGameOver() void {
     const text: []const u8 = switch (s.winner) {
         .player => "YOU WIN",
@@ -501,11 +532,66 @@ pub fn drawGameOver() void {
         .none => unreachable, // drawGameOver is only ever called once winner != .none
     };
     w4.DRAW_COLORS.* = 0x0001;
-    w4.Rect(20, 60, 120, 40);
+    w4.Rect(20, 52, 120, 56);
     w4.DRAW_COLORS.* = 0x0004;
-    w4.Text(text, 32, 68);
+    w4.Text("MATCH OVER", 40, 58);
+    w4.Text(text, 32, 74);
     w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("PRESS X", 40, 84);
+    w4.Text("PRESS X", 40, 90);
+}
+
+// "3 2 1 START" shown once per match, right after resetGame -- see
+// state.countdown_timer (which this turns back into "which stage, how far
+// into it") and board.beginCountdown, the only place that gets set. "3",
+// "2", "1" each rise a couple pixels then hold steady for about a second;
+// "START" rises the same way but then blinks a few times instead of holding
+// steady.
+pub fn drawCountdown() void {
+    const elapsed = c.COUNTDOWN_TOTAL_FRAMES - s.countdown_timer;
+
+    var label: []const u8 = "3";
+    var stage_elapsed: i32 = elapsed;
+    var is_start = false;
+    if (elapsed < c.COUNTDOWN_NUMBER_FRAMES) {
+        label = "3";
+    } else if (elapsed < c.COUNTDOWN_NUMBER_FRAMES * 2) {
+        label = "2";
+        stage_elapsed = elapsed - c.COUNTDOWN_NUMBER_FRAMES;
+    } else if (elapsed < c.COUNTDOWN_NUMBER_FRAMES * 3) {
+        label = "1";
+        stage_elapsed = elapsed - c.COUNTDOWN_NUMBER_FRAMES * 2;
+    } else {
+        label = "START";
+        stage_elapsed = elapsed - c.COUNTDOWN_NUMBER_FRAMES * 3;
+        is_start = true;
+    }
+
+    // Eases up from a couple pixels below its resting spot, then either
+    // holds there steady (numbers) or blinks a few times (START) -- see
+    // this function's own doc comment.
+    var visible = true;
+    var rise_offset: i32 = 0;
+    if (stage_elapsed < c.COUNTDOWN_RISE_FRAMES) {
+        const remain = c.COUNTDOWN_RISE_FRAMES - stage_elapsed;
+        rise_offset = @divTrunc(remain * c.COUNTDOWN_RISE_PX, c.COUNTDOWN_RISE_FRAMES);
+    } else if (is_start) {
+        const blink_elapsed = stage_elapsed - c.COUNTDOWN_RISE_FRAMES;
+        const phase = @divTrunc(blink_elapsed, c.COUNTDOWN_BLINK_HALF_FRAMES);
+        visible = @mod(phase, 2) == 0;
+    }
+    if (!visible) return;
+
+    const char_w: i32 = 8;
+    const text_w: i32 = @as(i32, @intCast(label.len)) * char_w;
+    const cx: i32 = 80; // screen center (SCREEN_SIZE/2)
+    const base_y: i32 = 70;
+    const y = base_y - rise_offset;
+    const pad: i32 = 8;
+
+    w4.DRAW_COLORS.* = 0x0001;
+    w4.Rect(cx - @divTrunc(text_w, 2) - pad, y - 6, @intCast(text_w + 2 * pad), @intCast(char_w + 12));
+    w4.DRAW_COLORS.* = 0x0004;
+    w4.Text(label, cx - @divTrunc(text_w, 2), y);
 }
 
 pub fn render() void {

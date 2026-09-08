@@ -185,6 +185,18 @@ fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16,
     drawMicroIcon(x, y, color, clip_top, clip_bottom);
 }
 
+// Mirrors render.closingWipedRows exactly (can't import it directly --
+// render.zig already imports this file, and Zig doesn't allow the reverse).
+// See that copy's own doc comment for why this is 0 outside the closing
+// wipe.
+fn closingWipedRows() u8 {
+    if (s.winner == .none) return 0;
+    const elapsed = c.CLOSING_TOTAL_FRAMES - s.closing_timer;
+    if (elapsed <= 0) return 0;
+    const rows = @divTrunc(elapsed, c.CLOSING_FRAMES_PER_ROW);
+    return @intCast(@min(rows, c.RING_SIZE));
+}
+
 fn drawMicroBoard(b: *s.Board, origin_x: i32, origin_y: i32) void {
     const clip_top = origin_y;
     const clip_bottom = origin_y + BOARD_H;
@@ -192,11 +204,13 @@ fn drawMicroBoard(b: *s.Board, origin_x: i32, origin_y: i32) void {
     // units, so it's rescaled here to MICRO_TILE units -- the rise reads at
     // the same relative pace, just smaller, rather than snapping row by row.
     const micro_scroll = @divTrunc(@as(i32, @intCast(b.scroll_px)) * MICRO_TILE, c.TILE);
+    const wiped = closingWipedRows();
 
     // Starts at SPAWN_ROWS, not 0 -- see render.drawBoard's identical fix for
     // why (rows before that are the offscreen garbage staging area).
     var lr: u8 = c.SPAWN_ROWS;
     while (lr < c.ROWS) : (lr += 1) {
+        if (lr - c.SPAWN_ROWS < wiped) continue; // already "popped" by the closing wipe
         const base_y = origin_y + @as(i32, lr - c.SPAWN_ROWS) * MICRO_TILE - micro_scroll;
         if (base_y + MICRO_TILE <= clip_top or base_y >= clip_bottom) continue;
         var col: u8 = 0;

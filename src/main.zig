@@ -48,6 +48,20 @@ export fn update() void {
     // touch starts.
     if (gp != 0) s.cursor_hidden = false;
 
+    // The "3 2 1 START" countdown, right after board.beginCountdown resets
+    // both boards -- freezes input/simulation entirely and just renders the
+    // already-reset boards underneath the overlay (render.render() reads
+    // board state only, so this is a perfectly valid "about to start" frame
+    // to sit on for a few seconds) until it counts down to 0.
+    if (s.countdown_timer > 0) {
+        s.countdown_timer -= 1;
+        render.render();
+        render.drawCountdown();
+        if (s.countdown_timer <= 0) s.started = true;
+        s.prev_gamepad = gp;
+        return;
+    }
+
     if (!s.started) {
         _ = s.player.rngNext();
         board.perturbSharedRng();
@@ -58,7 +72,7 @@ export fn update() void {
         // this is the only place it's adjustable.
         if (input.justPressed(gp, w4.BUTTON_LEFT) and s.difficulty > 1) s.difficulty -= 1;
         if (input.justPressed(gp, w4.BUTTON_RIGHT) and s.difficulty < 10) s.difficulty += 1;
-        if (input.justPressed(gp, w4.BUTTON_1)) s.started = true;
+        if (input.justPressed(gp, w4.BUTTON_1)) board.beginCountdown();
         s.prev_gamepad = gp;
         return;
     }
@@ -104,18 +118,26 @@ export fn update() void {
         } else if (s.cpu.game_over) {
             s.winner = .player;
         }
-        if (s.winner != .none and !was_over) audio.playGameOverSound();
+        if (s.winner != .none and !was_over) {
+            audio.playGameOverSound();
+            board.beginClosing();
+        }
+    } else if (s.closing_timer > 0) {
+        // The closing wipe (state.closing_timer) is ticked down here, before
+        // any input handling -- render.render() below reads it to decide how
+        // many rows to skip drawing (see render.closingWipedRows) -- so the
+        // "PRESS X" restart below only ever becomes reachable once every row
+        // has actually finished popping.
+        s.closing_timer -= 1;
     } else {
         if (input.justPressed(gp, w4.BUTTON_1)) {
-            board.resetSharedRows();
-            board.resetGame(&s.player);
-            board.resetGame(&s.cpu);
+            board.beginCountdown();
             s.winner = .none;
         }
     }
 
     render.render();
-    if (s.winner != .none) render.drawGameOver();
+    if (s.winner != .none and s.closing_timer <= 0) render.drawGameOver();
 
     s.prev_gamepad = gp;
 }

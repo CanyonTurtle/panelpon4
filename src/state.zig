@@ -192,6 +192,13 @@ pub const Board = struct {
 
     score: u32 = 0,
     chain: u8 = 0,
+    // The size of the most recent combo (see sim_matches.checkMatches'
+    // is_combo) -- unlike `chain`, a combo has no ongoing state of its own,
+    // so this just holds the last one's size for COMBO_DISPLAY_FRAMES (see
+    // render.drawPanel), ticked down once per frame in sim.simulate.
+    // Meaningless once combo_display_timer reaches 0.
+    combo_display: u8 = 0,
+    combo_display_timer: u16 = 0,
     game_over: bool = false,
     // Counts consecutive idle frames spent with a block at or above the
     // ceiling -- see board.updateDangerTimer, which is what actually sets
@@ -350,6 +357,23 @@ pub const Winner = enum { none, player, cpu, draw };
 pub var winner: Winner = .none;
 
 pub var started: bool = false;
+
+// A brief "3 2 1 START" overlay shown once per match, right after both
+// boards (and the shared row cache) reset but before real simulation
+// begins -- see board.beginCountdown (the only way this ever gets set) and
+// main.zig, which freezes input/simulation and just renders the
+// already-reset boards underneath it while this counts down to 0.
+// render.drawCountdown turns the remaining count back into "which stage
+// (3/2/1/START), how far into it".
+pub var countdown_timer: i32 = 0;
+
+// Ticks down in main.zig once `winner` leaves .none, before drawGameOver
+// actually shows the match-over/winner overlay -- a purely cosmetic
+// top-to-bottom wipe (render.drawBoard/render_cpu.drawMicroBoard just skip
+// drawing already-"popped" rows; nothing here ever touches either Board's
+// actual grid) so a loss reads as one final cascade rather than an instant
+// cut to the overlay.
+pub var closing_timer: i32 = 0;
 
 // The CPU's difficulty, 1-10 -- set on the title screen (see main.zig) and
 // then fixed for the rest of the session (there's no menu to revisit it

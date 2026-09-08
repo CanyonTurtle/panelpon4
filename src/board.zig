@@ -232,6 +232,27 @@ pub fn resetGame(self: *s.Board) void {
     }
 }
 
+// Kicks off a fresh match: resets the shared row cache and both boards (see
+// resetSharedRows/resetGame), then starts the "3 2 1 START" countdown (see
+// state.countdown_timer/render.drawCountdown) instead of jumping straight
+// into simulation. The only place either board ever gets reset -- called
+// once per match, from both the title screen's and the game-over screen's
+// own "press X" handling in main.zig.
+pub fn beginCountdown() void {
+    resetSharedRows();
+    resetGame(&s.player);
+    resetGame(&s.cpu);
+    s.countdown_timer = c.COUNTDOWN_TOTAL_FRAMES;
+    s.started = false;
+}
+
+// Starts the closing "pop everything, top to bottom" wipe (see
+// state.closing_timer/render.drawBoard's wipe skip) -- called once, right
+// when `winner` first leaves .none (see main.zig).
+pub fn beginClosing() void {
+    s.closing_timer = c.CLOSING_TOTAL_FRAMES;
+}
+
 const testing = @import("std").testing;
 
 test "doRise no longer ends the game directly -- see updateDangerTimer's forgiveness timer" {
