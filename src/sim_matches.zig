@@ -104,36 +104,34 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
     }
 
     // Garbage has no color of its own, so it never seeds a match -- but a
-    // pop pulls in every cell of any garbage *piece* (see Cell.garbage_group
-    // -- one persistent id per combo/chain that spawned it) that has at
-    // least one member orthogonally touching a matched real cell. This is
-    // about retained groupings, not transient spatial touching: two
-    // different pieces sitting right next to each other never merge into
-    // one event just because they're adjacent -- a piece only ever gets
-    // pulled in by actually touching the real match itself, never by
-    // touching some *other* garbage piece that happens to be nearby (even
-    // one that's itself being pulled in this same event). Once a piece is
-    // triggered, its whole group comes along together, wherever its other
-    // cells happen to be -- so, unlike the old spatial flood-fill this
-    // replaces, a single pass suffices: nothing here chains group-to-group.
-    var triggered_groups: [256]bool = std.mem.zeroes([256]bool);
-    for (0..c.ROWS) |lr| {
-        for (0..c.COLS) |col| {
-            const cell = self.cellAt(@intCast(lr), @intCast(col));
-            if (cell.state != .normal or !cell.is_garbage) continue;
-            const touches_matched =
-                (lr > 0 and matched[lr - 1][col]) or
-                (lr + 1 < c.ROWS and matched[lr + 1][col]) or
-                (col > 0 and matched[lr][col - 1]) or
-                (col + 1 < c.COLS and matched[lr][col + 1]);
-            if (touches_matched) triggered_groups[cell.garbage_group] = true;
-        }
-    }
-    for (0..c.ROWS) |lr| {
-        for (0..c.COLS) |col| {
-            const cell = self.cellAt(@intCast(lr), @intCast(col));
-            if (cell.state != .normal or !cell.is_garbage) continue;
-            if (triggered_groups[cell.garbage_group]) matched[lr][col] = true;
+    // pop propagates into any garbage cell orthogonally touching a matched
+    // cell, and from there into further garbage cells touching *that* one,
+    // and so on -- a whole physically-connected clump goes together, same as
+    // it always has, including a *different* garbage piece it merely happens
+    // to be resting against (see Cell.garbage_group and garbage_reveals
+    // below for the part that genuinely does need to stay per-piece: how
+    // much of each individual piece actually converts, once everything
+    // touching has been pulled in here). A fixed-point sweep, since
+    // propagation can chain through several garbage cells in a row within
+    // the same event.
+    var propagated = true;
+    while (propagated) {
+        propagated = false;
+        for (0..c.ROWS) |lr| {
+            for (0..c.COLS) |col| {
+                if (matched[lr][col]) continue;
+                const cell = self.cellAt(@intCast(lr), @intCast(col));
+                if (cell.state != .normal or !cell.is_garbage) continue;
+                const touches_matched =
+                    (lr > 0 and matched[lr - 1][col]) or
+                    (lr + 1 < c.ROWS and matched[lr + 1][col]) or
+                    (col > 0 and matched[lr][col - 1]) or
+                    (col + 1 < c.COLS and matched[lr][col + 1]);
+                if (touches_matched) {
+                    matched[lr][col] = true;
+                    propagated = true;
+                }
+            }
         }
     }
 

@@ -52,27 +52,39 @@ test "a garbage clump taller than one row only marks its bottom row (per column)
     try testing.expect(b.cellAt(9, 2).garbage_reveals); // bottom: converts
 }
 
-test "a match does not propagate into a different garbage piece just because it's touching the triggered one" {
+test "a pop propagates into a different garbage piece resting against the triggered one, but each piece still keeps its own bottom-row rule" {
     var b: s.Board = .{};
     var opp: s.Board = .{};
-    // Two SEPARATE pieces stacked on top of each other: piece 1 touches the
-    // real match directly; piece 2 (a different origin) just happens to be
-    // resting on top of it, touching it, but isn't touched by the match
-    // itself. Only piece 1 should be pulled into this event at all.
+    // Piece 1 (rows 8-9, 2 tall) touches the real match directly at its
+    // bottom. Piece 2 (row 7, a completely different origin) just happens
+    // to be resting on top of piece 1, touching it -- propagation still
+    // reaches it (a pop connects through a whole physically-touching
+    // clump, same as always), but piece 2 is its OWN separate 1-row piece,
+    // so it converts fully, independent of piece 1 only converting its own
+    // bottom row.
+    b.cellAt(7, 2).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 2 };
+    b.cellAt(8, 2).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 1 };
     b.cellAt(9, 2).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 1 };
-    b.cellAt(8, 2).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 2 };
     b.cellAt(10, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(10, 1).* = .{ .color = 1, .state = .normal };
     b.cellAt(10, 2).* = .{ .color = 1, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled);
 
-    try testing.expectEqual(s.CellState.recycling, b.cellAt(9, 2).state); // piece 1: pulled in
-    try testing.expect(b.cellAt(9, 2).garbage_reveals); // and converts -- nothing of ITS piece below it
+    // Both pieces are pulled into the same event -- propagation goes
+    // through the whole physically-connected clump, crossing from piece 1
+    // into piece 2 where they touch.
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(7, 2).state);
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(8, 2).state);
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(9, 2).state);
 
-    // Piece 2 is a completely different origin -- untouched, still plain
-    // inert garbage, not even part of this event.
-    try testing.expectEqual(s.CellState.normal, b.cellAt(8, 2).state);
-    try testing.expect(b.cellAt(8, 2).is_garbage);
+    // Piece 1's own bottom row (9) converts; its row 8 doesn't (piece 1's
+    // own cell is right below it). Piece 2's row 7 converts too -- it's a
+    // different, genuinely 1-row piece, so nothing of *its own* group is
+    // below it (row 8 belongs to piece 1), regardless of piece 1 only
+    // partially converting right underneath it.
+    try testing.expect(b.cellAt(9, 2).garbage_reveals);
+    try testing.expect(!b.cellAt(8, 2).garbage_reveals);
+    try testing.expect(b.cellAt(7, 2).garbage_reveals);
 }
 
 test "two separate 1-row pieces stacked together each convert on their own -- the rule is per piece, not per event" {
