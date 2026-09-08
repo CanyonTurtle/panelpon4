@@ -489,21 +489,22 @@ fn drawPanel() void {
     const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.player.score}) catch "0";
     w4.Text(score_str, c.PANEL_X, 14);
 
+    // Chain and combo share this one spot rather than each getting their own
+    // line -- chain takes priority when both are true (same precedence as
+    // the floating badge's own label choice in sim_matches.checkMatches),
+    // since it's the rarer, more meaningful feat. A combo has no ongoing
+    // Board state the way chain does -- just a recent-event flag
+    // (Board.combo_display_timer, ticked down once per frame in
+    // sim.simulate) -- so on its own it reads as a lingering callout rather
+    // than something that stays up for as long as a condition holds.
     if (s.player.chain > 1) {
         var buf2: [12]u8 = undefined;
         const chain_str = std.fmt.bufPrint(&buf2, "x{d}", .{s.player.chain}) catch "";
         w4.DRAW_COLORS.* = 0x0004;
         w4.Text(chain_str, c.PANEL_X, 28);
-    }
-
-    // A combo has no ongoing Board state the way chain does -- just a
-    // recent-event flag (Board.combo_display_timer, ticked down once per
-    // frame in sim.simulate) -- so this reads as a lingering callout rather
-    // than something that stays up for as long as a condition holds, unlike
-    // the chain multiplier above it.
-    if (s.player.combo_display_timer > 0) {
+    } else if (s.player.combo_display_timer > 0) {
         w4.DRAW_COLORS.* = 0x0004;
-        w4.Text("COMBO", c.PANEL_X, 38);
+        w4.Text("COMBO", c.PANEL_X, 28);
     }
 }
 
@@ -520,6 +521,26 @@ pub fn drawTitle() void {
     w4.Text("PRESS X", 52, 100);
 }
 
+// Bezeled orange border for a full-screen overlay panel (the countdown and
+// match-over screens): two concentric dithered outlines for a raised bezel
+// look (the same technique drawCursor uses), plus a 1px black (background)
+// outline just outside that so the bezel itself reads clearly against
+// whatever's behind the panel -- the board, mid-scroll or otherwise --
+// rather than risking blending into it the way a single flat-colored edge
+// might.
+fn drawPanelBorder(x: i32, y: i32, w: i32, h: i32) void {
+    w4.DRAW_COLORS.* = DC_BG;
+    w4.Rect(x - 1, y - 1, @intCast(w + 2), 1);
+    w4.Rect(x - 1, y + h, @intCast(w + 2), 1);
+    w4.Rect(x - 1, y - 1, 1, @intCast(h + 2));
+    w4.Rect(x + w, y - 1, 1, @intCast(h + 2));
+
+    drawDitheredRectOutline(x, y, w, h, badge.WARM_DITHER_HUES);
+    if (w > 2 and h > 2) {
+        drawDitheredRectOutline(x + 1, y + 1, w - 2, h - 2, badge.WARM_DITHER_HUES);
+    }
+}
+
 // Only ever shown once the closing wipe (state.closing_timer, see
 // board.beginClosing) has finished popping every row -- see main.zig, which
 // gates the call on that -- so the loss reads as "board clears, then the
@@ -531,8 +552,13 @@ pub fn drawGameOver() void {
         .draw => "DRAW",
         .none => unreachable, // drawGameOver is only ever called once winner != .none
     };
+    const x = 20;
+    const y = 52;
+    const w = 120;
+    const h = 56;
     w4.DRAW_COLORS.* = 0x0001;
-    w4.Rect(20, 52, 120, 56);
+    w4.Rect(x, y, w, h);
+    drawPanelBorder(x, y, w, h);
     w4.DRAW_COLORS.* = 0x0004;
     w4.Text("MATCH OVER", 40, 58);
     w4.Text(text, 32, 74);
@@ -587,9 +613,14 @@ pub fn drawCountdown() void {
     const base_y: i32 = 70;
     const y = base_y - rise_offset;
     const pad: i32 = 8;
+    const box_x = cx - @divTrunc(text_w, 2) - pad;
+    const box_y = y - 6;
+    const box_w = text_w + 2 * pad;
+    const box_h = char_w + 12;
 
     w4.DRAW_COLORS.* = 0x0001;
-    w4.Rect(cx - @divTrunc(text_w, 2) - pad, y - 6, @intCast(text_w + 2 * pad), @intCast(char_w + 12));
+    w4.Rect(box_x, box_y, @intCast(box_w), @intCast(box_h));
+    drawPanelBorder(box_x, box_y, box_w, box_h);
     w4.DRAW_COLORS.* = 0x0004;
     w4.Text(label, cx - @divTrunc(text_w, 2), y);
 }
