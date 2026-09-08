@@ -181,9 +181,11 @@ fn drawMicroBoard(b: *s.Board, origin_x: i32, origin_y: i32) void {
     // the same relative pace, just smaller, rather than snapping row by row.
     const micro_scroll = @divTrunc(@as(i32, @intCast(b.scroll_px)) * MICRO_TILE, c.TILE);
 
-    var lr: u8 = 0;
+    // Starts at SPAWN_ROWS, not 0 -- see render.drawBoard's identical fix for
+    // why (rows before that are the offscreen garbage staging area).
+    var lr: u8 = c.SPAWN_ROWS;
     while (lr < c.ROWS) : (lr += 1) {
-        const base_y = origin_y + @as(i32, lr) * MICRO_TILE - micro_scroll;
+        const base_y = origin_y + @as(i32, lr - c.SPAWN_ROWS) * MICRO_TILE - micro_scroll;
         if (base_y + MICRO_TILE <= clip_top or base_y >= clip_bottom) continue;
         var col: u8 = 0;
         while (col < c.COLS) : (col += 1) {

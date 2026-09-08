@@ -14,11 +14,12 @@ const no_settled: [c.ROWS][c.COLS]bool = std.mem.zeroes([c.ROWS][c.COLS]bool);
 
 test "a garbage cell is never swappable" {
     var b: s.Board = .{};
-    b.cellAt(b.cursor_row, b.cursor_col).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(b.cursor_row, b.cursor_col + 1).* = .{ .color = 1, .state = .normal };
+    const row = b.cursor_row + c.SPAWN_ROWS;
+    b.cellAt(row, b.cursor_col).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(row, b.cursor_col + 1).* = .{ .color = 1, .state = .normal };
     sim.trySwap(&b);
-    try testing.expect(b.cellAt(b.cursor_row, b.cursor_col).is_garbage);
-    try testing.expectEqual(@as(u8, 1), b.cellAt(b.cursor_row, b.cursor_col + 1).color);
+    try testing.expect(b.cellAt(row, b.cursor_col).is_garbage);
+    try testing.expectEqual(@as(u8, 1), b.cellAt(row, b.cursor_col + 1).color);
 }
 
 test "a match propagates into an orthogonally adjacent garbage cell, recycling it" {
@@ -94,23 +95,23 @@ test "an unrelated garbage cell elsewhere does not recycle" {
 test "a recycled garbage cell reveals a fresh chainable block only once its whole group finishes" {
     var b: s.Board = .{};
     var opp: s.Board = .{};
-    b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
-    b.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
-    b.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
-    b.cellAt(5, 3).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(15, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 3).* = .{ .state = .normal, .is_garbage = true };
     // A genuine floor directly below the garbage cell -- anchored all the
-    // way to row 12 (the true bottom of the ring buffer), or gravity would
+    // way to row 22 (the true bottom of the ring buffer), or gravity would
     // treat the "floor" itself as unsupported and let it fall away, leaving
     // the revealed block nothing to rest on (the project's standing
     // test-fixture pitfall). This keeps the revealed block at a known
-    // position (row 5) so the assertions below are unambiguous.
-    b.cellAt(6, 3).* = .{ .color = 3, .state = .normal };
-    b.cellAt(7, 3).* = .{ .color = 4, .state = .normal };
-    b.cellAt(8, 3).* = .{ .color = 3, .state = .normal };
-    b.cellAt(9, 3).* = .{ .color = 4, .state = .normal };
-    b.cellAt(10, 3).* = .{ .color = 3, .state = .normal };
-    b.cellAt(11, 3).* = .{ .color = 4, .state = .normal };
-    b.cellAt(12, 3).* = .{ .color = 3, .state = .normal };
+    // position (row 15) so the assertions below are unambiguous.
+    b.cellAt(16, 3).* = .{ .color = 3, .state = .normal };
+    b.cellAt(17, 3).* = .{ .color = 4, .state = .normal };
+    b.cellAt(18, 3).* = .{ .color = 3, .state = .normal };
+    b.cellAt(19, 3).* = .{ .color = 4, .state = .normal };
+    b.cellAt(20, 3).* = .{ .color = 3, .state = .normal };
+    b.cellAt(21, 3).* = .{ .color = 4, .state = .normal };
+    b.cellAt(22, 3).* = .{ .color = 3, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled);
     // (This match's 4 members -- 3 real + 1 propagated garbage -- also cross
     // the combo threshold and spawn combo garbage on the opponent's board;
@@ -119,22 +120,22 @@ test "a recycled garbage cell reveals a fresh chainable block only once its whol
 
     const member_count = 4; // 3 matched + 1 propagated garbage
     const group_end: i16 = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + (member_count - 1) * c.POP_STAGGER_FRAMES;
-    const color_at_start = b.cellAt(5, 3).color;
+    const color_at_start = b.cellAt(15, 3).color;
 
     for (0..@intCast(group_end - 1)) |_| sim.simulate(&b, &opp);
-    try testing.expectEqual(s.CellState.recycling, b.cellAt(5, 3).state);
-    try testing.expect(b.cellAt(5, 3).is_garbage);
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(15, 3).state);
+    try testing.expect(b.cellAt(15, 3).is_garbage);
     // The color doesn't change while recycling -- it was picked once, up
     // front, when the whole event was first detected.
-    try testing.expectEqual(color_at_start, b.cellAt(5, 3).color);
+    try testing.expectEqual(color_at_start, b.cellAt(15, 3).color);
 
     sim.simulate(&b, &opp); // the final frame: the whole group resolves together
-    try testing.expectEqual(s.CellState.normal, b.cellAt(5, 3).state);
-    try testing.expect(!b.cellAt(5, 3).is_garbage);
-    try testing.expect(b.cellAt(5, 3).chainable);
+    try testing.expectEqual(s.CellState.normal, b.cellAt(15, 3).state);
+    try testing.expect(!b.cellAt(15, 3).is_garbage);
+    try testing.expect(b.cellAt(15, 3).chainable);
     // Reveal doesn't reassign the color either -- what the player saw
     // throughout the pop is exactly what it becomes.
-    try testing.expectEqual(color_at_start, b.cellAt(5, 3).color);
+    try testing.expectEqual(color_at_start, b.cellAt(15, 3).color);
 }
 
 test "a garbage cell's color is picked the instant recycling starts, not at reveal" {
@@ -292,10 +293,15 @@ test "queued garbage doesn't land while the receiving board is still busy, even 
     for (0..3) |col| try testing.expect(opp.cellAt(0, @intCast(col)).is_garbage);
 }
 
-test "garbage spawn skips cells that are already occupied, rather than overwriting them" {
+test "garbage spawn refuses to place a piece with a hole -- it stays queued until the buffer is fully clear, rather than spawning around an obstacle" {
     var b: s.Board = .{};
     var opp: s.Board = .{};
-    opp.cellAt(0, 1).* = .{ .color = 2, .state = .normal }; // pre-existing, must survive
+    // Something already sitting in the spawn buffer (e.g. an earlier piece
+    // still waiting to fall clear) overlaps where the incoming piece would
+    // land. Placing around it would leave the new piece with a hole, which
+    // can deadlock against a free-standing block (see spawnGarbage's own doc
+    // comment) -- so the whole piece must stay queued instead.
+    opp.cellAt(0, 1).* = .{ .color = 2, .state = .normal };
     b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
     b.cellAt(5, 2).* = .{ .color = 1, .state = .normal };
@@ -303,10 +309,21 @@ test "garbage spawn skips cells that are already occupied, rather than overwriti
     _ = sim.checkMatches(&b, &opp, no_settled); // combo of 4 -> width-3 garbage at cols 0-2
     garbage.releaseIncomingGarbage(&opp);
 
+    // Not placed at all -- the pre-existing block is untouched, and none of
+    // the piece's cells appeared with a hole around it.
     try testing.expectEqual(@as(u8, 2), opp.cellAt(0, 1).color);
     try testing.expect(!opp.cellAt(0, 1).is_garbage);
+    try testing.expect(!opp.cellAt(0, 0).is_garbage);
+    try testing.expect(!opp.cellAt(0, 2).is_garbage);
+    try testing.expect(opp.incoming_garbage[0] != null); // still queued, retrying
+
+    // Once the buffer clears, the very next release places the whole piece.
+    opp.cellAt(0, 1).* = s.Cell{};
+    garbage.releaseIncomingGarbage(&opp);
     try testing.expect(opp.cellAt(0, 0).is_garbage);
+    try testing.expect(opp.cellAt(0, 1).is_garbage);
     try testing.expect(opp.cellAt(0, 2).is_garbage);
+    try testing.expectEqual(@as(?s.GarbageAttack, null), opp.incoming_garbage[0]);
 }
 
 test "propagated garbage does not count toward the combo threshold" {
@@ -351,31 +368,31 @@ test "linked garbage falls and lands as one rigid body, not per column independe
     // taller obstacle (row 8) than col 0/col 2 (nothing until row 10). The
     // whole group must stop the instant col 1 makes contact, landing
     // together at row 7 -- not col 0/col 2 continuing on down past it.
-    b.cellAt(0, 0).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(0, 1).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(0, 2).* = .{ .state = .normal, .is_garbage = true };
-    // The obstacle itself needs anchoring all the way to row 12 (the true
+    b.cellAt(10, 0).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(10, 1).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(10, 2).* = .{ .state = .normal, .is_garbage = true };
+    // The obstacle itself needs anchoring all the way to row 22 (the true
     // bottom of the ring buffer) or ordinary gravity treats it as
     // unsupported and lets it fall away too, silently flattening the
     // "uneven floor" this test depends on (a recurring test-fixture
     // pitfall in this project).
-    b.cellAt(8, 1).* = .{ .color = 2, .state = .normal };
-    b.cellAt(9, 1).* = .{ .color = 3, .state = .normal };
-    b.cellAt(10, 1).* = .{ .color = 2, .state = .normal };
-    b.cellAt(11, 1).* = .{ .color = 3, .state = .normal };
-    b.cellAt(12, 1).* = .{ .color = 2, .state = .normal };
+    b.cellAt(18, 1).* = .{ .color = 2, .state = .normal };
+    b.cellAt(19, 1).* = .{ .color = 3, .state = .normal };
+    b.cellAt(20, 1).* = .{ .color = 2, .state = .normal };
+    b.cellAt(21, 1).* = .{ .color = 3, .state = .normal };
+    b.cellAt(22, 1).* = .{ .color = 2, .state = .normal };
 
     for (0..100) |_| sim.simulate(&b, &opp);
 
-    try testing.expectEqual(s.CellState.normal, b.cellAt(7, 0).state);
-    try testing.expect(b.cellAt(7, 0).is_garbage);
-    try testing.expectEqual(s.CellState.normal, b.cellAt(7, 1).state);
-    try testing.expect(b.cellAt(7, 1).is_garbage);
-    try testing.expectEqual(s.CellState.normal, b.cellAt(7, 2).state);
-    try testing.expect(b.cellAt(7, 2).is_garbage);
-    // Col 0/2 did NOT continue past row 7 down toward the true floor.
-    try testing.expectEqual(s.CellState.empty, b.cellAt(8, 0).state);
-    try testing.expectEqual(s.CellState.empty, b.cellAt(8, 2).state);
+    try testing.expectEqual(s.CellState.normal, b.cellAt(17, 0).state);
+    try testing.expect(b.cellAt(17, 0).is_garbage);
+    try testing.expectEqual(s.CellState.normal, b.cellAt(17, 1).state);
+    try testing.expect(b.cellAt(17, 1).is_garbage);
+    try testing.expectEqual(s.CellState.normal, b.cellAt(17, 2).state);
+    try testing.expect(b.cellAt(17, 2).is_garbage);
+    // Col 0/2 did NOT continue past row 17 down toward the true floor.
+    try testing.expectEqual(s.CellState.empty, b.cellAt(18, 0).state);
+    try testing.expectEqual(s.CellState.empty, b.cellAt(18, 2).state);
 }
 
 test "a resting garbage group re-falls together once its support disappears" {
@@ -387,43 +404,43 @@ test "a resting garbage group re-falls together once its support disappears" {
     // above), which is a different scenario than what this test is after:
     // pure gravity re-evaluating a resting body once whatever was under it
     // is simply gone, regardless of why.
-    b.cellAt(0, 0).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(0, 1).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(0, 2).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(9, 0).* = .{ .color = 3, .state = .normal }; // temporary support
-    b.cellAt(9, 1).* = .{ .color = 4, .state = .normal };
-    b.cellAt(9, 2).* = .{ .color = 3, .state = .normal };
-    // True floor, anchored all the way to row 12 (the true bottom of the
-    // ring buffer) -- a single row at row 10 is no longer enough on its own
-    // now that the board is taller than 11 rows; it'd be just as
+    b.cellAt(10, 0).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(10, 1).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(10, 2).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(19, 0).* = .{ .color = 3, .state = .normal }; // temporary support
+    b.cellAt(19, 1).* = .{ .color = 4, .state = .normal };
+    b.cellAt(19, 2).* = .{ .color = 3, .state = .normal };
+    // True floor, anchored all the way to row 22 (the true bottom of the
+    // ring buffer) -- a single row at row 20 is no longer enough on its own
+    // now that the board is taller than 21 rows; it'd be just as
     // unsupported as anything else without this.
-    b.cellAt(10, 0).* = .{ .color = 3, .state = .normal };
-    b.cellAt(10, 1).* = .{ .color = 4, .state = .normal };
-    b.cellAt(10, 2).* = .{ .color = 3, .state = .normal };
-    b.cellAt(11, 0).* = .{ .color = 4, .state = .normal };
-    b.cellAt(11, 1).* = .{ .color = 3, .state = .normal };
-    b.cellAt(11, 2).* = .{ .color = 4, .state = .normal };
-    b.cellAt(12, 0).* = .{ .color = 3, .state = .normal };
-    b.cellAt(12, 1).* = .{ .color = 4, .state = .normal };
-    b.cellAt(12, 2).* = .{ .color = 3, .state = .normal };
+    b.cellAt(20, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(20, 1).* = .{ .color = 4, .state = .normal };
+    b.cellAt(20, 2).* = .{ .color = 3, .state = .normal };
+    b.cellAt(21, 0).* = .{ .color = 4, .state = .normal };
+    b.cellAt(21, 1).* = .{ .color = 3, .state = .normal };
+    b.cellAt(21, 2).* = .{ .color = 4, .state = .normal };
+    b.cellAt(22, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(22, 1).* = .{ .color = 4, .state = .normal };
+    b.cellAt(22, 2).* = .{ .color = 3, .state = .normal };
 
-    // The garbage falls and rests at row 8, on top of the (unrelated,
+    // The garbage falls and rests at row 18, on top of the (unrelated,
     // non-matching, never-triggered) support.
     for (0..60) |_| sim.simulate(&b, &opp);
-    try testing.expectEqual(s.CellState.normal, b.cellAt(8, 0).state);
-    try testing.expect(b.cellAt(8, 0).is_garbage);
+    try testing.expectEqual(s.CellState.normal, b.cellAt(18, 0).state);
+    try testing.expect(b.cellAt(18, 0).is_garbage);
 
     // Remove the support and let gravity respond: the garbage group above
     // should fall as one body into the new gap and land on the true floor.
-    b.cellAt(9, 0).* = s.Cell{};
-    b.cellAt(9, 1).* = s.Cell{};
-    b.cellAt(9, 2).* = s.Cell{};
+    b.cellAt(19, 0).* = s.Cell{};
+    b.cellAt(19, 1).* = s.Cell{};
+    b.cellAt(19, 2).* = s.Cell{};
     for (0..60) |_| sim.simulate(&b, &opp);
 
-    try testing.expectEqual(s.CellState.normal, b.cellAt(9, 0).state);
-    try testing.expect(b.cellAt(9, 0).is_garbage);
-    try testing.expectEqual(s.CellState.normal, b.cellAt(9, 1).state);
-    try testing.expect(b.cellAt(9, 1).is_garbage);
-    try testing.expectEqual(s.CellState.normal, b.cellAt(9, 2).state);
-    try testing.expect(b.cellAt(9, 2).is_garbage);
+    try testing.expectEqual(s.CellState.normal, b.cellAt(19, 0).state);
+    try testing.expect(b.cellAt(19, 0).is_garbage);
+    try testing.expectEqual(s.CellState.normal, b.cellAt(19, 1).state);
+    try testing.expect(b.cellAt(19, 1).is_garbage);
+    try testing.expectEqual(s.CellState.normal, b.cellAt(19, 2).state);
+    try testing.expect(b.cellAt(19, 2).is_garbage);
 }

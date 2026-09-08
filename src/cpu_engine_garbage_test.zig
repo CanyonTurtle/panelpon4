@@ -61,16 +61,16 @@ test "a floating garbage rectangle falls straight down to the floor, exactly lik
     // Floor anchor (row 12, the true ring-buffer bottom -- see this
     // project's standing test-fixture pitfall) in varied colors so it can't
     // accidentally form a match of its own.
-    b.cellAt(12, 1).* = .{ .color = 0, .state = .normal };
-    b.cellAt(12, 2).* = .{ .color = 1, .state = .normal };
-    b.cellAt(12, 3).* = .{ .color = 2, .state = .normal };
+    b.cellAt(22, 1).* = .{ .color = 0, .state = .normal };
+    b.cellAt(22, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(22, 3).* = .{ .color = 2, .state = .normal };
     // A 2x3 garbage rectangle floating well above the floor.
-    b.cellAt(3, 1).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(3, 2).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(3, 3).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(4, 1).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(4, 2).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(4, 3).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(13, 1).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(13, 2).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(13, 3).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(14, 1).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(14, 2).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(14, 3).* = .{ .state = .normal, .is_garbage = true };
 
     const initial = Grid.fromBoard(&b);
     realSettle(&b, &opp);
@@ -96,24 +96,24 @@ test "a garbage slab resting unevenly on towers of different heights settles as 
     // at row 12 (all colors chosen to alternate -- no run ever repeats
     // adjacently, either vertically within a column or horizontally across
     // the shared rows -- so nothing here accidentally matches on its own).
-    b.cellAt(10, 1).* = .{ .color = 0, .state = .normal };
-    b.cellAt(11, 1).* = .{ .color = 1, .state = .normal };
-    b.cellAt(12, 1).* = .{ .color = 0, .state = .normal };
+    b.cellAt(20, 1).* = .{ .color = 0, .state = .normal };
+    b.cellAt(21, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(22, 1).* = .{ .color = 0, .state = .normal };
 
-    b.cellAt(7, 2).* = .{ .color = 0, .state = .normal };
-    b.cellAt(8, 2).* = .{ .color = 1, .state = .normal };
-    b.cellAt(9, 2).* = .{ .color = 0, .state = .normal };
-    b.cellAt(10, 2).* = .{ .color = 1, .state = .normal };
-    b.cellAt(11, 2).* = .{ .color = 0, .state = .normal };
-    b.cellAt(12, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(17, 2).* = .{ .color = 0, .state = .normal };
+    b.cellAt(18, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(19, 2).* = .{ .color = 0, .state = .normal };
+    b.cellAt(20, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(21, 2).* = .{ .color = 0, .state = .normal };
+    b.cellAt(22, 2).* = .{ .color = 1, .state = .normal };
 
-    b.cellAt(11, 3).* = .{ .color = 0, .state = .normal };
-    b.cellAt(12, 3).* = .{ .color = 1, .state = .normal };
+    b.cellAt(21, 3).* = .{ .color = 0, .state = .normal };
+    b.cellAt(22, 3).* = .{ .color = 1, .state = .normal };
 
     // A 1x3 garbage slab floating well above all three towers.
-    b.cellAt(0, 1).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(0, 2).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(0, 3).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(10, 1).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(10, 2).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(10, 3).* = .{ .state = .normal, .is_garbage = true };
 
     const initial = Grid.fromBoard(&b);
     realSettle(&b, &opp);

@@ -106,16 +106,16 @@ test "at an engine level, the cpu finds and plays an obvious winning swap" {
     // amount, leaving them aligned exactly as here -- see
     // cpu_engine_test.zig's own "finds the swap that completes an immediate
     // match" test for the same setup and why it doesn't need a floor.
-    b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
-    b.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
-    b.cellAt(5, 2).* = .{ .color = 2, .state = .normal };
-    b.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5 + c.SPAWN_ROWS, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5 + c.SPAWN_ROWS, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5 + c.SPAWN_ROWS, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(5 + c.SPAWN_ROWS, 3).* = .{ .color = 1, .state = .normal };
 
     for (0..configFor(s.difficulty).move_interval) |_| update(&b);
 
     try testing.expectEqual(@as(u8, 5), b.cursor_row);
     try testing.expectEqual(@as(u8, 2), b.cursor_col);
-    try testing.expectEqual(s.CellState.swapping, b.cellAt(5, 2).state);
+    try testing.expectEqual(s.CellState.swapping, b.cellAt(5 + c.SPAWN_ROWS, 2).state);
 }
 
 test "at an engine level, the cpu raises instead of swapping on an empty board" {

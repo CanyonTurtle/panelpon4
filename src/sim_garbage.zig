@@ -14,32 +14,51 @@ const s = @import("state.zig");
 
 // Drops `rows` garbage rows (each `width` columns wide, anchored at
 // `anchor_col` -- clamped to fit the board, so callers can pass a match's
-// own min_col without worrying about overflow) onto `target`: garbage is
-// never self-inflicted in vs-CPU play, so this is always called with the
-// *other* board than the one whose combo/chain triggered it (see the call
-// site in sim.checkMatches). Cells are placed at logical rows 0..rows-1,
-// skipping any that are already occupied rather than overwriting the
-// player's existing blocks. They start out connected (a solid rectangle), so
-// updateGarbageGravity below picks them up as a single rigid body from the
-// very next frame -- and all share one fresh Cell.garbage_group id (this is
-// the *only* place a new one is handed out), so a match recycling any part
-// of this piece later always pulls in the whole thing, and never bleeds
-// into some other piece it merely happens to be touching by then.
-pub fn spawnGarbage(target: *s.Board, rows: u8, width: u8, anchor_col: u8) void {
-    const clamped_rows = @min(rows, c.ROWS);
+// own min_col without worrying about overflow) onto `target`, placed
+// entirely within the offscreen spawn buffer (logical rows 0..SPAWN_ROWS-1 --
+// see constants.SPAWN_ROWS/Board.physRow), never directly onto the visible
+// board: garbage is never self-inflicted in vs-CPU play, so this is always
+// called with the *other* board than the one whose combo/chain triggered it
+// (see the call site in sim.checkMatches).
+//
+// All-or-nothing: if any cell the piece would occupy is already taken (most
+// likely by an earlier piece still waiting in the buffer to fall clear), the
+// whole piece is skipped rather than placed with holes around whatever's in
+// the way -- a partially-placed piece could snag on a free-standing block
+// and deadlock (unable to fall itself, while also blocking that block from
+// falling). Returns whether it actually placed anything, so a caller queuing
+// this can leave it queued and retry once the buffer has room (see
+// releaseIncomingGarbage below) instead of losing the attack outright.
+//
+// A placed piece starts out connected (a solid rectangle), so
+// updateGarbageGravity picks it up as a single rigid body from the very next
+// frame -- falling out of the buffer into view the same way any other
+// garbage falls -- and all its cells share one fresh Cell.garbage_group id
+// (this is the *only* place a new one is handed out), so a match recycling
+// any part of this piece later always pulls in the whole thing, and never
+// bleeds into some other piece it merely happens to be touching by then.
+pub fn spawnGarbage(target: *s.Board, rows: u8, width: u8, anchor_col: u8) bool {
+    const clamped_rows = @min(rows, c.SPAWN_ROWS);
     const start_col = if (anchor_col + width > c.COLS) c.COLS - width else anchor_col;
-    const group = target.next_garbage_group;
-    target.next_garbage_group +%= 1;
+
     var r: u8 = 0;
     while (r < clamped_rows) : (r += 1) {
         var col = start_col;
         while (col < start_col + width) : (col += 1) {
-            const cell = target.cellAt(r, col);
-            if (cell.state == .empty) {
-                cell.* = s.Cell{ .state = .normal, .is_garbage = true, .garbage_group = group };
-            }
+            if (target.cellAt(r, col).state != .empty) return false;
         }
     }
+
+    const group = target.next_garbage_group;
+    target.next_garbage_group +%= 1;
+    r = 0;
+    while (r < clamped_rows) : (r += 1) {
+        var col = start_col;
+        while (col < start_col + width) : (col += 1) {
+            target.cellAt(r, col).* = s.Cell{ .state = .normal, .is_garbage = true, .garbage_group = group };
+        }
+    }
+    return true;
 }
 
 // Garbage queueing: rather than spawning the instant a combo/chain is
@@ -103,8 +122,10 @@ pub fn releaseIncomingGarbage(self: *s.Board) void {
     if (self.boardBusy()) return;
     for (&self.incoming_garbage) |*slot| {
         if (slot.*) |p| {
-            spawnGarbage(self, p.rows, p.width, p.anchor_col);
-            slot.* = null;
+            // Stays queued (retried next frame) if the spawn buffer doesn't
+            // have room for the whole piece yet -- see spawnGarbage's
+            // all-or-nothing placement.
+            if (spawnGarbage(self, p.rows, p.width, p.anchor_col)) slot.* = null;
         }
     }
 }

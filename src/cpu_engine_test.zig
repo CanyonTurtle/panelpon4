@@ -1,16 +1,17 @@
 const std = @import("std");
 const testing = std.testing;
+const c = @import("constants.zig");
 const s = @import("state.zig");
 const engine = @import("cpu_engine.zig");
 
 test "fromBoard reads color, garbage, and non-normal cells correctly" {
     var b: s.Board = .{};
-    b.cellAt(0, 0).* = .{ .color = 2, .state = .normal };
-    b.cellAt(0, 1).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(10, 0).* = .{ .color = 2, .state = .normal };
+    b.cellAt(10, 1).* = .{ .state = .normal, .is_garbage = true };
     // Mid-animation -- shouldn't happen in practice (the AI only snapshots
     // while boardBusy() is false), but fromBoard should still treat it as
     // empty rather than reading a stale color out of it.
-    b.cellAt(0, 2).* = .{ .color = 3, .state = .falling };
+    b.cellAt(10, 2).* = .{ .color = 3, .state = .falling };
 
     const grid = engine.Grid.fromBoard(&b);
     try testing.expectEqual(@as(i8, 2), grid.cell[0][0]);
@@ -22,10 +23,10 @@ test "fromBoard reads color, garbage, and non-normal cells correctly" {
 test "bestMove finds the swap that completes an immediate match" {
     var b: s.Board = .{};
     // Row 5: 1,1,2,1 -- swapping columns 2/3 completes a run of three 1's.
-    b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
-    b.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
-    b.cellAt(5, 2).* = .{ .color = 2, .state = .normal };
-    b.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(15, 3).* = .{ .color = 1, .state = .normal };
 
     const grid = engine.Grid.fromBoard(&b);
     const mv = engine.bestMove(grid, 1) orelse return error.NoMoveFound;
@@ -38,11 +39,11 @@ test "bestMove never proposes swapping a garbage cell, and still finds a real wi
     // Column 0 is garbage -- illegal to swap. Columns 1-4 are set up so only
     // the (row0, col3) swap (columns 3/4) actually completes a match; every
     // other legal pairing (anything not touching column 0) does nothing.
-    b.cellAt(0, 0).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(0, 1).* = .{ .color = 1, .state = .normal };
-    b.cellAt(0, 2).* = .{ .color = 1, .state = .normal };
-    b.cellAt(0, 3).* = .{ .color = 2, .state = .normal };
-    b.cellAt(0, 4).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 0).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(10, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 3).* = .{ .color = 2, .state = .normal };
+    b.cellAt(10, 4).* = .{ .color = 1, .state = .normal };
 
     const grid = engine.Grid.fromBoard(&b);
     const mv = engine.bestMove(grid, 1) orelse return error.NoMoveFound;
@@ -73,26 +74,26 @@ test "bestMove prefers a swap that sets off a chain over an equally-sized flat m
     // cell, which was splitting an otherwise-matching stack of three 3's
     // (rows 8, 9, and 11); gravity then compacts them into one contiguous
     // run -- a genuine second pass, not just a bigger first one.
-    b.cellAt(8, 0).* = .{ .color = 3, .state = .normal };
-    b.cellAt(9, 0).* = .{ .color = 3, .state = .normal };
-    b.cellAt(10, 0).* = .{ .color = 0, .state = .normal };
-    b.cellAt(11, 0).* = .{ .color = 3, .state = .normal };
-    b.cellAt(10, 1).* = .{ .color = 0, .state = .normal };
-    b.cellAt(11, 1).* = .{ .color = 4, .state = .normal }; // filler, just for gap-free support
-    b.cellAt(10, 2).* = .{ .color = 2, .state = .normal };
-    b.cellAt(11, 2).* = .{ .color = 1, .state = .normal }; // filler
-    b.cellAt(10, 3).* = .{ .color = 0, .state = .normal };
-    b.cellAt(11, 3).* = .{ .color = 4, .state = .normal }; // filler
+    b.cellAt(18, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(19, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(20, 0).* = .{ .color = 0, .state = .normal };
+    b.cellAt(21, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(20, 1).* = .{ .color = 0, .state = .normal };
+    b.cellAt(21, 1).* = .{ .color = 4, .state = .normal }; // filler, just for gap-free support
+    b.cellAt(20, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(21, 2).* = .{ .color = 1, .state = .normal }; // filler
+    b.cellAt(20, 3).* = .{ .color = 0, .state = .normal };
+    b.cellAt(21, 3).* = .{ .color = 4, .state = .normal }; // filler
 
     // Columns 4-5: an unrelated, equally-sized flat match -- swapping row
     // 10's columns 4/5 slides a matching 1 into column 4 (rows 9 and 11 are
     // already 1, split by a differently-colored row 10), completing a
     // vertical run of three with nothing left to cascade into.
-    b.cellAt(9, 4).* = .{ .color = 1, .state = .normal };
-    b.cellAt(10, 4).* = .{ .color = 4, .state = .normal };
-    b.cellAt(11, 4).* = .{ .color = 1, .state = .normal };
-    b.cellAt(10, 5).* = .{ .color = 1, .state = .normal };
-    b.cellAt(11, 5).* = .{ .color = 2, .state = .normal }; // filler
+    b.cellAt(19, 4).* = .{ .color = 1, .state = .normal };
+    b.cellAt(20, 4).* = .{ .color = 4, .state = .normal };
+    b.cellAt(21, 4).* = .{ .color = 1, .state = .normal };
+    b.cellAt(20, 5).* = .{ .color = 1, .state = .normal };
+    b.cellAt(21, 5).* = .{ .color = 2, .state = .normal }; // filler
 
     const grid = engine.Grid.fromBoard(&b);
     const mv = engine.bestMove(grid, 1) orelse return error.NoMoveFound;
@@ -112,11 +113,11 @@ test "bestAction raises when material is scarce and no swap accomplishes anythin
     // swap here can ever complete a run (there's only one of each color),
     // and there's nowhere near enough material to be worth playing one
     // anyway (see cpu_engine's LOW_MATERIAL_THRESHOLD).
-    b.cellAt(11, 0).* = .{ .color = 0, .state = .normal };
-    b.cellAt(11, 1).* = .{ .color = 1, .state = .normal };
-    b.cellAt(11, 2).* = .{ .color = 2, .state = .normal };
-    b.cellAt(11, 3).* = .{ .color = 3, .state = .normal };
-    b.cellAt(11, 4).* = .{ .color = 4, .state = .normal };
+    b.cellAt(21, 0).* = .{ .color = 0, .state = .normal };
+    b.cellAt(21, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(21, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(21, 3).* = .{ .color = 3, .state = .normal };
+    b.cellAt(21, 4).* = .{ .color = 4, .state = .normal };
 
     const grid = engine.Grid.fromBoard(&b);
     try testing.expectEqual(engine.Action.raise, engine.bestAction(grid, 1));
@@ -129,10 +130,10 @@ test "bestAction still takes an obvious winning swap even with scarce material" 
     // hundred points -- see simulateCascade/BASE_WEIGHT) always beats
     // raising by a wide enough margin that scarce material never talks the
     // engine out of taking a free win.
-    b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
-    b.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
-    b.cellAt(5, 2).* = .{ .color = 2, .state = .normal };
-    b.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(15, 3).* = .{ .color = 1, .state = .normal };
 
     const grid = engine.Grid.fromBoard(&b);
     const action = engine.bestAction(grid, 1);
@@ -150,7 +151,7 @@ test "bestAction refuses to raise a skinny pillar that's already dangerously tal
     // that used to make the engine kill itself chasing material.
     var lr: u8 = 2;
     while (lr < 12) : (lr += 1) {
-        b.cellAt(lr, 0).* = .{ .color = @intCast(lr % 2), .state = .normal };
+        b.cellAt(lr + c.SPAWN_ROWS, 0).* = .{ .color = @intCast(lr % 2), .state = .normal };
     }
 
     const grid = engine.Grid.fromBoard(&b);
@@ -162,7 +163,7 @@ test "raiseValue penalizes a dangerously tall column enough to outweigh scarce m
     var b: s.Board = .{};
     var lr: u8 = 2;
     while (lr < 12) : (lr += 1) {
-        b.cellAt(lr, 0).* = .{ .color = @intCast(lr % 2), .state = .normal };
+        b.cellAt(lr + c.SPAWN_ROWS, 0).* = .{ .color = @intCast(lr % 2), .state = .normal };
     }
     const grid = engine.Grid.fromBoard(&b);
     try testing.expect(engine.raiseValue(grid) < 0);
@@ -170,10 +171,10 @@ test "raiseValue penalizes a dangerously tall column enough to outweigh scarce m
 
 test "bestMove still finds the winning swap at deeper, beam-pruned search depths" {
     var b: s.Board = .{};
-    b.cellAt(5, 0).* = .{ .color = 1, .state = .normal };
-    b.cellAt(5, 1).* = .{ .color = 1, .state = .normal };
-    b.cellAt(5, 2).* = .{ .color = 2, .state = .normal };
-    b.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(15, 3).* = .{ .color = 1, .state = .normal };
 
     const grid = engine.Grid.fromBoard(&b);
     // Depths 2-4 all route the lookahead through bestMoveValue's beam
@@ -190,22 +191,22 @@ test "bestMove still prefers a chain-triggering swap over a flat match at deeper
     var b: s.Board = .{};
     // Identical fixture to the depth-1 version of this same test above --
     // see its own comments for exactly why each cell is where it is.
-    b.cellAt(8, 0).* = .{ .color = 3, .state = .normal };
-    b.cellAt(9, 0).* = .{ .color = 3, .state = .normal };
-    b.cellAt(10, 0).* = .{ .color = 0, .state = .normal };
-    b.cellAt(11, 0).* = .{ .color = 3, .state = .normal };
-    b.cellAt(10, 1).* = .{ .color = 0, .state = .normal };
-    b.cellAt(11, 1).* = .{ .color = 4, .state = .normal };
-    b.cellAt(10, 2).* = .{ .color = 2, .state = .normal };
-    b.cellAt(11, 2).* = .{ .color = 1, .state = .normal };
-    b.cellAt(10, 3).* = .{ .color = 0, .state = .normal };
-    b.cellAt(11, 3).* = .{ .color = 4, .state = .normal };
+    b.cellAt(18, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(19, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(20, 0).* = .{ .color = 0, .state = .normal };
+    b.cellAt(21, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(20, 1).* = .{ .color = 0, .state = .normal };
+    b.cellAt(21, 1).* = .{ .color = 4, .state = .normal };
+    b.cellAt(20, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(21, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(20, 3).* = .{ .color = 0, .state = .normal };
+    b.cellAt(21, 3).* = .{ .color = 4, .state = .normal };
 
-    b.cellAt(9, 4).* = .{ .color = 1, .state = .normal };
-    b.cellAt(10, 4).* = .{ .color = 4, .state = .normal };
-    b.cellAt(11, 4).* = .{ .color = 1, .state = .normal };
-    b.cellAt(10, 5).* = .{ .color = 1, .state = .normal };
-    b.cellAt(11, 5).* = .{ .color = 2, .state = .normal };
+    b.cellAt(19, 4).* = .{ .color = 1, .state = .normal };
+    b.cellAt(20, 4).* = .{ .color = 4, .state = .normal };
+    b.cellAt(21, 4).* = .{ .color = 1, .state = .normal };
+    b.cellAt(20, 5).* = .{ .color = 1, .state = .normal };
+    b.cellAt(21, 5).* = .{ .color = 2, .state = .normal };
 
     const grid = engine.Grid.fromBoard(&b);
     for ([_]u8{ 3, 4 }) |depth| {
@@ -225,7 +226,7 @@ test "a densely packed board (many more legal swaps than the beam width) still r
     // for real rather than only ever seeing a handful of candidates.
     for (0..12) |row| {
         for (0..6) |col| {
-            b.cellAt(@intCast(row), @intCast(col)).* = .{ .color = @intCast((row + col) % 3), .state = .normal };
+            b.cellAt(@intCast(row + c.SPAWN_ROWS), @intCast(col)).* = .{ .color = @intCast((row + col) % 3), .state = .normal };
         }
     }
     const grid = engine.Grid.fromBoard(&b);

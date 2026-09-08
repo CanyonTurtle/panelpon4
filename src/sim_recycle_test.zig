@@ -136,20 +136,20 @@ test "each column of a wider clump converts independently -- a 1-tall column sti
 test "after the whole group resolves, a converting cell becomes real+chainable and a non-converting one stays plain garbage" {
     var b: s.Board = .{};
     var opp: s.Board = .{};
-    b.cellAt(8, 2).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(9, 2).* = .{ .state = .normal, .is_garbage = true };
-    b.cellAt(10, 0).* = .{ .color = 1, .state = .normal };
-    b.cellAt(10, 1).* = .{ .color = 1, .state = .normal };
-    b.cellAt(10, 2).* = .{ .color = 1, .state = .normal };
-    // Floor anchor at row 12 (the true ring-buffer bottom -- see this
+    b.cellAt(18, 2).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(19, 2).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(20, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(20, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(20, 2).* = .{ .color = 1, .state = .normal };
+    // Floor anchor at row 22 (the true ring-buffer bottom -- see this
     // project's standing test-fixture pitfall) so nothing here falls away
     // unexpectedly once the match clears and gravity re-evaluates.
-    b.cellAt(11, 0).* = .{ .color = 2, .state = .normal };
-    b.cellAt(11, 1).* = .{ .color = 3, .state = .normal };
-    b.cellAt(11, 2).* = .{ .color = 2, .state = .normal };
-    b.cellAt(12, 0).* = .{ .color = 3, .state = .normal };
-    b.cellAt(12, 1).* = .{ .color = 2, .state = .normal };
-    b.cellAt(12, 2).* = .{ .color = 3, .state = .normal };
+    b.cellAt(21, 0).* = .{ .color = 2, .state = .normal };
+    b.cellAt(21, 1).* = .{ .color = 3, .state = .normal };
+    b.cellAt(21, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(22, 0).* = .{ .color = 3, .state = .normal };
+    b.cellAt(22, 1).* = .{ .color = 2, .state = .normal };
+    b.cellAt(22, 2).* = .{ .color = 3, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled);
 
     var frames: u32 = 0;
@@ -159,21 +159,21 @@ test "after the whole group resolves, a converting cell becomes real+chainable a
     }
     try testing.expect(!b.boardBusy());
 
-    // The row-10 match cleared, so the clump that was at rows 8-9 falls:
-    // row 9 (the converting one) lands at row 10 as a real block; row 8
-    // (the flash-only one, still garbage) lands at row 9, resting on top of
+    // The row-20 match cleared, so the clump that was at rows 18-19 falls:
+    // row 19 (the converting one) lands at row 20 as a real block; row 18
+    // (the flash-only one, still garbage) lands at row 19, resting on top of
     // it, ready for a future match. (Not asserting `chainable` here -- it's
     // granted the instant the cell converts, but this fall-and-land-without-
     // matching legitimately spends it again by the same standing rule any
     // ordinary revealed block follows; see sim_garbage_test.zig's own
     // "reveals a fresh chainable block" test for that instant, before any
     // further falling, instead.)
-    try testing.expectEqual(s.CellState.normal, b.cellAt(10, 2).state);
-    try testing.expect(!b.cellAt(10, 2).is_garbage);
+    try testing.expectEqual(s.CellState.normal, b.cellAt(20, 2).state);
+    try testing.expect(!b.cellAt(20, 2).is_garbage);
 
-    try testing.expectEqual(s.CellState.normal, b.cellAt(9, 2).state);
-    try testing.expect(b.cellAt(9, 2).is_garbage);
-    try testing.expect(!b.cellAt(9, 2).garbage_reveals);
+    try testing.expectEqual(s.CellState.normal, b.cellAt(19, 2).state);
+    try testing.expect(b.cellAt(19, 2).is_garbage);
+    try testing.expect(!b.cellAt(19, 2).garbage_reveals);
 }
 
 test "recycled garbage colors never complete a run of 3, across many random seeds" {

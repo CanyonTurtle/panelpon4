@@ -55,8 +55,8 @@ pub fn generateRowInto(self: *s.Board, target_phys: u8, logical_r: u8) void {
 }
 
 pub fn doRise(self: *s.Board) void {
-    generateRowInto(self, self.top, c.ROWS - 1);
-    self.top = @intCast((@as(u16, self.top) + 1) % @as(u16, c.ROWS));
+    generateRowInto(self, c.SPAWN_ROWS + self.top, c.ROWS - 1);
+    self.top = @intCast((@as(u16, self.top) + 1) % @as(u16, c.RING_SIZE));
 
     // Logical row indices are relative to `top`, so a fixed cursor_row would
     // silently point at a different (lower) absolute row after this shift,
@@ -88,7 +88,7 @@ fn rowOccupied(self: *s.Board, row: u8) bool {
 // gets cleared in time never carries over into the next one.
 pub fn updateDangerTimer(self: *s.Board) void {
     if (self.game_over) return;
-    if (!self.boardBusy() and rowOccupied(self, 0)) {
+    if (!self.boardBusy() and rowOccupied(self, c.SPAWN_ROWS)) {
         self.danger_timer += 1;
         if (self.danger_timer >= c.DANGER_FORGIVENESS_FRAMES) self.game_over = true;
     } else {
@@ -157,7 +157,7 @@ pub fn resetGame(self: *s.Board) void {
     self.rng_state = rng_state;
 
     const start_rows_filled: u8 = 5;
-    var r: u8 = c.VISIBLE_ROWS - start_rows_filled;
+    var r: u8 = c.SPAWN_ROWS + c.VISIBLE_ROWS - start_rows_filled;
     while (r < c.ROWS) : (r += 1) {
         generateRowInto(self, r, r);
     }
@@ -167,17 +167,17 @@ const testing = @import("std").testing;
 
 test "doRise no longer ends the game directly -- see updateDangerTimer's forgiveness timer" {
     var b: s.Board = .{};
-    // Row 1 becomes the new row 0 after this rise (see the old version of
-    // this test/doRise's history for why post-rise row 0 is what used to
-    // matter) -- reaching it doesn't instantly end the game anymore.
-    b.cellAt(1, 0).state = .normal;
+    // At the ceiling from frame 0 -- reaching it doesn't instantly end the
+    // game anymore (that's updateDangerTimer's job, gated behind its own
+    // forgiveness timer).
+    b.cellAt(c.SPAWN_ROWS, 0).state = .normal;
     doRise(&b);
     try testing.expect(!b.game_over);
 }
 
 test "updateDangerTimer does nothing while the board is busy, even with a block at the ceiling" {
     var b: s.Board = .{};
-    b.cellAt(0, 0).state = .falling; // busy, and already at the ceiling
+    b.cellAt(c.SPAWN_ROWS, 0).state = .falling; // busy, and already at the ceiling
     for (0..c.DANGER_FORGIVENESS_FRAMES * 2) |_| updateDangerTimer(&b);
     try testing.expectEqual(@as(u32, 0), b.danger_timer);
     try testing.expect(!b.game_over);
@@ -193,7 +193,7 @@ test "updateDangerTimer does nothing while idle with no block at the ceiling" {
 
 test "updateDangerTimer ends the game only after the forgiveness timer elapses while idle and at the ceiling" {
     var b: s.Board = .{};
-    b.cellAt(0, 0).state = .normal; // idle and at the ceiling from frame 0
+    b.cellAt(c.SPAWN_ROWS, 0).state = .normal; // idle and at the ceiling from frame 0
     for (0..c.DANGER_FORGIVENESS_FRAMES - 1) |_| updateDangerTimer(&b);
     try testing.expect(!b.game_over);
     updateDangerTimer(&b); // the DANGER_FORGIVENESS_FRAMES-th frame
@@ -202,7 +202,7 @@ test "updateDangerTimer ends the game only after the forgiveness timer elapses w
 
 test "updateDangerTimer resets if the board goes busy before the forgiveness timer elapses" {
     var b: s.Board = .{};
-    b.cellAt(0, 0).state = .normal;
+    b.cellAt(c.SPAWN_ROWS, 0).state = .normal;
     for (0..c.DANGER_FORGIVENESS_FRAMES - 1) |_| updateDangerTimer(&b);
     try testing.expectEqual(c.DANGER_FORGIVENESS_FRAMES - 1, b.danger_timer);
 
@@ -221,11 +221,11 @@ test "updateDangerTimer resets if the board goes busy before the forgiveness tim
 
 test "updateDangerTimer resets if the ceiling clears before the forgiveness timer elapses" {
     var b: s.Board = .{};
-    b.cellAt(0, 0).state = .normal;
+    b.cellAt(c.SPAWN_ROWS, 0).state = .normal;
     for (0..c.DANGER_FORGIVENESS_FRAMES - 1) |_| updateDangerTimer(&b);
     try testing.expectEqual(c.DANGER_FORGIVENESS_FRAMES - 1, b.danger_timer);
 
-    b.cellAt(0, 0).state = .empty; // the danger row clears in time
+    b.cellAt(c.SPAWN_ROWS, 0).state = .empty; // the danger row clears in time
     updateDangerTimer(&b);
     try testing.expectEqual(@as(u32, 0), b.danger_timer);
     try testing.expect(!b.game_over);
@@ -237,7 +237,7 @@ test "doRise shifts top and keeps the cursor tracking the same physical row" {
     const before_top = b.top;
     doRise(&b);
     try testing.expect(!b.game_over);
-    try testing.expectEqual(@as(u8, (before_top + 1) % c.ROWS), b.top);
+    try testing.expectEqual(@as(u8, (before_top + 1) % c.RING_SIZE), b.top);
     try testing.expectEqual(@as(u8, 3), b.cursor_row);
 }
 
@@ -279,7 +279,7 @@ test "a manual raise finishes the current row in exactly MANUAL_RAISE_FRAMES, fr
     }
     const before_top = b.top;
     updateRise(&b); // the MANUAL_RAISE_FRAMES-th frame: should land exactly on TILE and rise
-    try testing.expectEqual(@as(u8, (before_top + 1) % c.ROWS), b.top);
+    try testing.expectEqual(@as(u8, (before_top + 1) % c.RING_SIZE), b.top);
     try testing.expectEqual(@as(u32, 0), b.scroll_px); // consumed exactly, no leftover
     try testing.expectEqual(@as(u32, 0), b.manual_raise_elapsed); // finished, not left dangling
 }

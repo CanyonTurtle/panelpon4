@@ -117,7 +117,14 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/state.zig` — the `Board` struct (grid, cursor, score/chain, rise state, its own RNG stream, its own
   match-popup pool) plus its small methods (ring-buffer indexing, RNG, board-busy query), and the two live
   instances of it, `player`/`cpu`. Every other module takes an explicit `*Board` rather than reaching into
-  an implicit global, so the exact same logic drives both sides of a vs-CPU match.
+  an implicit global, so the exact same logic drives both sides of a vs-CPU match. `physRow` (the logical-to-
+  physical row translation) is piecewise: logical rows below `constants.SPAWN_ROWS` are a fixed, non-rotating
+  offscreen garbage staging area (see `sim_garbage.spawnGarbage`) that maps straight through regardless of
+  `top`; everything from `SPAWN_ROWS` on is the actual rotating ring (the ceiling, the visible board, and the
+  one hidden buffer row rising in from below), exactly as the whole board used to work before the staging
+  area existed, just starting at that offset. Cursor-facing code (`input.zig`, `cpu_ai.zig`) stays in
+  visible-relative row terms (0 = ceiling) and only converts to an absolute logical row at the point it
+  actually touches the grid (`sim.trySwap`, `input.canSwapAt`).
 - `src/board.zig` — row generation, the rising floor (automatic and the Z-button manual raise),
   `updateDangerTimer` (the actual loss condition -- a forgiveness timer gated on the board being idle with
   a block at or above the ceiling, rather than an instant check right after a rise), and (re)starting a
@@ -142,7 +149,12 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   idle, and `releaseIncomingGarbage` actually spawns whatever's queued for a board once *that* board goes
   idle too -- driven once per frame per board from `main.zig`, so garbage from either side never lands
   while a match or chain is still resolving, on the sending board or the receiving one) -- tests in the
-  companion `src/sim_garbage_test.zig`.
+  companion `src/sim_garbage_test.zig`. `spawnGarbage` places a piece entirely within the offscreen spawn
+  buffer (logical rows below `constants.SPAWN_ROWS`), never directly onto the visible board, and falls back
+  to gravity from there like any other garbage -- and it's all-or-nothing: if any cell the piece would
+  occupy is already taken, the whole piece is skipped rather than placed with a hole around whatever's in
+  the way (a partial placement could snag on a free-standing block and deadlock both). `releaseIncomingGarbage`
+  leaves a piece queued and retries it next frame if `spawnGarbage` reports it didn't fit yet.
 - `src/cpu_ai.zig` — the CPU opponent's move picker, branching on `state.difficulty` (see `configFor`):
   every level from 1-10 runs `cpu_engine.zig`'s actual search, differing only in how often they listen to
   it (a steep chance to ignore its pick and play a random legal swap instead at the low end, falling to

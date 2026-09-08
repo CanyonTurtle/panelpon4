@@ -23,8 +23,13 @@ pub fn swappable(state: s.CellState) bool {
 }
 
 pub fn trySwap(self: *s.Board) void {
-    const a = self.cellAt(self.cursor_row, self.cursor_col);
-    const b = self.cellAt(self.cursor_row, self.cursor_col + 1);
+    // cursor_row is relative to the visible window (see input.moveCursor) --
+    // add SPAWN_ROWS to reach the matching absolute logical row now that the
+    // board has an offscreen staging area above the ceiling (see
+    // Board.physRow).
+    const row = self.cursor_row + c.SPAWN_ROWS;
+    const a = self.cellAt(row, self.cursor_col);
+    const b = self.cellAt(row, self.cursor_col + 1);
     if (!swappable(a.state) or !swappable(b.state)) return;
     if (a.is_garbage or b.is_garbage) return; // inert -- see Cell.is_garbage
     if (a.state == .empty and b.state == .empty) return;

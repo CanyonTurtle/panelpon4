@@ -29,7 +29,11 @@ pub const Grid = struct {
         var g: Grid = .{};
         for (0..ROWS) |lr| {
             for (0..COLS) |col| {
-                const cell = b.cellAt(@intCast(lr), @intCast(col));
+                // lr is relative to the visible window -- add SPAWN_ROWS to
+                // reach the matching absolute logical row now that the board
+                // has an offscreen staging area above the ceiling (see
+                // Board.physRow).
+                const cell = b.cellAt(@intCast(lr + c.SPAWN_ROWS), @intCast(col));
                 g.cell[lr][col] = if (cell.state != .normal)
                     EMPTY
                 else if (cell.is_garbage)

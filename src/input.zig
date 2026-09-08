@@ -89,8 +89,12 @@ const TOUCH_SWIPE_THRESHOLD: i32 = 8;
 // apart from "not valid *yet*" (e.g. still mid-animation from the previous
 // swap) and keep retrying only the latter.
 fn canSwapAt(row: u8, col: u8) bool {
-    const a = s.player.cellAt(row, col);
-    const b = s.player.cellAt(row, col + 1);
+    // row is relative to the visible window (cursor_row/touch_anchor_row) --
+    // add SPAWN_ROWS to reach the matching absolute logical row (see
+    // sim.trySwap's identical conversion).
+    const abs_row = row + c.SPAWN_ROWS;
+    const a = s.player.cellAt(abs_row, col);
+    const b = s.player.cellAt(abs_row, col + 1);
     if (!sim.swappable(a.state) or !sim.swappable(b.state)) return false;
     if (a.is_garbage or b.is_garbage) return false;
     if (a.state == .empty and b.state == .empty) return false;

@@ -3,7 +3,17 @@
 
 pub const COLS: u8 = 6;
 pub const VISIBLE_ROWS: u8 = 12; // traditional Panel de Pon board size (6x12)
-pub const ROWS: u8 = VISIBLE_ROWS + 1; // one extra buffer row rising in from below
+// Offscreen rows stacked above the ceiling, purely as a garbage staging area
+// (see sim_garbage.spawnGarbage) -- never rendered, never reachable by the
+// cursor, never touched by the rise mechanic's ring rotation (see
+// Board.physRow). Big enough that a piece almost never fails to fit even
+// against a near-full board.
+pub const SPAWN_ROWS: u8 = 10;
+// Size of the rotating ring window that doRise/physRow actually rotate
+// through -- unchanged in meaning from the old (pre-spawn-buffer) `ROWS`:
+// every visible row plus one extra buffer row rising in from below.
+pub const RING_SIZE: u8 = VISIBLE_ROWS + 1;
+pub const ROWS: u8 = SPAWN_ROWS + RING_SIZE; // spawn buffer + the rotating window
 pub const TILE: i32 = 12;
 pub const NUM_COLORS: u8 = 5; // 3 solid hues + 2 dithered blends of adjacent hues
 

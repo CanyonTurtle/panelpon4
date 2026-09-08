@@ -301,9 +301,12 @@ fn drawBoard(b: *s.Board) void {
     for (0..c.COLS) |ci| col_stressed[ci] = isColumnStressed(b, @intCast(ci));
     const bounce = stressBounceOffset();
 
-    var lr: u8 = 0;
+    // Starts at SPAWN_ROWS, not 0 -- rows before that are the offscreen
+    // garbage staging area (see constants.SPAWN_ROWS/Board.physRow), never
+    // meant to be drawn at all.
+    var lr: u8 = c.SPAWN_ROWS;
     while (lr < c.ROWS) : (lr += 1) {
-        const base_y = c.BOARD_Y + @as(i32, lr) * c.TILE - @as(i32, @intCast(b.scroll_px));
+        const base_y = c.BOARD_Y + @as(i32, lr - c.SPAWN_ROWS) * c.TILE - @as(i32, @intCast(b.scroll_px));
         if (base_y + c.TILE <= c.BOARD_Y or base_y >= BOARD_BOTTOM) continue;
         var col: u8 = 0;
         while (col < c.COLS) : (col += 1) {

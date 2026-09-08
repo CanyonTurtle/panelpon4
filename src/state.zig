@@ -232,8 +232,18 @@ pub const Board = struct {
         return self.rngNext() % n;
     }
 
+    // Logical rows 0..SPAWN_ROWS-1 are a fixed, non-rotating garbage staging
+    // area (see sim_garbage.spawnGarbage) -- they map straight through to the
+    // same-numbered physical slots and are never touched by `top`. Logical
+    // rows SPAWN_ROWS.. (the ceiling and everything below it, plus the hidden
+    // rise buffer) are the actual rotating ring, exactly as the whole board
+    // used to be before the spawn buffer existed -- `top` still just walks
+    // 0..RING_SIZE-1 within that sub-window, unaffected by SPAWN_ROWS.
     pub fn physRow(self: *const Board, logical: u8) u8 {
-        return @intCast((@as(u16, self.top) + @as(u16, logical)) % @as(u16, c.ROWS));
+        if (logical < c.SPAWN_ROWS) return logical;
+        const rel: u16 = @as(u16, logical) - @as(u16, c.SPAWN_ROWS);
+        const ring_phys: u16 = (@as(u16, self.top) + rel) % @as(u16, c.RING_SIZE);
+        return c.SPAWN_ROWS + @as(u8, @intCast(ring_phys));
     }
 
     pub fn cellAt(self: *Board, logical_row: u8, col: u8) *Cell {
@@ -364,20 +374,27 @@ pub var touch_pending_dir: u8 = 0;
 
 const testing = std.testing;
 
-test "physRow wraps around the ring buffer at ROWS" {
+test "physRow: spawn buffer rows map straight through, ignoring top" {
     var b: Board = .{};
-    b.top = c.ROWS - 1;
-    try testing.expectEqual(@as(u8, c.ROWS - 1), b.physRow(0));
-    try testing.expectEqual(@as(u8, 0), b.physRow(1));
-    try testing.expectEqual(@as(u8, 1), b.physRow(2));
+    b.top = 5;
+    try testing.expectEqual(@as(u8, 0), b.physRow(0));
+    try testing.expectEqual(@as(u8, c.SPAWN_ROWS - 1), b.physRow(c.SPAWN_ROWS - 1));
 }
 
-test "cellAt honors the current top offset" {
+test "physRow wraps around the rotating window at RING_SIZE" {
+    var b: Board = .{};
+    b.top = c.RING_SIZE - 1;
+    try testing.expectEqual(@as(u8, c.SPAWN_ROWS + c.RING_SIZE - 1), b.physRow(c.SPAWN_ROWS));
+    try testing.expectEqual(@as(u8, c.SPAWN_ROWS), b.physRow(c.SPAWN_ROWS + 1));
+    try testing.expectEqual(@as(u8, c.SPAWN_ROWS + 1), b.physRow(c.SPAWN_ROWS + 2));
+}
+
+test "cellAt honors the current top offset, within the rotating window" {
     var b: Board = .{};
     b.top = 3;
-    b.cellAt(0, 2).* = Cell{ .color = 4, .state = .normal };
-    try testing.expectEqual(CellState.normal, b.grid[3][2].state);
-    try testing.expectEqual(@as(u8, 4), b.grid[3][2].color);
+    b.cellAt(c.SPAWN_ROWS, 2).* = Cell{ .color = 4, .state = .normal };
+    try testing.expectEqual(CellState.normal, b.grid[c.SPAWN_ROWS + 3][2].state);
+    try testing.expectEqual(@as(u8, 4), b.grid[c.SPAWN_ROWS + 3][2].color);
 }
 
 test "boardBusy is false on an empty/settled board and true mid-animation" {

@@ -28,11 +28,12 @@ test "swappable allows only empty and normal cells" {
 
 test "trySwap exchanges two normal cells and starts their slide animation" {
     var b: s.Board = .{};
-    b.cellAt(b.cursor_row, b.cursor_col).* = .{ .color = 1, .state = .normal };
-    b.cellAt(b.cursor_row, b.cursor_col + 1).* = .{ .color = 2, .state = .normal };
+    const row = b.cursor_row + c.SPAWN_ROWS;
+    b.cellAt(row, b.cursor_col).* = .{ .color = 1, .state = .normal };
+    b.cellAt(row, b.cursor_col + 1).* = .{ .color = 2, .state = .normal };
     sim.trySwap(&b);
-    const a = b.cellAt(b.cursor_row, b.cursor_col);
-    const bb = b.cellAt(b.cursor_row, b.cursor_col + 1);
+    const a = b.cellAt(row, b.cursor_col);
+    const bb = b.cellAt(row, b.cursor_col + 1);
     try testing.expectEqual(@as(u8, 2), a.color);
     try testing.expectEqual(@as(u8, 1), bb.color);
     try testing.expectEqual(s.CellState.swapping, a.state);
@@ -43,18 +44,19 @@ test "trySwap exchanges two normal cells and starts their slide animation" {
 
 test "trySwap refuses to grab a cell mid-animation" {
     var b: s.Board = .{};
-    b.cellAt(b.cursor_row, b.cursor_col).* = .{ .color = 1, .state = .falling };
-    b.cellAt(b.cursor_row, b.cursor_col + 1).* = .{ .color = 2, .state = .normal };
+    const row = b.cursor_row + c.SPAWN_ROWS;
+    b.cellAt(row, b.cursor_col).* = .{ .color = 1, .state = .falling };
+    b.cellAt(row, b.cursor_col + 1).* = .{ .color = 2, .state = .normal };
     sim.trySwap(&b);
     // Nothing should have moved: a falling cell is not swappable.
-    try testing.expectEqual(@as(u8, 1), b.cellAt(b.cursor_row, b.cursor_col).color);
-    try testing.expectEqual(s.CellState.falling, b.cellAt(b.cursor_row, b.cursor_col).state);
+    try testing.expectEqual(@as(u8, 1), b.cellAt(row, b.cursor_col).color);
+    try testing.expectEqual(s.CellState.falling, b.cellAt(row, b.cursor_col).state);
 }
 
 test "trySwap is a no-op when both cells are empty" {
     var b: s.Board = .{};
     sim.trySwap(&b);
-    try testing.expectEqual(s.CellState.empty, b.cellAt(b.cursor_row, b.cursor_col).state);
+    try testing.expectEqual(s.CellState.empty, b.cellAt(b.cursor_row + c.SPAWN_ROWS, b.cursor_col).state);
 }
 
 test "checkMatches pops a horizontal run of 3+" {
