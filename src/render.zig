@@ -220,7 +220,22 @@ fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: rgarbage.Edge
         return;
     }
     if (!garbage_reveals) {
-        rgarbage.drawLinked(x, y, edges);
+        // Purely cosmetic: this row isn't actually converting or clearing
+        // (see Cell.garbage_reveals), but it should still visibly read as
+        // being processed for the same span a genuine reveal would take --
+        // a flash (phase-inverted checkerboard, alternating with the normal
+        // look) rather than sitting there looking untouched while the rest
+        // of the group pops -- then back to its ordinary inert look once
+        // that span elapses, since it never actually resolves to anything
+        // else.
+        const elapsed = c.POP_FRAMES - timer;
+        if (elapsed < 0 or elapsed >= c.POP_FRAMES) {
+            rgarbage.drawLinked(x, y, edges);
+        } else if (@mod(elapsed, 8) < 4) {
+            rgarbage.drawLinkedFlash(x, y, edges);
+        } else {
+            rgarbage.drawLinked(x, y, edges);
+        }
         return;
     }
     const elapsed = c.POP_FRAMES - timer;
@@ -260,17 +275,21 @@ fn drawSwappingCell(x: i32, y: i32, color: u8, timer: i16, dir: i8) void {
     drawNormalCell(x + offset, y, color);
 }
 
-// A column with any content in its very top row is close enough to the rise
-// hazard (see board.doRise's game-over check on logical row 0) that its
-// settled blocks bounce in place as a warning.
-const STRESS_WARNING_ROWS: u8 = 1;
+// A column with any content within this many rows of the ceiling (see
+// board.updateDangerTimer's game-over check, at logical row SPAWN_ROWS) is
+// close enough to the rise hazard that its settled blocks bounce in place as
+// a warning -- matching other Panel de Pon clients' more generous warning
+// zone (a few rows of headroom before the stack is actually touching the
+// top) now that the full 12-row board gives room for it, rather than only
+// reacting once a column is already touching the very top row.
+const STRESS_WARNING_ROWS: u8 = 3;
 const STRESS_BOUNCE_PERIOD: i32 = 16;
 const STRESS_BOUNCE_AMOUNT: i32 = 3;
 
 fn isColumnStressed(b: *s.Board, col: u8) bool {
     var lr: u8 = 0;
     while (lr < STRESS_WARNING_ROWS) : (lr += 1) {
-        if (b.cellAt(lr, col).state != .empty) return true;
+        if (b.cellAt(c.SPAWN_ROWS + lr, col).state != .empty) return true;
     }
     return false;
 }
@@ -497,5 +516,7 @@ pub fn render() void {
     drawCursor();
     drawPanel();
     badge.drawMatchPopups(&s.player.match_popups);
+    // In the gutter between the player's own frame and the panel column.
+    badge.drawGarbageQueueIcons(96, c.BOARD_Y + 4, &s.player);
     render_cpu.draw();
 }

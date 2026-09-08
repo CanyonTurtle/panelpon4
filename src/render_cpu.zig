@@ -17,6 +17,7 @@ const c = @import("constants.zig");
 const s = @import("state.zig");
 const w4 = @import("wasm4.zig");
 const sym = @import("symbols.zig");
+const badge = @import("render_badge.zig");
 
 // Mirrors render.zig's own DC_BG/DC_FRAME/HUE_DRAWCOLOR/GARBAGE_HUE/
 // dither-hue mapping, and render_badge.zig's warm cursor/badge dither pair.
@@ -161,7 +162,18 @@ fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16,
         return;
     }
     if (!garbage_reveals) {
-        fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
+        // Mirrors render.drawRecyclingCell's own !garbage_reveals flash --
+        // purely cosmetic, this row never actually converts or clears, but
+        // still visibly reads as being processed via a phase-inverted
+        // checkerboard flash for the same span a genuine reveal would take.
+        const elapsed = c.POP_FRAMES - timer;
+        if (elapsed < 0 or elapsed >= c.POP_FRAMES) {
+            fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
+        } else if (@mod(elapsed, 8) < 4) {
+            fillChecker(x, y, MICRO_CELL, MICRO_CELL, HUE_DRAWCOLOR[GARBAGE_HUE], DC_BG, clip_top, clip_bottom);
+        } else {
+            fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
+        }
         return;
     }
     const elapsed = c.POP_FRAMES - timer;
@@ -257,4 +269,7 @@ pub fn draw() void {
 
     drawMicroBoard(&s.cpu, c.PANEL_X, BOARD_Y);
     drawMicroCursor(&s.cpu, c.PANEL_X, BOARD_Y);
+    // In the narrow gutter to the right of the mini board, within the panel
+    // column's own leftover width.
+    badge.drawGarbageQueueIcons(c.PANEL_X + @as(i32, c.COLS) * MICRO_TILE + 2, BOARD_Y + 2, &s.cpu);
 }

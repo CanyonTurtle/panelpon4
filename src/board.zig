@@ -20,42 +20,108 @@ pub fn riseSpeedFramesPerPixel(score: u32) u32 {
     return RISE_START_FRAMES_PER_PIXEL - level;
 }
 
-pub fn generateRowInto(self: *s.Board, target_phys: u8, logical_r: u8) void {
+// Draws from the shared RNG stream (state.shared_row_rng_state) -- never
+// either board's own rng_state -- so the result depends only on how many
+// times this has been called since the stream was last reseeded, never on
+// anything board-specific. That's what makes rowForIndex's result
+// reproducible purely from an index (see its own doc comment).
+fn sharedRandRange(n: u32) u32 {
+    var x = s.shared_row_rng_state;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    s.shared_row_rng_state = x;
+    return x % n;
+}
+
+// Picks one row's colors, avoiding a horizontal run of 3 within the row
+// (row_colors itself) and a vertical run of 3 against the previous two rows
+// -- but *in the shared sequence itself* (above1/above2), never either
+// board's own actual stack content like this used to check: a board's stack
+// is a downstream consequence of match play, popping, and gravity, which
+// differs between boards immediately, so checking against it would make two
+// boards' otherwise-identical sequences diverge and defeat the whole point
+// of rowForIndex below.
+fn pickRowColors(above1: ?[c.COLS]u8, above2: ?[c.COLS]u8) [c.COLS]u8 {
     var row_colors: [c.COLS]u8 = undefined;
     var ci: u8 = 0;
     while (ci < c.COLS) : (ci += 1) {
-        var above1: i16 = -1;
-        var above2: i16 = -1;
-        if (logical_r >= 1) {
-            const cell1 = self.cellAt(logical_r - 1, ci);
-            if (cell1.state == .normal) above1 = cell1.color;
-        }
-        if (logical_r >= 2) {
-            const cell2 = self.cellAt(logical_r - 2, ci);
-            if (cell2.state == .normal) above2 = cell2.color;
-        }
+        const a1: i16 = if (above1) |a| a[ci] else -1;
+        const a2: i16 = if (above2) |a| a[ci] else -1;
 
         var chosen: u8 = 0;
         var tries: u8 = 0;
         while (true) {
-            chosen = @intCast(self.randRange(c.NUM_COLORS));
+            chosen = @intCast(sharedRandRange(c.NUM_COLORS));
             var ok = true;
             if (ci >= 2 and row_colors[ci - 1] == chosen and row_colors[ci - 2] == chosen) ok = false;
-            if (ok and above1 >= 0 and above2 >= 0 and above1 == chosen and above2 == chosen) ok = false;
+            if (ok and a1 >= 0 and a2 >= 0 and a1 == chosen and a2 == chosen) ok = false;
             tries += 1;
             if (ok or tries > 20) break;
         }
         row_colors[ci] = chosen;
     }
+    return row_colors;
+}
 
-    ci = 0;
+// Resets the shared row cache at match start. Deliberately separate from
+// resetGame (which runs once PER BOARD): calling this from inside resetGame
+// would reset shared_rows_count back to 0 a second time when the second
+// board resets, discarding the row the first board may have already
+// generated for index 0 and replacing it with a *different* one -- exactly
+// the desync this whole mechanism exists to prevent. Callers reset both
+// boards and the shared cache together instead (see main.zig).
+// shared_row_rng_state itself is deliberately left untouched here -- see its
+// own doc comment in state.zig for why.
+pub fn resetSharedRows() void {
+    s.shared_rows_count = 0;
+}
+
+// Advances the shared RNG stream by one step without consuming a row --
+// mirrors each board's own idle title-screen rngNext() perturbation (see
+// main.zig), so how long a player dawdles on the title screen before
+// starting still changes the eventual row sequence, exactly like it always
+// has, just for the shared stream now instead of the player's own.
+pub fn perturbSharedRng() void {
+    _ = sharedRandRange(2);
+}
+
+// Returns the colors for the `index`-th row risen since the match started,
+// shared by both boards (see state.shared_rows) -- generates and caches it
+// the first time either board reaches that index, and simply replays the
+// cached result for whichever board reaches it second, however much later.
+// This -- not either board's own rng_state -- is what "predetermined at
+// match start" and "the same for both players per row" mean in practice:
+// the sequence depends only on shared_row_rng_state's evolution and the
+// row's own position in it, never on anything board-specific, so the Nth
+// row either board has ever seen rise in looks identical regardless of
+// which board reached N first -- a fair, reproducible comparison of how
+// each side handles the same material.
+fn rowForIndex(index: u32) [c.COLS]u8 {
+    if (index < s.shared_rows_count) return s.shared_rows[index % s.SHARED_ROW_CACHE];
+
+    const above1: ?[c.COLS]u8 = if (index >= 1) s.shared_rows[(index - 1) % s.SHARED_ROW_CACHE] else null;
+    const above2: ?[c.COLS]u8 = if (index >= 2) s.shared_rows[(index - 2) % s.SHARED_ROW_CACHE] else null;
+    const colors = pickRowColors(above1, above2);
+    s.shared_rows[index % s.SHARED_ROW_CACHE] = colors;
+    s.shared_rows_count = index + 1;
+    return colors;
+}
+
+// Writes this board's next shared row into `target_phys`, advancing its own
+// count of how many rows it's consumed since match start (see
+// Board.rows_generated, the index into the shared sequence above).
+fn writeNextRow(self: *s.Board, target_phys: u8) void {
+    const colors = rowForIndex(self.rows_generated);
+    self.rows_generated += 1;
+    var ci: u8 = 0;
     while (ci < c.COLS) : (ci += 1) {
-        self.grid[target_phys][ci] = s.Cell{ .color = row_colors[ci], .state = .normal };
+        self.grid[target_phys][ci] = s.Cell{ .color = colors[ci], .state = .normal };
     }
 }
 
 pub fn doRise(self: *s.Board) void {
-    generateRowInto(self, c.SPAWN_ROWS + self.top, c.ROWS - 1);
+    writeNextRow(self, c.SPAWN_ROWS + self.top);
     self.top = @intCast((@as(u16, self.top) + 1) % @as(u16, c.RING_SIZE));
 
     // Logical row indices are relative to `top`, so a fixed cursor_row would
@@ -149,8 +215,11 @@ pub fn updateRise(self: *s.Board) void {
 
 // Resets a board to a fresh game start: every piece of state except its RNG
 // stream (preserved across a restart so replaying doesn't just repeat the
-// exact same row sequence -- see state.Board.rng_state), plus an initial
-// stack of rows already filled in, same as a freshly-risen board would have.
+// exact same reveal colors -- see state.Board.rng_state), plus an initial
+// stack of rows already filled in, same as a freshly-risen board would have
+// -- drawn from the shared row sequence (see writeNextRow/resetSharedRows),
+// so this initial stack is identical for both boards too, not just the rows
+// that rise in later.
 pub fn resetGame(self: *s.Board) void {
     const rng_state = self.rng_state;
     self.* = s.Board{};
@@ -159,7 +228,7 @@ pub fn resetGame(self: *s.Board) void {
     const start_rows_filled: u8 = 5;
     var r: u8 = c.SPAWN_ROWS + c.VISIBLE_ROWS - start_rows_filled;
     while (r < c.ROWS) : (r += 1) {
-        generateRowInto(self, r, r);
+        writeNextRow(self, r);
     }
 }
 
@@ -241,11 +310,12 @@ test "doRise shifts top and keeps the cursor tracking the same physical row" {
     try testing.expectEqual(@as(u8, 3), b.cursor_row);
 }
 
-test "generateRowInto never produces a 3-in-a-row horizontally" {
+test "the shared row sequence never produces a 3-in-a-row horizontally" {
     var b: s.Board = .{};
-    b.rng_state = 12345;
+    resetSharedRows();
+    s.shared_row_rng_state = 12345;
     for (0..50) |i| {
-        generateRowInto(&b, 0, 0);
+        writeNextRow(&b, 0);
         var run: u8 = 1;
         var run_color = b.grid[0][0].color;
         for (1..c.COLS) |col| {
@@ -259,6 +329,27 @@ test "generateRowInto never produces a 3-in-a-row horizontally" {
         }
         _ = i;
     }
+}
+
+test "the shared row sequence gives the same row to both boards, whichever reaches that index first" {
+    var a: s.Board = .{};
+    var b: s.Board = .{};
+    resetSharedRows();
+    s.shared_row_rng_state = 999;
+
+    // `b` reaches index 0 first (generating and caching it); `a` then
+    // reaches the SAME index later and must see the identical result, not a
+    // freshly-generated (and almost certainly different) one of its own.
+    writeNextRow(&b, 0);
+    writeNextRow(&a, 0);
+    for (0..c.COLS) |col| try testing.expectEqual(b.grid[0][col].color, a.grid[0][col].color);
+
+    // Continuing to advance independently (mimicking one board rising
+    // faster than the other) still lines up index-for-index.
+    writeNextRow(&b, 1);
+    writeNextRow(&b, 2);
+    writeNextRow(&a, 1);
+    for (0..c.COLS) |col| try testing.expectEqual(b.grid[1][col].color, a.grid[1][col].color);
 }
 
 test "riseSpeedFramesPerPixel decreases with score and floors at 4" {

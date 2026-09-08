@@ -128,7 +128,15 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/board.zig` — row generation, the rising floor (automatic and the Z-button manual raise),
   `updateDangerTimer` (the actual loss condition -- a forgiveness timer gated on the board being idle with
   a block at or above the ceiling, rather than an instant check right after a rise), and (re)starting a
-  game, each taking the `*Board` to act on.
+  game, each taking the `*Board` to act on. Rising rows are drawn from a *shared* sequence
+  (`state.shared_rows`/`shared_rows_count`, generated via `rowForIndex`), not either board's own RNG stream:
+  whichever board first reaches a given row index generates and caches it, and the other board just replays
+  that exact result whenever it reaches the same index, however much later -- so the Nth row either board has
+  ever seen rise in is identical regardless of which board got there first, predetermined the instant
+  `resetSharedRows` runs at match start rather than depending on either board's own stack. `resetSharedRows`
+  is deliberately called once per match (see `main.zig`), never from inside `resetGame` itself, since that
+  runs once *per board* and resetting the shared cache a second time would discard whatever the first board
+  already generated for index 0.
 - `src/sim.zig` — the core simulation: swaps, pops, landings, and per-cell gravity, each taking `self`
   (and, for simulate, `opponent`) -- tests in the companion `src/sim_test.zig`.
 - `src/sim_matches.zig` — match detection, chain/combo scoring, and garbage queueing (re-exported from
@@ -203,15 +211,25 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   input buffering so a fast continuous drag chains swaps at max speed) -- always drives `state.player`; the
   CPU has no real input (see `cpu_ai.zig`).
 - `src/render.zig` — most drawing: the player's board (in full detail) at normal size, the cursor, panel,
-  and title/game-over screens.
+  and title/game-over screens. A column bounces in place as a stress warning (`isColumnStressed`) once it
+  has any content within `STRESS_WARNING_ROWS` rows of the ceiling (logical row `constants.SPAWN_ROWS`), not
+  only once it's already touching the top -- matching other Panel de Pon clients' more generous warning zone.
 - `src/render_garbage.zig` — garbage's full-detail rendering (the muted checkerboard fill and the linked-
   clump bezel look), split out from render.zig to keep that file under the project's ~500-line guideline,
-  mirroring the sim.zig/sim_garbage.zig split.
+  mirroring the sim.zig/sim_garbage.zig split. `drawLinkedFlash` is a phase-inverted variant of the same
+  checkerboard, used by `render.drawRecyclingCell` to give a garbage row that's caught up in a pop event but
+  won't actually convert (see `Cell.garbage_reveals`) a purely cosmetic "still being processed" flash instead
+  of sitting there looking untouched while the rest of the clump pops.
 - `src/render_cpu.zig` — the CPU's side of the panel: its score/label and its board at a simplified micro
   scale (dithered colors, tiny per-color icons, smooth rise scrolling, a cursor, popping/recycling
   animation -- just abstracted down to fit: no bevels, linked-garbage slab, landing squash, or popups).
 - `src/render_badge.zig` — the chain/combo popup badge, plus the shared checkerboard-blit dithering
-  primitive it's built on (reusable for any future dithered-highlight effect).
+  primitive it's built on (reusable for any future dithered-highlight effect). Also home to
+  `drawGarbageQueueIcons`: small warm-dithered pips in the gutter beside each board, one per queued incoming
+  garbage attack (`Board.incoming_garbage`), width scaled to the attack's own column width -- a lightweight
+  heads-up that an attack is about to land the instant that board goes idle, visible without reading the
+  board itself. Drawn for the player in the gap between its frame and the panel column, and for the CPU in
+  the panel's own leftover width to the right of its mini board.
 - `src/debug.zig` — debug-only helpers (set up a board scenario, read back cell/chain/winner state) for
   scripted testing, each taking a `board` selector (0 = player, else = cpu); only exported as WASM functions
   in Debug builds (see the `comptime` block in `main.zig`) -- `zig build --release=small` never includes

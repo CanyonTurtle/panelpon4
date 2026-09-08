@@ -398,7 +398,7 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
             // decided to its left/above (already-settled real blocks, or an
             // earlier cell in this same pass) is only reliable if every
             // decision is made in a fixed, consistent scan order -- exactly
-            // mirroring board.generateRowInto's own reasoning for a
+            // mirroring board.pickRowColors' own reasoning for a
             // freshly-generated row.
             for (0..c.ROWS) |lr| {
                 for (0..c.COLS) |col| {
@@ -443,7 +443,12 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
                 // with no room for a badge), so this is harmless dead data
                 // in that case rather than something worth threading a
                 // second coordinate system through checkMatches for.
-                const cy = c.BOARD_Y + @as(i32, min_row) * c.TILE - @as(i32, @intCast(self.scroll_px)) + @divTrunc(c.TILE, 2);
+                // min_row is an absolute logical row -- SPAWN_ROWS of those
+                // are the offscreen garbage staging area above the ceiling
+                // (see constants.SPAWN_ROWS), not part of the visible board's
+                // own Y=0 origin, so it has to come out before converting to
+                // screen space (mirrors render.drawBoard's identical offset).
+                const cy = c.BOARD_Y + (@as(i32, min_row) - @as(i32, c.SPAWN_ROWS)) * c.TILE - @as(i32, @intCast(self.scroll_px)) + @divTrunc(c.TILE, 2);
                 const edge_y = cy - s.MATCH_POPUP_RISE_PX;
                 self.spawnMatchPopup(label, cx, cy, edge_y, group_end);
 

@@ -34,6 +34,7 @@ comptime {
 
 export fn start() void {
     render.setupPalette();
+    board.resetSharedRows();
     board.resetGame(&s.player);
     board.resetGame(&s.cpu);
 }
@@ -49,6 +50,7 @@ export fn update() void {
 
     if (!s.started) {
         _ = s.player.rngNext();
+        board.perturbSharedRng();
         render.clearBackground();
         render.drawTitle();
         // Sets the CPU's difficulty for the whole match (see state.difficulty
@@ -105,6 +107,7 @@ export fn update() void {
         if (s.winner != .none and !was_over) audio.playGameOverSound();
     } else {
         if (input.justPressed(gp, w4.BUTTON_1)) {
+            board.resetSharedRows();
             board.resetGame(&s.player);
             board.resetGame(&s.cpu);
             s.winner = .none;

@@ -88,6 +88,28 @@ fn drawBadgeOutline(x: i32, y: i32, w: i32, h: i32) void {
     w4.Rect(x + w - 1, y + 1, 1, @intCast(h - 2)); // right
 }
 
+// Small warm-dithered pips in the gutter beside a board, one per queued
+// incoming garbage attack (see Board.incoming_garbage) -- a lightweight
+// heads-up that an attack is about to land the instant this board goes idle,
+// visible without having to read the board itself. Width scales with the
+// attack's own width in columns, so a full 6-wide row and a narrow 3-wide
+// combo read as visibly different threats; height is a fixed small pip per
+// queued attack, not proportional to `rows` -- a multi-row chain attack is
+// still one single incoming event, just a bigger one. Stacked downward from
+// `top_y`.
+const QUEUE_ICON_H: i32 = 4;
+const QUEUE_ICON_GAP: i32 = 2;
+
+pub fn drawGarbageQueueIcons(x: i32, top_y: i32, board: *const s.Board) void {
+    var y = top_y;
+    for (board.incoming_garbage) |slot| {
+        const attack = slot orelse continue;
+        const w = @as(i32, attack.width) + 2;
+        drawDitheredRectBlit(x, y, w, QUEUE_ICON_H, WARM_DITHER_HUES);
+        y += QUEUE_ICON_H + QUEUE_ICON_GAP;
+    }
+}
+
 pub fn drawMatchPopups(match_popups: []const s.MatchPopup) void {
     for (match_popups) |p| {
         if (!p.active) continue;

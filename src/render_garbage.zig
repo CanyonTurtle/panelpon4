@@ -31,6 +31,23 @@ pub fn drawGarbageRect(x: i32, y: i32, w: i32, h: i32) void {
     }
 }
 
+// Same checkerboard, phase inverted -- a purely cosmetic "this cell is being
+// processed" flash for a garbage row caught up in a pop/recycle event that
+// won't actually convert or clear it (see render.drawRecyclingCell's
+// !garbage_reveals branch), so a taller clump still visibly reacts the whole
+// group is popping, not just the one row that's actually cracking open.
+fn drawGarbageRectFlash(x: i32, y: i32, w: i32, h: i32) void {
+    if (w <= 0 or h <= 0) return;
+    var dy: i32 = 0;
+    while (dy < h) : (dy += 1) {
+        var dx: i32 = 0;
+        while (dx < w) : (dx += 1) {
+            w4.DRAW_COLORS.* = if (@mod(dx + dy, 2) == 0) HUE_DRAWCOLOR[GARBAGE_HUE] else DC_BG;
+            w4.Rect(x + dx, y + dy, 1, 1);
+        }
+    }
+}
+
 // Which of a garbage cell's 4 orthogonal neighbors are themselves garbage,
 // still attached (see sim.zig's group-based gravity -- connected garbage
 // always falls/lands in lockstep, so a neighbor in any of these states is
@@ -75,6 +92,19 @@ pub fn drawLinked(x: i32, y: i32, edges: Edges) void {
     const w: i32 = if (edges.right) BLOCK_SIZE + 1 else BLOCK_SIZE;
     const h: i32 = if (edges.down) BLOCK_SIZE + 1 else BLOCK_SIZE;
     drawGarbageRect(x, y, w, h);
+    w4.DRAW_COLORS.* = DC_BG;
+    if (!edges.up and !edges.left) w4.Rect(x, y, 1, 1);
+    if (!edges.up and !edges.right) w4.Rect(x + w - 1, y, 1, 1);
+    if (!edges.down and !edges.left) w4.Rect(x, y + h - 1, 1, 1);
+    if (!edges.down and !edges.right) w4.Rect(x + w - 1, y + h - 1, 1, 1);
+}
+
+// Like drawLinked, but with the flashing (phase-inverted) fill -- see
+// drawGarbageRectFlash.
+pub fn drawLinkedFlash(x: i32, y: i32, edges: Edges) void {
+    const w: i32 = if (edges.right) BLOCK_SIZE + 1 else BLOCK_SIZE;
+    const h: i32 = if (edges.down) BLOCK_SIZE + 1 else BLOCK_SIZE;
+    drawGarbageRectFlash(x, y, w, h);
     w4.DRAW_COLORS.* = DC_BG;
     if (!edges.up and !edges.left) w4.Rect(x, y, 1, 1);
     if (!edges.up and !edges.right) w4.Rect(x + w - 1, y, 1, 1);
