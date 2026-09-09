@@ -7,6 +7,14 @@
 const c = @import("constants.zig");
 const s = @import("state.zig");
 const w4 = @import("wasm4.zig");
+const sym = @import("symbols.zig");
+const pieces = @import("garbage_pieces.zig");
+
+// Re-exported so render.zig's call site doesn't need to know this logic
+// lives in its own module (split out purely so it can be unit tested
+// without render_garbage.zig's own w4 dependency -- see garbage_pieces.zig's
+// own doc comment).
+pub const markCenters = pieces.markCenters;
 
 // Mirrors render.zig's own DC_BG/HUE_DRAWCOLOR mapping and BLOCK_SIZE.
 const DC_BG: u16 = 1;
@@ -110,4 +118,26 @@ pub fn drawLinkedFlash(x: i32, y: i32, edges: Edges) void {
     if (!edges.up and !edges.right) w4.Rect(x + w - 1, y, 1, 1);
     if (!edges.down and !edges.left) w4.Rect(x, y + h - 1, 1, 1);
     if (!edges.down and !edges.right) w4.Rect(x + w - 1, y + h - 1, 1, 1);
+}
+
+// A different hue than GARBAGE_HUE, solid (not checkerboarded) -- a mark
+// drawn in DC_BG (like a real block's own symbol) would only actually
+// change the pixels that started out teal; the half of it landing on
+// already-background checkerboard squares would be invisible, breaking the
+// shape up into an illegible scatter instead of one solid mark. A third,
+// otherwise-unused hue reads as a clean, solid shape regardless of which
+// checkerboard phase it lands on.
+const MARK_HUE: u8 = 0; // red
+
+// Draws SYM_GARBAGE_MARK at (x, y) -- the top-left of a single tile, same
+// convention as render.zig's drawSymbolFor -- so a piece's center reads as a
+// small solid mark, unmistakable against its checkerboard fill.
+pub fn drawMark(x: i32, y: i32) void {
+    w4.DRAW_COLORS.* = HUE_DRAWCOLOR[MARK_HUE];
+    const rows = sym.SYM_GARBAGE_MARK;
+    for (rows, 0..) |row, ry| {
+        for (row, 0..) |ch, rx| {
+            if (ch == '#') w4.Rect(x + @as(i32, @intCast(rx)), y + @as(i32, @intCast(ry)), 1, 1);
+        }
+    }
 }

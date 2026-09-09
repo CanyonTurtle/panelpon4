@@ -137,6 +137,28 @@ pub const GarbageAttack = struct { rows: u8 = 0, width: u8 = 0, anchor_col: u8 =
 
 const MAX_INCOMING_GARBAGE = 8;
 
+// A short burst of small particles flying diagonally outward from a real
+// block's own center the instant it's actually removed (see sim.simulate's
+// just_cleared handling) -- a bit of impact feedback for a satisfying-
+// feeling pop. Purely cosmetic, exactly like MatchPopup above: nothing here
+// affects gameplay, and it's cleared along with everything else on reset.
+// `x`/`y` (the spawn origin, in pixel space) and `color` never change after
+// spawn -- only `elapsed` advances (see Board.tickParticles) -- render.zig
+// derives each particle's actual on-screen position and size from that and
+// its own fixed diagonal direction.
+pub const Particle = struct {
+    active: bool = false,
+    x: i32 = 0,
+    y: i32 = 0,
+    dir_x: i8 = 1, // -1/+1: which of the 4 diagonals this particle flies toward
+    dir_y: i8 = 1,
+    color: u8 = 0,
+    elapsed: i16 = 0,
+};
+
+pub const PARTICLE_LIFE: i16 = 16; // frames a burst's particles stay alive
+const MAX_PARTICLES = 16; // 4 per burst, room for several simultaneous pops
+
 pub const MatchPopup = struct {
     active: bool = false,
     label: [MATCH_POPUP_LABEL_CAP]u8 = undefined,
@@ -240,6 +262,8 @@ pub const Board = struct {
 
     match_popups: [MAX_MATCH_POPUPS]MatchPopup = [_]MatchPopup{.{}} ** MAX_MATCH_POPUPS,
 
+    particles: [MAX_PARTICLES]Particle = [_]Particle{.{}} ** MAX_PARTICLES,
+
     pub fn rngNext(self: *Board) u32 {
         var x = self.rng_state;
         x ^= x << 13;
@@ -310,6 +334,36 @@ pub const Board = struct {
 
     pub fn clearMatchPopups(self: *Board) void {
         for (&self.match_popups) |*p| p.* = .{};
+    }
+
+    // One small burst of 4 particles, one per diagonal direction, flying
+    // outward from (x, y) -- a popped real block's own center, in pixel
+    // space. Silently drops whichever particles don't fit if the pool's
+    // already full (see spawnMatchPopup's identical reasoning) -- missing a
+    // few sparks during an enormous simultaneous multi-pop is harmless.
+    pub fn spawnPopParticles(self: *Board, x: i32, y: i32, color: u8) void {
+        const dirs = [4][2]i8{ .{ -1, -1 }, .{ 1, -1 }, .{ -1, 1 }, .{ 1, 1 } };
+        for (dirs) |d| {
+            for (&self.particles) |*p| {
+                if (p.active) continue;
+                p.active = true;
+                p.x = x;
+                p.y = y;
+                p.dir_x = d[0];
+                p.dir_y = d[1];
+                p.color = color;
+                p.elapsed = 0;
+                break;
+            }
+        }
+    }
+
+    pub fn tickParticles(self: *Board) void {
+        for (&self.particles) |*p| {
+            if (!p.active) continue;
+            p.elapsed += 1;
+            if (p.elapsed >= PARTICLE_LIFE) p.active = false;
+        }
     }
 };
 

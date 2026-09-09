@@ -343,6 +343,11 @@ fn drawBoard(b: *s.Board) void {
     for (0..c.COLS) |ci| col_stressed[ci] = isColumnStressed(b, @intCast(ci));
     const bounce = stressBounceOffset();
     const wiped = closingWipedRows();
+    // One glyph per settled garbage piece (see rgarbage.markCenters) -- lets
+    // two different pieces resting against each other, rendered as one
+    // seamless slab with no visible seam (see rgarbage.drawLinked), still
+    // read as visually distinct blocks instead of one bigger one.
+    const garbage_centers = rgarbage.markCenters(b);
 
     // Starts at SPAWN_ROWS, not 0 -- rows before that are the offscreen
     // garbage staging area (see constants.SPAWN_ROWS/Board.physRow), never
@@ -366,6 +371,7 @@ fn drawBoard(b: *s.Board) void {
                     // sync with it.
                     if (cell.is_garbage) {
                         rgarbage.drawLinked(x, base_y, rgarbage.edgesAt(b, lr, col));
+                        if (garbage_centers[lr][col]) rgarbage.drawMark(x, base_y);
                     } else {
                         const sym_bounce = if (col_stressed[col]) bounce else 0;
                         drawNormalCell(x, base_y, cell.color, sym_bounce);
@@ -888,6 +894,28 @@ pub fn drawCountdown() void {
     w4.Text(label, cx - @divTrunc(text_w, 2), y);
 }
 
+// How far a particle travels from its spawn point by the end of its life,
+// and how big it starts out (shrinking to nothing by the same point) -- see
+// state.Particle/Board.spawnPopParticles. Linear growth/shrink, same
+// integer-elapsed-over-total style as every other timed animation here
+// (e.g. drawSwappingCell's slide) rather than anything fancier.
+const PARTICLE_MAX_DIST: i32 = 10;
+const PARTICLE_START_SIZE: i32 = 3;
+
+fn drawParticles(particles: []const s.Particle) void {
+    for (particles) |p| {
+        if (!p.active) continue;
+        const dist = @divTrunc(PARTICLE_MAX_DIST * @as(i32, p.elapsed), s.PARTICLE_LIFE);
+        const size = PARTICLE_START_SIZE - @divTrunc(PARTICLE_START_SIZE * @as(i32, p.elapsed), s.PARTICLE_LIFE);
+        if (size <= 0) continue;
+        const x = p.x + @as(i32, p.dir_x) * dist - @divTrunc(size, 2);
+        const y = p.y + @as(i32, p.dir_y) * dist - @divTrunc(size, 2);
+        const hue = if (p.color < 3) p.color else DITHER_HUES[p.color - 3][0];
+        w4.DRAW_COLORS.* = HUE_DRAWCOLOR[hue];
+        w4.Oval(x, y, @intCast(size), @intCast(size));
+    }
+}
+
 pub fn render() void {
     clearBackground();
     drawBoard(&s.player);
@@ -896,6 +924,7 @@ pub fn render() void {
     drawCursor();
     drawPanel();
     badge.drawMatchPopups(&s.player.match_popups);
+    drawParticles(&s.player.particles);
     // In the gutter between the player's own frame and the panel column.
     badge.drawGarbageQueueIcons(96, c.BOARD_Y + 4, &s.player);
     render_cpu.draw();

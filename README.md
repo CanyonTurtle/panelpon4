@@ -63,6 +63,8 @@ the side panel. Both run the exact same rules and physics.
 - Match 3 or more blocks of the same color/pattern in a horizontal or vertical line to pop them. Each
   affected block gives you a heads-up first: it blinks rapidly, holds still for a beat, then actually
   starts popping (or, for garbage, recycling) -- a brief moment to read what's about to go before it does.
+  A small burst of particles flies diagonally outward, in the block's own color, right as it actually
+  disappears.
 - Blocks above a pop fall and can chain into new matches for bonus score. A genuine chain ("x2", "x3", ...)
   or a combo (a single match bigger than 3 blocks, shown as a bare block count) flies a small badge into
   the score display. A chain multiplier also shows continuously next to the score for as long as it holds;
@@ -85,7 +87,9 @@ the side panel. Both run the exact same rules and physics.
   whatever *other* piece happens to be resting against it, which keeps (and follows) its own bottom-row rule
   the same way. A connected clump of garbage falls and lands as one rigid piece (a piece touching
   down stops the whole clump at once), rendering as a single seamless bezeled slab rather than individual
-  tiles.
+  tiles -- which on its own would make two different pieces resting against each other indistinguishable
+  from one bigger piece, so each settled piece additionally gets its own small mark at its center, one per
+  piece even within a shared slab.
 - The single new row rising in from below isn't playable yet: it's marked with a sparse dither overlay and
   can't be matched into (or match on its own) until it's fully risen into the lowest row you can actually
   reach with the cursor, at which point the dithering clears and it's live like any other row.
@@ -152,9 +156,14 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 
 - `src/wasm4.zig` — bindings for the WASM-4 host API (drawing, input, memory-mapped registers).
 - `src/constants.zig` — layout/timing constants shared across modules.
-- `src/symbols.zig` — pixel-art symbol data drawn on each block color.
+- `src/symbols.zig` — pixel-art symbol data drawn on each block color, plus `SYM_GARBAGE_MARK` (not paired
+  with any color -- see `garbage_pieces.zig`/`render_garbage.drawMark`).
 - `src/state.zig` — the `Board` struct (grid, cursor, score/chain, rise state, its own RNG stream, its own
-  match-popup pool) plus its small methods (ring-buffer indexing, RNG, board-busy query), and the two live
+  match-popup pool, its own particle pool -- `Board.spawnPopParticles`/`tickParticles`, a short burst of 4
+  small particles flying diagonally outward from a real block's own center the instant it's actually removed,
+  called from `sim.simulate`'s `just_cleared` handling and `s.player`'s own drawn by `render.drawParticles`;
+  purely cosmetic, exactly like `MatchPopup`) plus its small methods (ring-buffer indexing, RNG, board-busy
+  query), and the two live
   instances of it, `player`/`cpu`. Every other module takes an explicit `*Board` rather than reaching into
   an implicit global, so the exact same logic drives both sides of a vs-CPU match. `physRow` (the logical-to-
   physical row translation) is piecewise: logical rows below `constants.SPAWN_ROWS` are a fixed, non-rotating
@@ -312,7 +321,19 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   mirroring the sim.zig/sim_garbage.zig split. `drawLinkedFlash` is a phase-inverted variant of the same
   checkerboard, used by `render.drawRecyclingCell` to give a garbage row that's caught up in a pop event but
   won't actually convert (see `Cell.garbage_reveals`) a purely cosmetic "still being processed" flash instead
-  of sitting there looking untouched while the rest of the clump pops.
+  of sitting there looking untouched while the rest of the clump pops. `drawMark` draws a small solid mark
+  (`symbols.SYM_GARBAGE_MARK`, in a third hue that's neither the checkerboard's background nor its own teal,
+  so it always reads as one solid shape regardless of which checkerboard phase it lands on -- a background-
+  punched mark, like a real block's own symbol, would only actually change the half of it landing on
+  already-background squares) at whichever cell `garbage_pieces.markCenters` picked for each currently-
+  settled piece.
+- `src/garbage_pieces.zig` — groups settled garbage cells into their individual pieces (by `Cell.garbage_group`,
+  4-connected) and picks one cell near each piece's own geometric center, for `render_garbage.zig` to mark --
+  split out specifically so this pure grouping logic can be unit tested without render_garbage.zig's own w4
+  draw-call dependency (see `tests.zig`'s own doc comment on why render.zig/render_garbage.zig can't be
+  tested directly). This is what lets two different pieces resting against each other, rendered as one
+  seamless slab with no visible seam (see `render_garbage.drawLinked`/`isAttached`, which merge on pure
+  spatial adjacency, not piece identity), still read as visually distinct blocks instead of one bigger one.
 - `src/characters.zig` — the 4 selectable characters: a real pixel-art sprite each (same text-art bitmap
   convention as `symbols.zig`) -- a lizard, a mermaid, a bug, and a cloud puff -- plus a hue/dither pair, a
   main-frame border style, and a `face` anchor (where `render_character.zig`'s shared expression logic
@@ -361,15 +382,17 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 
 ## Testing
 
-`state.zig`, `board.zig`, `sim.zig`/`sim_matches.zig`/`sim_garbage.zig`, `cpu_ai.zig`, and
-`cpu_engine.zig`/`cpu_engine_garbage.zig` have Zig `test` blocks — `sim.zig`'s live in the companion
-`src/sim_test.zig`, garbage-specific ones in `src/sim_garbage_test.zig`, recycle-specific ones (stagger
-order, the bottom-row-only-converts rule, and the no-accidental-match color guarantee) in
-`src/sim_recycle_test.zig`, `cpu_engine.zig`'s in `src/cpu_engine_test.zig`, and `cpu_engine_garbage.zig`'s
-(including its cross-validation against the real board) in `src/cpu_engine_garbage_test.zig`, to keep each
-module under ~500 lines. These run natively (not compiled into the
-cart) and are excluded from `input.zig`/`render.zig`/`render_garbage.zig`/`render_cpu.zig`, which touch
-WASM-4's real host functions and only make sense under an actual WASM-4 host.
+`state.zig`, `board.zig`, `sim.zig`/`sim_matches.zig`/`sim_garbage.zig`, `cpu_ai.zig`,
+`cpu_engine.zig`/`cpu_engine_garbage.zig`, and `garbage_pieces.zig` have Zig `test` blocks — `sim.zig`'s live
+in the companion `src/sim_test.zig`, garbage-specific ones in `src/sim_garbage_test.zig`, recycle-specific
+ones (stagger order, the bottom-row-only-converts rule, and the no-accidental-match color guarantee) in
+`src/sim_recycle_test.zig`, `cpu_engine.zig`'s in `src/cpu_engine_test.zig`, `cpu_engine_garbage.zig`'s
+(including its cross-validation against the real board) in `src/cpu_engine_garbage_test.zig`, and
+`garbage_pieces.zig`'s inline in the same file, to keep each module under ~500 lines. These run natively (not
+compiled into the cart) and are excluded from `input.zig`/`render.zig`/`render_garbage.zig`/`render_cpu.zig`,
+which touch WASM-4's real host functions and only make sense under an actual WASM-4 host --
+`garbage_pieces.zig` is deliberately split out from `render_garbage.zig` specifically so its own pure
+grouping logic doesn't inherit that exclusion.
 
 ```sh
 zig build test

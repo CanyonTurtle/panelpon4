@@ -15,4 +15,5 @@ test {
     _ = @import("cpu_ai.zig");
     _ = @import("cpu_engine_test.zig");
     _ = @import("cpu_engine_garbage_test.zig");
+    _ = @import("garbage_pieces.zig");
 }
