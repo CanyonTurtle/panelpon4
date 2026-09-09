@@ -69,8 +69,8 @@ fn configFor(level: u8) DifficultyConfig {
         6 => .{ .move_interval = 17, .depth = 2, .chain_weight = 80 },
         7 => .{ .move_interval = 12, .depth = 2, .chain_weight = 100 },
         8 => .{ .move_interval = 11, .depth = 3, .chain_weight = 100, .raise_bias = 10 },
-        9 => .{ .move_interval = 9, .depth = 3, .chain_weight = 115, .raise_bias = 15 },
-        10 => .{ .move_interval = 8, .depth = 3, .chain_weight = 130, .raise_bias = 20 },
+        9 => .{ .move_interval = 9, .depth = 3, .chain_weight = 100, .raise_bias = 15 },
+        10 => .{ .move_interval = 8, .depth = 3, .chain_weight = 100, .raise_bias = 20 },
         // state.difficulty is always clamped to 1-10 (see main.zig's title
         // screen) -- this is just a defensive fallback, not a real level.
         else => .{ .move_interval = 20, .depth = 1, .chain_weight = 50 },
@@ -149,7 +149,7 @@ test "cpu AI stays put for the first move_interval-1 idle frames" {
 test "cpu AI walks its cursor one cell at a time toward the engine's target, never teleporting" {
     move_timer = 0;
     target = null;
-    s.difficulty = 10; // depth 3, chain_weight 130 -- always plays its actual best move
+    s.difficulty = 10; // depth 3, chain_weight 100 -- always plays its actual best move
     var b: s.Board = .{};
     // Row 5, col 2 is the target (see the "finds and plays" test below) --
     // starting cursor col already matches (default cursor_col == 2), so
@@ -179,7 +179,7 @@ test "cpu AI walks its cursor one cell at a time toward the engine's target, nev
 test "at an engine level, the cpu finds and plays an obvious winning swap" {
     move_timer = 0;
     target = null;
-    s.difficulty = 10; // depth 3, chain_weight 130 -- always plays its actual best move
+    s.difficulty = 10; // depth 3, chain_weight 100 -- always plays its actual best move
     var b: s.Board = .{};
     // Row 5: 1,1,2,1 -- only swapping columns 2/3 completes a match. Nothing
     // else is on the board, so cpu_engine's own gravity pass (part of
@@ -219,7 +219,7 @@ test "at an engine level, the cpu raises instead of swapping on an empty board" 
 test "cpu AI sits still (no spinning) when there's genuinely no good move" {
     move_timer = 0;
     target = null;
-    s.difficulty = 10; // depth 3, chain_weight 130
+    s.difficulty = 10; // depth 3, chain_weight 100
     var b: s.Board = .{};
     // Same (row + 2*col) % 5 board used by cpu_engine_test's own "bestAction
     // does nothing ..." test -- no swap can ever improve on it or set off a
