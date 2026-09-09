@@ -730,13 +730,29 @@ fn drawDifficultyBar(x: i32, y: i32) void {
     }
 }
 
-// Left edge of each of the 4 portraits in the setup screen's character row
-// -- evenly spaced, centered in the panel's own width.
+// Position of each portrait in the setup screen's character grid -- wraps
+// into rows of CHARS_PER_ROW rather than one long line (7 characters, at
+// this sprite size plus gap, are too wide for the panel to fit in a single
+// row), each row independently centered in the panel's own width so a
+// shorter final row (3, not 4) still sits centered under the one above it
+// rather than left-aligned.
+const CHARS_PER_ROW: u8 = 4;
 const CHAR_SLOT_GAP: i32 = 8;
-const CHAR_ROW_W: i32 = characters.COUNT * rchar.W + (characters.COUNT - 1) * CHAR_SLOT_GAP;
-fn charSlotX(index: u8) i32 {
-    const start = MENU_PANEL_X + @divTrunc(MENU_PANEL_W - CHAR_ROW_W, 2);
-    return start + @as(i32, index) * (rchar.W + CHAR_SLOT_GAP);
+const CHAR_ROW_GAP: i32 = 8;
+
+fn charRowCount(row: u8) u8 {
+    const start = row * CHARS_PER_ROW;
+    return @intCast(@min(CHARS_PER_ROW, characters.COUNT - start));
+}
+
+fn charSlotPos(index: u8) struct { x: i32, y: i32, row: u8 } {
+    const row = index / CHARS_PER_ROW;
+    const col = index % CHARS_PER_ROW;
+    const row_w = @as(i32, charRowCount(row)) * rchar.W + (@as(i32, charRowCount(row)) - 1) * CHAR_SLOT_GAP;
+    const start_x = MENU_PANEL_X + @divTrunc(MENU_PANEL_W - row_w, 2);
+    const x = start_x + @as(i32, col) * (rchar.W + CHAR_SLOT_GAP);
+    const y = @as(i32, row) * (rchar.H + CHAR_ROW_GAP);
+    return .{ .x = x, .y = y, .row = row };
 }
 
 // The setup flow's own screen position -- held fixed across all 3 steps
@@ -745,40 +761,44 @@ fn charSlotX(index: u8) i32 {
 const SETUP_BASE_Y: i32 = 24;
 
 pub fn drawSetupCharacterScreen() void {
-    const y = drawMenuPanelFill(SETUP_BASE_Y, 100);
+    const y = drawMenuPanelFill(SETUP_BASE_Y, 120);
     // Retheme the panel border itself to whichever character is currently
     // selected -- "switching should retheme the setup menu".
-    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100, characters.ALL[s.player_character]);
+    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 120, characters.ALL[s.player_character]);
 
     w4.DRAW_COLORS.* = 0x0003;
     w4.Text("SETUP", 58, y + 6);
     w4.DRAW_COLORS.* = 0x0002;
     w4.Text("CHARACTER", 40, y + 18);
 
-    // All 4 characters are shown at once (not just the current pick) --
+    // Every character is shown at once (not just the current pick) --
     // left/right cycles the player's own selection (see main.zig),
     // highlighted with a dithered outline -- solid normally, blinking on/off
     // for a moment right after confirming (see state.setup_flash_timer)
     // before moving on to watch the CPU pick its own.
     const frame = rchar.currentFrame();
-    const row_y = y + 34;
+    const grid_y = y + 34;
     const flashing = s.setup_flash_timer > 0;
     const flash_on = !flashing or blinkOn(c.SETUP_FLASH_TOTAL_FRAMES - s.setup_flash_timer, c.SETUP_FLASH_TOGGLE_FRAMES);
+    var last_row: u8 = 0;
     for (0..characters.COUNT) |i| {
-        const cx = charSlotX(@intCast(i));
-        rchar.draw(cx, row_y, @intCast(i), .normal, frame);
+        const pos = charSlotPos(@intCast(i));
+        const cy = grid_y + pos.y;
+        last_row = pos.row;
+        rchar.draw(pos.x, cy, @intCast(i), .normal, frame);
         if (i == s.player_character and flash_on) {
-            drawDitheredRectOutline(cx - 2, row_y - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
+            drawDitheredRectOutline(pos.x - 2, cy - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
         }
     }
+    const grid_bottom = grid_y + @as(i32, last_row) * (rchar.H + CHAR_ROW_GAP) + rchar.H;
 
     w4.DRAW_COLORS.* = 0x0002;
     var buf: [24]u8 = undefined;
     const you_label = std.fmt.bufPrint(&buf, "YOU: {s}", .{characters.ALL[s.player_character].name}) catch "YOU";
-    w4.Text(you_label, 28, row_y + rchar.H + 6);
+    w4.Text(you_label, 28, grid_bottom + 6);
     if (!flashing) {
-        w4.Text("<-      ->", 40, row_y + rchar.H + 18);
-        w4.Text("PRESS X", 52, row_y + rchar.H + 30);
+        w4.Text("<-      ->", 40, grid_bottom + 18);
+        w4.Text("PRESS X", 52, grid_bottom + 30);
     }
 }
 

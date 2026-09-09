@@ -134,17 +134,18 @@ the side panel. Both run the exact same rules and physics.
   raising out of necessity -- gated well clear of the danger threshold, so it can never itself run a stack
   into the ceiling. Difficulty and character are both fixed for the whole series, but revisitable in setup
   again once one concludes.
-- The character screen shows all 4 selectable characters at once (see `src/characters.zig`) -- a lizard, a
-  mermaid, a bug, and a cloud puff, each a real pixel-art figure, not just a colored square. **Left/right**
-  cycles your own pick (highlighted with a dithered outline, rethemeing the screen's own menu panel border to
-  match live); pressing **X** blinks that outline a few times (a short, explicit "confirmed" flash) before
-  moving on. The CPU screen right after plays out its own pick as a brief reveal, not an instant assignment --
-  its portrait spins through the roster once per tick, each tick held a little longer than the last (a slot
-  machine slowing to a stop), before landing for good on a genuinely random pick (never the same character as
-  yours, but otherwise no more likely to be any one of the other 3 -- see `characters.cpuPickFor`) with no
-  further input needed. Every pre-game screen shares the same background (a slow diagonal-scrolling drift of
-  faint blocks) and an identically-positioned menu panel that stays perfectly still -- no bobbing or other
-  idle motion -- so nothing shifts around between steps except the content itself.
+- The character screen shows all 7 selectable characters at once, wrapped into two rows since they're too wide
+  for one (see `src/characters.zig`) -- a lizard, a mermaid, a bug, a cloud puff, a slime blob, a crow, and a
+  robot, each a real pixel-art figure, not just a colored square. **Left/right** cycles your own pick
+  (highlighted with a dithered outline, rethemeing the screen's own menu panel border to match live); pressing
+  **X** blinks that outline a few times (a short, explicit "confirmed" flash) before moving on. The CPU screen
+  right after plays out its own pick as a brief reveal, not an instant assignment -- its portrait spins through
+  the roster once per tick, each tick held a little longer than the last (a slot machine slowing to a stop),
+  before landing for good on a genuinely random pick (never the same character as yours, but otherwise no more
+  likely to be any one of the other 6 -- see `characters.cpuPickFor`) with no further input needed. Every
+  pre-game screen shares the same background (a slow diagonal-scrolling drift of faint blocks) and an
+  identically-positioned menu panel that stays perfectly still -- no bobbing or other idle motion -- so
+  nothing shifts around between steps except the content itself.
 - Your chosen character themes your own main-frame border (its own color and a distinct border pattern --
   solid, checkered, dashed, or a thin double outline) and gives you an animated portrait next to your score,
   reacting to what's actually happening: idle otherwise, excited on a combo or chain, wincing for a moment
@@ -386,13 +387,17 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   wipe eats into it and disappears entirely once the whole piece -- or, once a match concludes, the whole
   board -- has been wiped, rather than a mark computed from the board's real underlying data hanging in the
   air over a wipe that's already visually cleared the piece it belonged to.
-- `src/characters.zig` — the 4 selectable characters: a real pixel-art sprite each (same text-art bitmap
-  convention as `symbols.zig`) -- a lizard, a mermaid, a bug, and a cloud puff -- plus a hue/dither pair, a
-  main-frame border style, and a `face` anchor (where `render_character.zig`'s shared expression logic
-  centers on top of that sprite). `cpuPickFor(player_pick, roll)` picks uniformly among the 3 characters that
-  aren't `player_pick`, using `roll` (any value; only taken mod `COUNT - 1`) to choose which -- called once in
-  `main.zig` with a fresh `s.player.rngNext()` right as the character screen's confirm flash finishes, so the
-  CPU's pick genuinely varies run to run (never the player's own, but otherwise no more likely to be any one
+- `src/characters.zig` — the 7 selectable characters: a real pixel-art sprite each (same text-art bitmap
+  convention as `symbols.zig`) -- a lizard, a mermaid, a bug, a cloud puff, a slime blob, a crow, and a robot --
+  plus a hue/dither pair, a main-frame border style, and a `face` anchor (where `render_character.zig`'s
+  shared expression logic centers on top of that sprite). Only 3 real hues exist, so there are only 6 distinct
+  looks total (3 solid, 3 dithered pairs); the robot deliberately reuses the mermaid's solid teal (the real
+  in-game garbage block's own accent color, a fitting match for a "garbage themed" character) and `border_style`
+  cycles back through its 4 options a second time -- a completely different sprite silhouette carries each
+  character's own identity regardless. `cpuPickFor(player_pick, roll)` picks uniformly among the characters
+  that aren't `player_pick`, using `roll` (any value; only taken mod `COUNT - 1`) to choose which -- called
+  once in `main.zig` with a fresh `s.player.rngNext()` right as the character screen's confirm flash finishes,
+  so the CPU's pick genuinely varies run to run (never the player's own, but otherwise no more likely to be any one
   of the other 3) rather than always being "the next one in the list".
 - `src/render_character.zig` — shared character-portrait rendering: draws a character's own sprite in its
   own hue(s), then an animated face reacting to `stateFor` (a board's own `garbage_punish_timer`/
