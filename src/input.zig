@@ -1,9 +1,16 @@
-// Gamepad and touch input: cursor movement and swap triggering, always
-// driving the player's own board (see state.player) -- the CPU has no real
-// input; see cpu_ai.zig for its random-move equivalent. Not unit tested (it
-// dereferences WASM4's real memory-mapped gamepad/mouse registers, which
-// only make sense under an actual WASM4 host) -- see sim.zig for the
-// swap/match logic it ultimately drives, which is tested.
+// Gamepad and touch input: cursor movement and swap triggering. Every
+// function below takes an explicit `board`, plus that board's own
+// held_dir/das_counter/button_pending_swap/cursor_idle_frames fields to
+// track DAS/buffering state -- almost always `state.player`'s own (see
+// main.zig's ordinary single-player call sites), but versus mode (see
+// state.GameMode) calls the exact same functions a second time with `&s.cpu`
+// and its own parallel set of fields (state.cpu_held_dir etc.), since
+// GAMEPAD2 drives a real second player there instead of cpu_ai. Touch has no
+// second-player equivalent -- see updateTouch, still hardcoded to the
+// player's own board. Not unit tested (it dereferences WASM4's real
+// memory-mapped gamepad/mouse registers, which only make sense under an
+// actual WASM4 host) -- see sim.zig for the swap/match logic it ultimately
+// drives, which is tested.
 
 const c = @import("constants.zig");
 const s = @import("state.zig");
@@ -14,26 +21,27 @@ pub fn justPressed(gp: u8, btn: u8) bool {
     return (gp & btn) != 0 and (s.prev_gamepad & btn) == 0;
 }
 
-pub fn moveCursor(dir: u8) void {
-    s.cursor_idle_frames = 0;
+pub fn moveCursor(board: *s.Board, idle_frames: *u32, dir: u8) void {
+    idle_frames.* = 0;
     if (dir == w4.BUTTON_LEFT) {
-        if (s.player.cursor_col > 0) s.player.cursor_col -= 1;
+        if (board.cursor_col > 0) board.cursor_col -= 1;
     } else if (dir == w4.BUTTON_RIGHT) {
-        if (s.player.cursor_col < c.COLS - 2) s.player.cursor_col += 1;
+        if (board.cursor_col < c.COLS - 2) board.cursor_col += 1;
     } else if (dir == w4.BUTTON_UP) {
-        if (s.player.cursor_row > 0) s.player.cursor_row -= 1;
+        if (board.cursor_row > 0) board.cursor_row -= 1;
     } else if (dir == w4.BUTTON_DOWN) {
-        if (s.player.cursor_row < c.VISIBLE_ROWS - 1) s.player.cursor_row += 1;
+        if (board.cursor_row < c.VISIBLE_ROWS - 1) board.cursor_row += 1;
     }
 }
 
 // Shared DAS (delayed auto-shift) logic: given a single direction (or 0) held
 // this frame, and pointers to that input method's own held_dir/das_counter,
 // moves the cursor at most once per frame with the standard first-move-then-
-// repeat timing. Kept generic over which held_dir/das_counter it touches so
-// the gamepad and touch can each hold a direction across frames without
-// clobbering each other's timing.
-fn stepDas(cur_dir: u8, held: *u8, counter: *u8) void {
+// repeat timing. Kept generic over which held_dir/das_counter (and now which
+// board/idle_frames) it touches so the gamepad and touch -- and, in versus
+// mode, a second real player -- can each hold a direction across frames
+// without clobbering each other's timing.
+fn stepDas(cur_dir: u8, held: *u8, counter: *u8, board: *s.Board, idle_frames: *u32) void {
     if (cur_dir == 0) {
         held.* = 0;
         counter.* = 0;
@@ -42,19 +50,19 @@ fn stepDas(cur_dir: u8, held: *u8, counter: *u8) void {
     if (cur_dir != held.*) {
         held.* = cur_dir;
         counter.* = c.MOVE_DAS_FIRST;
-        moveCursor(cur_dir);
+        moveCursor(board, idle_frames, cur_dir);
     } else {
         if (counter.* == 0) {
             counter.* = c.MOVE_DAS_REPEAT;
-            moveCursor(cur_dir);
+            moveCursor(board, idle_frames, cur_dir);
         } else {
             counter.* -= 1;
         }
     }
 }
 
-pub fn updateCursorMovement(gp: u8) void {
-    s.cursor_idle_frames += 1; // moveCursor resets this back to 0 if a move actually happens this frame
+pub fn updateCursorMovement(board: *s.Board, held: *u8, counter: *u8, idle_frames: *u32, gp: u8) void {
+    idle_frames.* += 1; // moveCursor resets this back to 0 if a move actually happens this frame
     const dirs = [_]u8{ w4.BUTTON_LEFT, w4.BUTTON_RIGHT, w4.BUTTON_UP, w4.BUTTON_DOWN };
     var cur_dir: u8 = 0;
     for (dirs) |d| {
@@ -63,20 +71,20 @@ pub fn updateCursorMovement(gp: u8) void {
             break;
         }
     }
-    stepDas(cur_dir, &s.held_dir, &s.das_counter);
+    stepDas(cur_dir, held, counter, board, idle_frames);
 }
 
 // A fresh press always tries the swap immediately; if the cursor's current
 // pair can't swap yet (still mid-animation from a previous swap), the press
-// is buffered (state.button_pending_swap) instead of dropped, and retried
-// here again every frame until it succeeds -- see canSwapAt below, shared
-// with touch's own buffering. Lets mashing X chain swaps at the fastest rate
-// the swap animation allows, with none silently lost to bad timing.
-pub fn updateSwap(gp: u8) void {
-    if (justPressed(gp, w4.BUTTON_1)) s.button_pending_swap = true;
-    if (s.button_pending_swap and canSwapAt(&s.player, s.player.cursor_row, s.player.cursor_col)) {
-        sim.trySwap(&s.player);
-        s.button_pending_swap = false;
+// is buffered (`pending`) instead of dropped, and retried here again every
+// frame until it succeeds -- see canSwapAt below, shared with touch's own
+// buffering. Lets mashing X chain swaps at the fastest rate the swap
+// animation allows, with none silently lost to bad timing.
+pub fn updateSwap(board: *s.Board, pending: *bool, gp: u8) void {
+    if (justPressed(gp, w4.BUTTON_1)) pending.* = true;
+    if (pending.* and canSwapAt(board, board.cursor_row, board.cursor_col)) {
+        sim.trySwap(board);
+        pending.* = false;
     }
 }
 

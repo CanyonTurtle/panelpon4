@@ -221,7 +221,7 @@ fn closingWipedRows() u8 {
     return @intCast(@min(rows, c.RING_SIZE));
 }
 
-fn drawMicroBoard(b: *s.Board, origin_x: i32, origin_y: i32) void {
+fn drawMicroBoard(b: *s.Board, character: u8, origin_x: i32, origin_y: i32) void {
     const clip_top = origin_y;
     const clip_bottom = origin_y + BOARD_H;
     // Proportional scroll: scroll_px is counted in the main board's TILE
@@ -260,7 +260,7 @@ fn drawMicroBoard(b: *s.Board, origin_x: i32, origin_y: i32) void {
         }
     }
 
-    const char = characters.ALL[s.cpu_character];
+    const char = characters.ALL[character];
     const w = @as(i32, c.COLS) * MICRO_TILE;
     drawThemedEdge(origin_x - 1, origin_y - 1, w + 2, char.hues, char.border_style, true);
     drawThemedEdge(origin_x - 1, origin_y + BOARD_H, w + 2, char.hues, char.border_style, true);
@@ -298,29 +298,45 @@ fn plotDithered(x: i32, y: i32) void {
     w4.Rect(x, y, 1, 1);
 }
 
-pub fn draw() void {
-    // The CPU's own character portrait, framed in its character's own theme
-    // (see rchar.drawFrame) and animated per render_character.zig, replaces
-    // the old plain "CPU" text label -- score/points squeezed in beside it
-    // instead of on their own lines below (mirrors the player's own panel
-    // layout in render.drawPanel).
-    rchar.drawFrame(c.PANEL_X, LABEL_Y, s.cpu_character);
-    rchar.draw(c.PANEL_X, LABEL_Y, s.cpu_character, rchar.stateFor(&s.cpu), rchar.currentFrame());
+// `board`/`character`/`points` is ordinarily always `s.cpu`/s.cpu_character/
+// s.cpu_points (every mode but versus), but a versus peer whose own real
+// input is GAMEPAD2 sees `s.player`/s.player_character/s.player_points here
+// instead (see state.versus_render_swapped/render.miniBoard) -- this file
+// itself never reaches into those globals directly any more, so it doesn't
+// need to know or care which peer's perspective it's drawing.
+pub fn draw(board: *s.Board, character: u8, points: u8) void {
+    // This side's own character portrait, framed in its character's own
+    // theme (see rchar.drawFrame) and animated per render_character.zig,
+    // replaces the old plain "CPU" text label -- score/points squeezed in
+    // beside it instead of on their own lines below (mirrors the main
+    // board's own panel layout in render.drawPanel).
+    rchar.drawFrame(c.PANEL_X, LABEL_Y, character);
+    rchar.draw(c.PANEL_X, LABEL_Y, character, rchar.stateFor(board), rchar.currentFrame());
 
     w4.DRAW_COLORS.* = 0x0002;
     var buf: [12]u8 = undefined;
-    const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.cpu.score}) catch "0";
+    const score_str = std.fmt.bufPrint(&buf, "{d}", .{board.score}) catch "0";
     w4.Text(score_str, TEXT_X, LABEL_Y + 2);
-    badge.drawPoints(TEXT_X, LABEL_Y + 10, s.cpu_points);
-    // The CPU's own chain/combo popups now fly here too (see
-    // sim_matches.checkMatches, which computes their spawn point in this
-    // same micro-board coordinate system whenever `self` is the CPU) --
-    // landing on the CPU's own score instead of the player's.
-    badge.drawMatchPopups(&s.cpu.match_popups, TEXT_X, LABEL_Y + 10);
+    // Story mode plays single-game stages, not a best-of-N series (see
+    // render.drawPanel's identical guard) -- these points are meaningless
+    // there, so this slot is just left blank instead.
+    if (s.game_mode != .story) badge.drawPoints(TEXT_X, LABEL_Y + 10, points);
+    // This side's own chain/combo popups fly here too (see sim_matches.
+    // checkMatches, which computes their spawn point in this same
+    // micro-board coordinate system whenever the match happened on `&s.cpu`
+    // specifically, checked by that same pointer identity) -- landing on
+    // its own score instead of the main side's. Only actually drawn when
+    // `board` really is `&s.cpu`: a versus peer whose own real input is
+    // GAMEPAD2 sees `s.player` rendered here instead (see state.
+    // versus_render_swapped), but that board's own popups were spawned in
+    // the *other* (full-scale) coordinate system, which would land them
+    // somewhere nonsensical at this micro scale -- silently skipping the
+    // flourish there is better than drawing it in the wrong place.
+    if (board == &s.cpu) badge.drawMatchPopups(&board.match_popups, TEXT_X, LABEL_Y + 10);
 
-    drawMicroBoard(&s.cpu, c.PANEL_X, BOARD_Y);
-    drawMicroCursor(&s.cpu, c.PANEL_X, BOARD_Y);
+    drawMicroBoard(board, character, c.PANEL_X, BOARD_Y);
+    drawMicroCursor(board, c.PANEL_X, BOARD_Y);
     // In the narrow gutter to the right of the mini board, within the panel
     // column's own leftover width.
-    badge.drawGarbageQueueIcons(c.PANEL_X + @as(i32, c.COLS) * MICRO_TILE + 2, BOARD_Y + 2, &s.cpu);
+    badge.drawGarbageQueueIcons(c.PANEL_X + @as(i32, c.COLS) * MICRO_TILE + 2, BOARD_Y + 2, board);
 }

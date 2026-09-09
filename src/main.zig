@@ -11,6 +11,24 @@ const render = @import("render.zig");
 const audio = @import("audio.zig");
 const debug = @import("debug.zig");
 const characters = @import("characters.zig");
+const game_modes = @import("game_modes.zig");
+
+// mode_select's own left/right cycling order (quick -> story -> versus ->
+// wraps back to quick).
+fn prevMode(m: s.GameMode) s.GameMode {
+    return switch (m) {
+        .quick => .versus,
+        .story => .quick,
+        .versus => .story,
+    };
+}
+fn nextMode(m: s.GameMode) s.GameMode {
+    return switch (m) {
+        .quick => .story,
+        .story => .versus,
+        .versus => .quick,
+    };
+}
 
 // Debug-only WASM exports (see debug.zig) for tools/wasm4-harness.js to
 // drive: only compiled into Debug builds, so `zig build --release=small`
@@ -39,6 +57,7 @@ export fn start() void {
     board.resetSharedRows();
     board.resetGame(&s.player);
     board.resetGame(&s.cpu);
+    game_modes.loadSave();
 }
 
 export fn update() void {
@@ -70,21 +89,63 @@ export fn update() void {
         switch (s.menu_phase) {
             .title => {
                 render.drawTitleScreen();
-                if (input.justPressed(gp, w4.BUTTON_1)) s.menu_phase = .setup_character;
+                if (input.justPressed(gp, w4.BUTTON_1)) s.menu_phase = .mode_select;
+            },
+            .mode_select => {
+                render.drawModeSelectScreen();
+                if (input.justPressed(gp, w4.BUTTON_LEFT)) s.game_mode = prevMode(s.game_mode);
+                if (input.justPressed(gp, w4.BUTTON_RIGHT)) s.game_mode = nextMode(s.game_mode);
+                if (input.justPressed(gp, w4.BUTTON_1)) {
+                    switch (s.game_mode) {
+                        .quick, .story => s.menu_phase = .setup_character,
+                        .versus => {
+                            // No character/difficulty picking for versus --
+                            // the opponent is a real second player, not a
+                            // rolled or ramped CPU (see state.GameMode's own
+                            // doc comment). Figure out once, right now,
+                            // whether *this* peer's own real input is
+                            // GAMEPAD2 (see wasm4.NETPLAY) -- if so, this
+                            // peer needs to see itself in the main seat by
+                            // swapping which board render.render() treats as
+                            // "mine", since GAMEPAD1 always drives `player`
+                            // and GAMEPAD2 always drives `cpu` regardless of
+                            // slot (see the in-match input routing below).
+                            game_modes.applyDefaultProfile();
+                            const netplay = w4.NETPLAY.*;
+                            const my_slot = netplay & w4.NETPLAY_PLAYER_MASK;
+                            s.versus_render_swapped = (netplay & w4.NETPLAY_ACTIVE != 0) and my_slot == 1;
+                            board.beginCountdown();
+                        },
+                    }
+                }
             },
             .setup_character => {
                 render.drawSetupCharacterScreen();
                 if (s.setup_flash_timer > 0) {
                     // Confirmed -- ignore input and just let the flash play
                     // out (see render.drawSetupCharacterScreen) until it's
-                    // done, then roll the CPU's own pick (see
-                    // characters.cpuPickFor) and move on to watch it reveal.
+                    // done, then move on: quick match rolls the CPU's own
+                    // pick (see characters.cpuPickFor) and watches it
+                    // reveal; story mode's opponents are predetermined (see
+                    // game_modes.storyOpponentFor), so it skips the reveal
+                    // screen entirely and goes straight to picking a tier.
                     s.setup_flash_timer -= 1;
                     if (s.setup_flash_timer == 0) {
-                        s.cpu_character = characters.cpuPickFor(s.player_character, s.player.rngNext());
-                        s.cpu_reveal_tick = 0;
-                        s.cpu_reveal_timer = c.CPU_REVEAL_HOLD_BASE;
-                        s.menu_phase = .setup_cpu_reveal;
+                        switch (s.game_mode) {
+                            .quick => {
+                                s.cpu_character = characters.cpuPickFor(s.player_character, s.player.rngNext());
+                                s.cpu_reveal_tick = 0;
+                                s.cpu_reveal_timer = c.CPU_REVEAL_HOLD_BASE;
+                                s.menu_phase = .setup_cpu_reveal;
+                            },
+                            .story => {
+                                s.story_stage = 0;
+                                s.story_game_overs = 0;
+                                s.cpu_character = game_modes.storyOpponentFor(0);
+                                s.menu_phase = .story_tier_select;
+                            },
+                            .versus => unreachable, // versus never reaches setup_character (see mode_select above)
+                        }
                     }
                 } else {
                     // Left/right cycles the player's own character -- a
@@ -121,7 +182,44 @@ export fn update() void {
                 // around, but fixed for the whole series in between.
                 if (input.justPressed(gp, w4.BUTTON_LEFT) and s.difficulty > 1) s.difficulty -= 1;
                 if (input.justPressed(gp, w4.BUTTON_RIGHT) and s.difficulty < 10) s.difficulty += 1;
-                if (input.justPressed(gp, w4.BUTTON_1)) board.beginCountdown();
+                if (input.justPressed(gp, w4.BUTTON_1)) {
+                    // Guarantees a clean baseline even if a story run earlier
+                    // this session left its own tier's profile active (see
+                    // game_modes.zig's own doc comment).
+                    game_modes.applyDefaultProfile();
+                    board.beginCountdown();
+                }
+            },
+            .story_tier_select => {
+                render.drawStoryTierScreen();
+                // "By tradition", X Hard is never reachable by plain
+                // left/right cycling (see state.StoryTier's own doc
+                // comment) -- only by holding left and pressing the swap
+                // button while already sitting on Hard, checked before the
+                // ordinary cycling below so that combo doesn't *also* register
+                // as a plain left-press. Left from X Hard steps back out of
+                // it to Hard, same as arriving there.
+                if (s.story_tier == .hard and gp & w4.BUTTON_LEFT != 0 and input.justPressed(gp, w4.BUTTON_2)) {
+                    s.story_tier = .xhard;
+                } else if (input.justPressed(gp, w4.BUTTON_LEFT)) {
+                    s.story_tier = switch (s.story_tier) {
+                        .easy => .easy,
+                        .medium => .easy,
+                        .hard => .medium,
+                        .xhard => .hard,
+                    };
+                } else if (input.justPressed(gp, w4.BUTTON_RIGHT)) {
+                    s.story_tier = switch (s.story_tier) {
+                        .easy => .medium,
+                        .medium => .hard,
+                        .hard, .xhard => s.story_tier, // never cycles *into* xhard this way
+                    };
+                }
+                if (input.justPressed(gp, w4.BUTTON_1)) {
+                    game_modes.applyStoryProfile(s.story_tier);
+                    s.difficulty = game_modes.storyDifficultyFor(s.story_tier, s.story_stage);
+                    board.beginCountdown();
+                }
             },
         }
         s.prev_gamepad = gp;
@@ -129,8 +227,8 @@ export fn update() void {
     }
 
     if (s.winner == .none) {
-        input.updateCursorMovement(gp);
-        input.updateSwap(gp);
+        input.updateCursorMovement(&s.player, &s.held_dir, &s.das_counter, &s.cursor_idle_frames, gp);
+        input.updateSwap(&s.player, &s.button_pending_swap, gp);
         // Held (not just a fresh press) so the raise keeps going for as long
         // as Z stays down -- tryManualRaise already no-ops on its own while
         // still cooling down or mid-raise, so calling it every held frame
@@ -138,7 +236,23 @@ export fn update() void {
         // actually allowed to, with no extra debouncing needed here.
         if (gp & w4.BUTTON_2 != 0) board.tryManualRaise(&s.player);
         input.updateTouch();
-        cpu_ai.update(&s.cpu);
+        // Versus mode's `cpu` board is a real second player on GAMEPAD2 (see
+        // state.GameMode), driven through the exact same input functions as
+        // the player's own -- GAMEPAD1 always drives `player` and GAMEPAD2
+        // always drives `cpu` regardless of which netplay slot is "mine"
+        // (see mode_select's own versus branch above, which decides the
+        // *rendering* swap instead -- this keeps the simulate/resolve/
+        // release/rise call order below byte-for-byte identical on every
+        // peer, which is what actually has to stay in sync for netplay).
+        // Every other mode still hands `cpu` to the AI as always.
+        if (s.game_mode == .versus) {
+            const gp2 = w4.GAMEPAD2.*;
+            input.updateCursorMovement(&s.cpu, &s.cpu_held_dir, &s.cpu_das_counter, &s.cpu_cursor_idle_frames, gp2);
+            input.updateSwap(&s.cpu, &s.cpu_button_pending_swap, gp2);
+            if (gp2 & w4.BUTTON_2 != 0) board.tryManualRaise(&s.cpu);
+        } else {
+            cpu_ai.update(&s.cpu);
+        }
 
         sim.simulate(&s.player, &s.cpu);
         sim.simulate(&s.cpu, &s.player);
@@ -172,7 +286,13 @@ export fn update() void {
         if (s.winner != .none and !was_over) {
             audio.playGameOverSound();
             board.beginClosing();
-            board.awardMatchPoint(s.winner);
+            // Story mode plays single-game stages, not a best-of-N series --
+            // see the game-over handling below, which advances/retries a
+            // stage directly off `s.winner` instead. Awarding a point here
+            // too would let a long run spuriously trip set_winner (the
+            // best-of-POINTS_TO_WIN series-decided flag) with nothing ever
+            // around to consume/reset it.
+            if (s.game_mode != .story) board.awardMatchPoint(s.winner);
         }
     } else if (s.closing_timer > 0) {
         // The closing wipe (state.closing_timer) is ticked down here, before
@@ -183,17 +303,47 @@ export fn update() void {
         s.closing_timer -= 1;
     } else {
         if (input.justPressed(gp, w4.BUTTON_1)) {
-            if (s.set_winner != .none) {
-                // The series itself is decided -- back to the title/setup
-                // screens (see state.menu_phase) rather than straight into
-                // another countdown, with the whole series' state reset.
-                s.player_points = 0;
-                s.cpu_points = 0;
-                s.set_winner = .none;
-                s.menu_phase = .title;
-                s.started = false;
-            } else {
-                board.beginCountdown();
+            switch (s.game_mode) {
+                .story => {
+                    if (s.winner == .player) {
+                        s.story_stage += 1;
+                        if (s.story_stage >= game_modes.STORY_STAGES) {
+                            // The whole run just cleared -- see game_modes.
+                            // maybeRevealXhard for the one-time hint this can
+                            // earn, then back to picking a mode (not all the
+                            // way to the title splash).
+                            game_modes.maybeRevealXhard(s.story_tier, s.story_game_overs);
+                            s.menu_phase = .mode_select;
+                            s.started = false;
+                        } else {
+                            s.cpu_character = game_modes.storyOpponentFor(s.story_stage);
+                            s.difficulty = game_modes.storyDifficultyFor(s.story_tier, s.story_stage);
+                            board.beginCountdown();
+                        }
+                    } else {
+                        // Lost (or drew) this stage -- tallies toward this
+                        // run's own game-over count (see state.
+                        // story_game_overs) and retries the SAME stage,
+                        // never restarting the whole run from stage 1.
+                        s.story_game_overs += 1;
+                        board.beginCountdown();
+                    }
+                },
+                .quick, .versus => {
+                    if (s.set_winner != .none) {
+                        // The series itself is decided -- back to picking a
+                        // mode (see state.menu_phase) rather than straight
+                        // into another countdown, with the whole series'
+                        // state reset.
+                        s.player_points = 0;
+                        s.cpu_points = 0;
+                        s.set_winner = .none;
+                        s.menu_phase = .mode_select;
+                        s.started = false;
+                    } else {
+                        board.beginCountdown();
+                    }
+                },
             }
             s.winner = .none;
         }

@@ -19,6 +19,7 @@ const rgarbage = @import("render_garbage.zig");
 const bg = @import("render_bg.zig");
 const characters = @import("characters.zig");
 const rchar = @import("render_character.zig");
+const game_modes = @import("game_modes.zig");
 
 // nibble values for DRAW_COLORS color1, one per palette slot (index+1)
 const DC_BG: u16 = 1;
@@ -525,7 +526,7 @@ fn drawThemedPanelBorder(x: i32, y: i32, w: i32, h: i32, char: characters.Charac
 // (WASM-4's rect() has no rounded-corner support, so the corners are faked
 // by punching a small diagonal notch out of the frame in the background
 // color).
-fn drawFrame() void {
+fn drawFrame(character: u8) void {
     // Pushed out from the board's own bounding box so the frame doesn't
     // overlap the edge tiles' own fill. Horizontally there's margin to
     // spare, so it's pushed out by the full frame thickness -- plus 1 extra
@@ -547,7 +548,7 @@ fn drawFrame() void {
     const t = FRAME_THICKNESS;
     const radius = FRAME_RADIUS;
 
-    const char = characters.ALL[s.player_character];
+    const char = characters.ALL[character];
     drawThemedBand(x, y, w, t, char.hues, char.border_style, true); // top
     drawThemedBand(x, y + h - t, w, t, char.hues, char.border_style, true); // bottom
     drawThemedBand(x, y, t, h, char.hues, char.border_style, false); // left
@@ -611,27 +612,36 @@ fn drawCursorCorners(x: i32, y: i32, out: i32, hues: [2]u8) void {
     }
 }
 
-// Always the player's own cursor -- the CPU has no cursor to show (its board
-// is drawn too small for one to read well, and it has no real input anyway).
-// Hidden while touch is the active input method (see state.cursor_hidden) --
+// Always whichever board is rendered in the main, full-detail seat (see
+// render()'s own main_board/mainIdleFrames -- ordinarily `player`, but in
+// versus mode (see state.versus_render_swapped) a peer whose own real input
+// is GAMEPAD2 sees `cpu` there instead, since every peer wants to see
+// *themselves* in the main seat regardless of which struct their own real
+// presses happen to land in). Whichever board is rendered in the *mini*
+// seat never gets a cursor of its own to show -- true for the actual CPU
+// (no real input to reflect) and, as a deliberate scope cut, also true for
+// versus mode's other real player (their own screen shows their own cursor
+// just fine on their own copy of the cart; this peer's own view of them
+// stays exactly as simple as the existing CPU mini-view always was). Hidden
+// while touch is the active input method (see state.cursor_hidden) --
 // swipes move it relative to wherever it already is rather than aiming at a
 // touched tile, so there's nothing the player needs to see it for.
-fn drawCursor() void {
+fn drawCursor(board: *s.Board, idle_frames: u32) void {
     if (s.winner != .none or s.cursor_hidden) return;
-    const row = s.player.cursor_row;
-    const col = s.player.cursor_col;
+    const row = board.cursor_row;
+    const col = board.cursor_col;
     const base_x = c.BOARD_X + @as(i32, col) * c.TILE;
-    const base_y = c.BOARD_Y + @as(i32, row) * c.TILE - @as(i32, @intCast(s.player.scroll_px));
+    const base_y = c.BOARD_Y + @as(i32, row) * c.TILE - @as(i32, @intCast(board.scroll_px));
 
     // Breathe by alternating between two discrete sizes (contracted at
     // CURSOR_OUT_BASE, expanded at CURSOR_OUT_BASE + CURSOR_OUT_PULSE) --
-    // driven by cursor_idle_frames (time since the cursor last actually
-    // moved), not raw frame_count, so idle_frames == 0 always lands on the
-    // contracted frame: the cursor snaps to it the instant it moves, and
-    // only starts alternating again once it's been sitting there for a
-    // whole CURSOR_BREATHE_HOLD_FRAMES -- a fast-playing player never sees
-    // it breathe at all.
-    const expanded = @mod(@divTrunc(s.cursor_idle_frames, CURSOR_BREATHE_HOLD_FRAMES), 2) == 1;
+    // driven by idle_frames (time since the cursor last actually moved), not
+    // raw frame_count, so idle_frames == 0 always lands on the contracted
+    // frame: the cursor snaps to it the instant it moves, and only starts
+    // alternating again once it's been sitting there for a whole
+    // CURSOR_BREATHE_HOLD_FRAMES -- a fast-playing player never sees it
+    // breathe at all.
+    const expanded = @mod(@divTrunc(idle_frames, CURSOR_BREATHE_HOLD_FRAMES), 2) == 1;
     const out = if (expanded) CURSOR_OUT_BASE + CURSOR_OUT_PULSE else CURSOR_OUT_BASE;
 
     // Rather than staying pinned to the two static grid tiles, each slot's
@@ -641,8 +651,8 @@ fn drawCursor() void {
     // as they trade places, instead of the cursor sitting still while the
     // blocks slide underneath it.
     const abs_row = row + c.SPAWN_ROWS;
-    const left = s.player.cellAt(abs_row, col);
-    const right = s.player.cellAt(abs_row, col + 1);
+    const left = board.cellAt(abs_row, col);
+    const right = board.cellAt(abs_row, col + 1);
     const left_offset: i32 = if (left.state == .swapping) @as(i32, left.swap_dir) * @divTrunc(c.TILE * @as(i32, left.timer), c.SWAP_FRAMES) else 0;
     const right_offset: i32 = if (right.state == .swapping) @as(i32, right.swap_dir) * @divTrunc(c.TILE * @as(i32, right.timer), c.SWAP_FRAMES) else 0;
 
@@ -659,23 +669,32 @@ fn drawCursor() void {
 const CHAR_PORTRAIT_Y: i32 = rchar.FRAME_MARGIN;
 const CHAR_TEXT_X: i32 = c.PANEL_X + rchar.W + rchar.FRAME_MARGIN + 2;
 
-// The player's own character portrait, framed in their chosen character's
-// own theme (see rchar.drawFrame) and animated per render_character.zig,
-// plus score/points squeezed in beside it. The old static yellow "COMBO"/
-// "xN" chain callout that used to sit below the portrait is gone -- the
-// flying match-popup badge (badge.drawMatchPopups, now landing right here
-// for both sides) already communicates the same thing, and the character's
-// own combo/win bounce (see rchar.bounceOffset) reinforces it further, so
-// keeping a second static text readout around just ate space for no benefit.
-fn drawPanel() void {
-    rchar.drawFrame(c.PANEL_X, CHAR_PORTRAIT_Y, s.player_character);
-    rchar.draw(c.PANEL_X, CHAR_PORTRAIT_Y, s.player_character, rchar.stateFor(&s.player), rchar.currentFrame());
+// The main (full-detail) side's own character portrait, framed in their
+// chosen character's own theme (see rchar.drawFrame) and animated per
+// render_character.zig, plus score/points squeezed in beside it. The old
+// static yellow "COMBO"/"xN" chain callout that used to sit below the
+// portrait is gone -- the flying match-popup badge (badge.drawMatchPopups,
+// now landing right here for both sides) already communicates the same
+// thing, and the character's own combo/win bounce (see rchar.bounceOffset)
+// reinforces it further, so keeping a second static text readout around
+// just ate space for no benefit. Story mode shows its own stage counter
+// where the best-of-N series pips normally go, since a story stage is a
+// single game, not a series (see main.zig).
+fn drawPanel(board: *s.Board, character: u8, points: u8) void {
+    rchar.drawFrame(c.PANEL_X, CHAR_PORTRAIT_Y, character);
+    rchar.draw(c.PANEL_X, CHAR_PORTRAIT_Y, character, rchar.stateFor(board), rchar.currentFrame());
 
     w4.DRAW_COLORS.* = 0x0002;
     var buf: [12]u8 = undefined;
-    const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.player.score}) catch "0";
+    const score_str = std.fmt.bufPrint(&buf, "{d}", .{board.score}) catch "0";
     w4.Text(score_str, CHAR_TEXT_X, 2);
-    badge.drawPoints(CHAR_TEXT_X, 10, s.player_points);
+    if (s.game_mode == .story) {
+        var buf2: [12]u8 = undefined;
+        const stage_str = std.fmt.bufPrint(&buf2, "{d}/{d}", .{ s.story_stage + 1, game_modes.STORY_STAGES }) catch "";
+        w4.Text(stage_str, CHAR_TEXT_X, 10);
+    } else {
+        badge.drawPoints(CHAR_TEXT_X, 10, points);
+    }
 }
 
 const MENU_PANEL_X: i32 = 20;
@@ -701,6 +720,37 @@ pub fn drawTitleScreen() void {
     w4.Text("PANELPON4", 40, y + 24);
     w4.DRAW_COLORS.* = 0x0002;
     w4.Text("PRESS X", 52, y + 64);
+}
+
+// Right after the title, before any character/difficulty picking -- neither
+// of which applies yet, so this uses the same plain (non-themed) bezel the
+// title screen does, not a character-themed one. `state.GameMode`'s own
+// left/right cycling order (see main.zig's prevMode/nextMode) matches this
+// list's own order top to bottom.
+const GAME_MODE_LABELS = [3][]const u8{ "1P STORY", "1P QUICK MATCH", "2P VERSUS" };
+fn gameModeIndex(m: s.GameMode) u8 {
+    return switch (m) {
+        .story => 0,
+        .quick => 1,
+        .versus => 2,
+    };
+}
+
+pub fn drawModeSelectScreen() void {
+    const y = drawMenuPanelFill(30, 100);
+    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100);
+    w4.DRAW_COLORS.* = 0x0003;
+    w4.Text("SELECT MODE", 34, y + 12);
+
+    const cur = gameModeIndex(s.game_mode);
+    for (GAME_MODE_LABELS, 0..) |label, i| {
+        const line_y = y + 34 + @as(i32, @intCast(i)) * 14;
+        w4.DRAW_COLORS.* = if (i == cur) 0x0004 else 0x0002;
+        w4.Text(label, 30, line_y);
+    }
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text("<-      ->", 40, y + 80);
+    w4.Text("PRESS X", 52, y + 92);
 }
 
 // One filled-in segment per difficulty level (1-10), replacing the old
@@ -876,6 +926,42 @@ pub fn drawSetupDifficultyScreen() void {
     w4.Text("PRESS X", 52, y + 100);
 }
 
+const STORY_TIER_LABELS = [4][]const u8{ "EASY", "MEDIUM", "HARD", "X HARD" };
+
+// Story mode's own difficulty screen -- no CPU portrait/name here (unlike
+// drawSetupDifficultyScreen above), since the opponent sequence is
+// predetermined by the run itself (see game_modes.storyOpponentFor), not
+// picked or rolled. Left/right only ever cycles EASY/MEDIUM/HARD (see
+// main.zig's own cycling logic) -- X Hard is "by tradition" only reachable
+// by holding left and pressing Z while sitting on HARD, so it never appears
+// in the ordinary cycling order, and this screen only ever hints that it
+// exists (never spells out the actual input) once game_modes.xhard_revealed
+// says the player has actually earned that hint.
+pub fn drawStoryTierScreen() void {
+    const y = drawMenuPanelFill(SETUP_BASE_Y, 110);
+    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 110, characters.ALL[s.player_character]);
+
+    w4.DRAW_COLORS.* = 0x0003;
+    w4.Text("STORY", 58, y + 6);
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text("DIFFICULTY", 40, y + 18);
+
+    var buf: [24]u8 = undefined;
+    const you_label = std.fmt.bufPrint(&buf, "YOU: {s}", .{characters.ALL[s.player_character].name}) catch "YOU";
+    w4.Text(you_label, 28, y + 32);
+
+    w4.DRAW_COLORS.* = 0x0004;
+    w4.Text(STORY_TIER_LABELS[@intFromEnum(s.story_tier)], 52, y + 50);
+
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text("<-      ->", 40, y + 66);
+    w4.Text("PRESS X", 52, y + 78);
+
+    if (game_modes.xhard_revealed and s.story_tier == .hard) {
+        w4.Text("HOLD <- + Z ...", 22, y + 96);
+    }
+}
+
 // Bezeled orange border for a full-screen overlay panel (the countdown and
 // match-over screens): two concentric dithered outlines for a raised bezel
 // look (the same technique drawCursor uses), plus a 1px black (background)
@@ -896,19 +982,41 @@ fn drawPanelBorder(x: i32, y: i32, w: i32, h: i32) void {
     }
 }
 
+// Shared by drawGameOver's two branches below: both characters stay visible
+// through the transition, whichever won celebrating on the right and the
+// loser wincing on the left (a draw shows both idle, since neither actually
+// won or lost) -- `won` is from the *rendering* main side's own perspective
+// (see render()'s own mainBoard/mainCharacter), not always state.player, so
+// this reads correctly for a versus peer whose own board is rendered as
+// `cpu` (see state.versus_render_swapped).
+fn drawGameOverPortraits(x: i32, y: i32, w: i32, won: ?bool) void {
+    const frame = rchar.currentFrame();
+    const main_state: rchar.CharState = if (won) |w_| (if (w_) .win else .punish) else .normal;
+    const mini_state: rchar.CharState = if (won) |w_| (if (w_) .punish else .win) else .normal;
+    rchar.draw(x + 4, y + 4, mainCharacter(), main_state, frame);
+    rchar.draw(x + w - rchar.W - 4, y + 4, miniCharacter(), mini_state, frame);
+}
+
 // Only ever shown once the closing wipe (state.closing_timer, see
 // board.beginClosing) has finished popping every row -- see main.zig, which
 // gates the call on that -- so the loss reads as "board clears, then the
-// verdict appears", not both at once. Shows this one match's own result
-// plus the running series score always, and -- once state.set_winner says
-// the whole best-of-N series is decided (see board.awardMatchPoint) -- who
-// took the series instead of just prompting to continue it.
+// verdict appears", not both at once. Story mode (see state.GameMode) plays
+// single-game stages rather than a best-of-N series, and has its own
+// stage-clear/game-over/story-clear text instead of a running series score
+// -- see drawStoryGameOver below, which this defers to entirely.
 pub fn drawGameOver() void {
+    if (s.game_mode == .story) return drawStoryGameOver();
+
+    // "YOU WIN"/"YOU LOSE" is inherently a *perspective* -- versus mode's
+    // own main side isn't always state.player (see state.
+    // versus_render_swapped/render()'s own mainBoard), so this reads winner
+    // against whichever Winner value the main side actually corresponds to,
+    // not always .player.
+    const main_side: s.Winner = if (s.versus_render_swapped) .cpu else .player;
     const text: []const u8 = switch (s.winner) {
-        .player => "YOU WIN",
-        .cpu => "YOU LOSE",
         .draw => "DRAW",
         .none => unreachable, // drawGameOver is only ever called once winner != .none
+        else => if (s.winner == main_side) "YOU WIN" else "YOU LOSE",
     };
     const x = 20;
     const y = 52;
@@ -918,22 +1026,8 @@ pub fn drawGameOver() void {
     w4.Rect(x, y, w, h);
     drawPanelBorder(x, y, w, h);
 
-    // Both characters stay visible through the transition -- the winning
-    // side celebrating on the right, the losing side wincing on the left
-    // (a draw shows both idle, since neither actually won or lost).
-    const frame = rchar.currentFrame();
-    const player_state: rchar.CharState = switch (s.winner) {
-        .player => .win,
-        .cpu => .punish,
-        .draw, .none => .normal,
-    };
-    const cpu_state: rchar.CharState = switch (s.winner) {
-        .cpu => .win,
-        .player => .punish,
-        .draw, .none => .normal,
-    };
-    rchar.draw(x + 4, y + 4, s.player_character, player_state, frame);
-    rchar.draw(x + w - rchar.W - 4, y + 4, s.cpu_character, cpu_state, frame);
+    const won: ?bool = if (s.winner == .draw) null else s.winner == main_side;
+    drawGameOverPortraits(x, y, w, won);
 
     w4.DRAW_COLORS.* = 0x0004;
     w4.Text("MATCH OVER", 40, 58);
@@ -945,14 +1039,60 @@ pub fn drawGameOver() void {
     w4.Text(pts, 64, 84);
 
     if (s.set_winner != .none) {
-        const set_text: []const u8 = if (s.set_winner == .player) "YOU WIN THE SET!" else "CPU WINS THE SET!";
+        const set_text: []const u8 = if (s.set_winner == main_side) "YOU WIN THE SET!" else "OPPONENT WINS THE SET!";
         w4.DRAW_COLORS.* = 0x0004;
-        w4.Text(set_text, 12, 96);
+        w4.Text(set_text, 8, 96);
         w4.DRAW_COLORS.* = 0x0002;
         w4.Text("PRESS X", 40, 106);
     } else {
         w4.DRAW_COLORS.* = 0x0002;
         w4.Text("PRESS X", 40, 98);
+    }
+}
+
+// Story mode's own match-over overlay: no running series score (a stage is
+// one game, not a best-of-N series -- see main.zig), just this stage's own
+// outcome, the run's own game-over tally on a loss, and (once the final
+// stage actually clears) whether this run just earned the X Hard reveal
+// (see game_modes.maybeRevealXhard, called from main.zig the instant the
+// final stage's win is detected -- so by the time this ever renders, .
+// xhard_revealed already reflects it if this run just earned it).
+fn drawStoryGameOver() void {
+    const won = s.winner == .player;
+    const cleared_run = won and s.story_stage + 1 >= game_modes.STORY_STAGES;
+
+    const x = 20;
+    const y = 52;
+    const w = 120;
+    const h = 68;
+    w4.DRAW_COLORS.* = 0x0001;
+    w4.Rect(x, y, w, h);
+    drawPanelBorder(x, y, w, h);
+    drawGameOverPortraits(x, y, w, won);
+
+    w4.DRAW_COLORS.* = 0x0004;
+    const headline: []const u8 = if (!won) "GAME OVER" else if (cleared_run) "STORY CLEAR!" else "STAGE CLEAR";
+    w4.Text(headline, 40, 58);
+
+    w4.DRAW_COLORS.* = 0x0002;
+    var buf: [24]u8 = undefined;
+    if (!won) {
+        const go = std.fmt.bufPrint(&buf, "GAME OVERS: {d}", .{s.story_game_overs}) catch "";
+        w4.Text(go, 34, 76);
+        w4.Text("PRESS X TO RETRY", 22, 96);
+    } else if (cleared_run) {
+        const stage_str = std.fmt.bufPrint(&buf, "ALL {d} CLEARED!", .{game_modes.STORY_STAGES}) catch "";
+        w4.Text(stage_str, 30, 76);
+        if (s.story_game_overs == 0 and s.story_tier == .hard) {
+            w4.DRAW_COLORS.* = 0x0004;
+            w4.Text("X HARD UNLOCKED!", 22, 88);
+            w4.DRAW_COLORS.* = 0x0002;
+        }
+        w4.Text("PRESS X", 52, 100);
+    } else {
+        const stage_str = std.fmt.bufPrint(&buf, "STAGE {d}/{d} DONE", .{ s.story_stage + 1, game_modes.STORY_STAGES }) catch "";
+        w4.Text(stage_str, 26, 76);
+        w4.Text("PRESS X", 52, 96);
     }
 }
 
@@ -1037,16 +1177,61 @@ fn drawParticles(particles: []const s.Particle) void {
     }
 }
 
+// Which Board/character/points/idle-frames this peer's own "main", full-
+// detail seat actually shows -- ordinarily always `player`'s own (every mode
+// but versus, and even versus itself for the netplay host/GAMEPAD1 side, or
+// local same-console play), but a versus peer whose own real input is
+// GAMEPAD2 (see state.versus_render_swapped, decided once in main.zig right
+// as a versus match's countdown begins) sees `cpu` there instead -- every
+// peer wants to see *themselves* in the main seat, not always whichever
+// struct GAMEPAD1's input happens to land in (see input routing in
+// main.zig's own update(), which stays fixed regardless: this swap is a
+// rendering-only decision, so the simulation's own call order never changes
+// between peers).
+fn mainBoard() *s.Board {
+    return if (s.versus_render_swapped) &s.cpu else &s.player;
+}
+fn miniBoard() *s.Board {
+    return if (s.versus_render_swapped) &s.player else &s.cpu;
+}
+fn mainCharacter() u8 {
+    return if (s.versus_render_swapped) s.cpu_character else s.player_character;
+}
+fn miniCharacter() u8 {
+    return if (s.versus_render_swapped) s.player_character else s.cpu_character;
+}
+fn mainPoints() u8 {
+    return if (s.versus_render_swapped) s.cpu_points else s.player_points;
+}
+fn miniPoints() u8 {
+    return if (s.versus_render_swapped) s.player_points else s.cpu_points;
+}
+fn mainIdleFrames() u32 {
+    return if (s.versus_render_swapped) s.cpu_cursor_idle_frames else s.cursor_idle_frames;
+}
+
 pub fn render() void {
+    const main_board = mainBoard();
+    const main_char = mainCharacter();
     clearBackground();
-    drawBoard(&s.player);
+    drawBoard(main_board);
     maskBelowBoard();
-    drawFrame();
-    drawCursor();
-    drawPanel();
-    badge.drawMatchPopups(&s.player.match_popups, CHAR_TEXT_X, 10);
-    drawParticles(&s.player.particles);
-    // In the gutter between the player's own frame and the panel column.
-    badge.drawGarbageQueueIcons(96, c.BOARD_Y + 4, &s.player);
-    render_cpu.draw();
+    drawFrame(main_char);
+    drawCursor(main_board, mainIdleFrames());
+    drawPanel(main_board, main_char, mainPoints());
+    // Only drawn when the main board really is `&s.player`: its own popups
+    // are always spawned in this full-scale coordinate system by
+    // sim_matches.checkMatches (checked there by that same pointer
+    // identity). A versus peer whose own real input is GAMEPAD2 sees `&s.
+    // cpu` rendered here instead (see mainBoard/state.versus_render_swapped)
+    // -- that board's own popups were spawned in the *other* (micro-board)
+    // coordinate system instead, which would land them somewhere nonsensical
+    // at full scale, so this just silently skips the flourish there rather
+    // than drawing it in the wrong place (see render_cpu.draw's identical
+    // guard on the mini side).
+    if (main_board == &s.player) badge.drawMatchPopups(&main_board.match_popups, CHAR_TEXT_X, 10);
+    drawParticles(&main_board.particles);
+    // In the gutter between the main board's own frame and the panel column.
+    badge.drawGarbageQueueIcons(96, c.BOARD_Y + 4, main_board);
+    render_cpu.draw(miniBoard(), miniCharacter(), miniPoints());
 }

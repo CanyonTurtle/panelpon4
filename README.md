@@ -40,9 +40,45 @@ npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm --html web/panelpon4.html --t
 
 ## How to play
 
-Each board is the traditional Panel de Pon size, 6 columns by 12 rows. You play against a CPU opponent,
-each with your own full board -- yours at normal size on the left, the CPU's at a simplified micro scale in
+Each board is the traditional Panel de Pon size, 6 columns by 12 rows. You play against an opponent, each
+with your own full board -- yours at normal size on the left, the opponent's at a simplified micro scale in
 the side panel. Both run the exact same rules and physics.
+
+### Game modes
+
+Right after the title screen, a mode-select screen (**left/right** to cycle, **X** to confirm) picks one of
+3 top-level modes (see `src/game_modes.zig`, `state.GameMode`):
+
+- **1P story**: face every character in turn, one stage per opponent, in a fixed order (including a "mirror
+  match" against whichever character you yourself picked, if it comes up in the order -- no different from
+  any other stage). Each stage is a single game, not a best-of-3 series -- win to advance, lose and it just
+  retries that same stage (never restarting the whole run from stage 1), tallying a running game-over count
+  for the run. Pick a difficulty **tier** instead of a numeric level (Easy/Medium/Hard, cycled with
+  left/right on their own screen) -- the CPU's own strength ramps up across the 7 stages within whichever
+  tier you picked (see `game_modes.storyDifficultyFor`), and the tier also retunes the board's own feel:
+  stack rise speed, how long a match lingers before it actually pops, and how long the top-loss forgiveness
+  timer gives you once you're in danger (see `game_modes.applyStoryProfile` -- Easy is slower and more
+  forgiving on all three, Hard compresses them). Clearing every stage on Hard without a single game over the
+  whole run reveals a hint, on the tier-select screen from then on, that a secret harder tier exists --
+  **X Hard** is "by tradition" never reachable by ordinary left/right cycling at all, only by holding **left**
+  and pressing **Z** while sitting on Hard, whether or not you've ever earned that hint (the hint just tells
+  you it's there -- the input itself always works). The hint (not the input) persists across sessions via
+  WASM-4's disk API.
+- **1P quick match**: the original single best-of-3 series against one CPU opponent -- pick a character,
+  watch the CPU pick its own, set a numeric difficulty (1-10), play. Completely unchanged by any of the
+  above; story mode's own difficulty-profile retuning always resets back to this exact baseline before a
+  quick match begins (see `game_modes.applyDefaultProfile`), so switching modes mid-session never leaves a
+  story tier's feel bleeding into a quick match.
+- **2P versus**: a second real player takes over the side that's normally the CPU's, on a second controller
+  (GAMEPAD2) -- either physically local (two controllers, one console) or remote via WASM-4's own built-in
+  netplay (`w4 watch --host`/`--join`, or a netplay URL -- the cart itself doesn't implement any networking
+  of its own; WASM-4's runtime keeps both peers' GAMEPAD1-4 states in sync transparently). No
+  character/difficulty picking -- straight from mode-select into the countdown. Each peer always sees
+  *themselves* in the full-detail main seat regardless of which of the two boards their own real input
+  happens to land in over the network (`wasm4.NETPLAY`'s low 2 bits say which slot -- 0 or 1 -- a peer's own
+  controller is broadcast as; see `state.versus_render_swapped`) -- but the actual simulation's own board
+  identities and per-frame call order never change between peers, only which one gets rendered where, since
+  that's what netplay's lockstep determinism actually depends on staying identical everywhere.
 
 - **Arrow keys**: move the two-tile cursor -- a classic Panel de Pon-style corner bracket at each of its two
   tiles (like a photo mounted by its own four corner tabs), not one box traced around both, centered on the
@@ -111,14 +147,18 @@ the side panel. Both run the exact same rules and physics.
   waiting for the automatic pace) -- useful for deliberately forcing a rise when you want fresh blocks, or
   to bail out of a bad board shape. On a cooldown (two thirds of a second) so it can't be spammed -- hold it
   down to keep raising row after row as soon as each cooldown clears, instead of having to tap repeatedly.
-- A match is a best of 3 -- first to 2 match wins takes the whole series (see `constants.POINTS_TO_WIN`). A
-  small row of pips next to each side's own score fills in as they win matches; losing a match doesn't end
-  the series, just that one match -- press X to move straight into the next one, same difficulty, running
-  score carried over as pips, not reset.
-- Four screens lead into a series: a branded **title** screen (press X to continue), then 3 setup steps in
-  order -- pick your **character**, watch the **CPU** pick its own, then set the **difficulty** -- each its
-  own screen rather than everything crammed onto one. On the difficulty screen, **left/right** sets it, 1-10,
-  shown as a filled-in bar rather than a bare number (press X to begin). Every level runs the same move-search
+- Quick match and versus are both a best of 3 -- first to 2 match wins takes the whole series (see
+  `constants.POINTS_TO_WIN`). A small row of pips next to each side's own score fills in as they win matches;
+  losing a match doesn't end the series, just that one match -- press X to move straight into the next one,
+  same difficulty, running score carried over as pips, not reset. Story mode plays single-game stages
+  instead (see Game modes above) -- that same pip row is replaced by a running stage counter there.
+- A branded **title** screen (press X to continue) leads into mode-select (see Game modes above), then each
+  mode's own setup: quick match's is 3 steps in order -- pick your **character**, watch the **CPU** pick its
+  own, then set the **difficulty** -- each its own screen rather than everything crammed onto one; story's is
+  2 steps (character, then its own difficulty **tier** screen, no CPU reveal -- its opponents are
+  predetermined, not rolled); versus skips straight to the countdown. On quick match's difficulty screen,
+  **left/right** sets it, 1-10, shown as a filled-in bar rather than a bare number (press X to begin). Every
+  level runs the same move-search
   engine (see `src/cpu_engine.zig`) and always plays
   its actual best-scored move -- never a random or deliberately mistaken one. Weaker levels play *correctly*,
   just *myopically*: a shallower search, a slower reaction time, and a much lower preference for a chain over
@@ -178,8 +218,16 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 
 ## Project layout
 
-- `src/wasm4.zig` — bindings for the WASM-4 host API (drawing, input, memory-mapped registers).
-- `src/constants.zig` — layout/timing constants shared across modules.
+- `src/wasm4.zig` — bindings for the WASM-4 host API (drawing, input, memory-mapped registers), including
+  `NETPLAY` (the low 2 bits are which player slot -- 0-3 -- *this* peer's own local input is broadcast as
+  under netplay; bit 2 says netplay is active at all) -- see `state.versus_render_swapped`/`main.zig`'s
+  versus mode, the only thing that reads it.
+- `src/constants.zig` — layout/timing constants shared across modules. `POP_FRAMES`/`PRE_POP_BLINK_FRAMES`/
+  `PRE_POP_PAUSE_FRAMES`/`PRE_POP_TOTAL_FRAMES`/`DANGER_FORGIVENESS_FRAMES`/`RISE_SPEED_SCALE_PCT` are `var`s,
+  not `const`s -- the only thing that ever writes them is `game_modes.applyProfile` (story mode's own "stack
+  rise speed, pop delay, top loss timer" tuning per difficulty tier), but every read site elsewhere keeps
+  using the exact same plain `c.FIELD` access either way, so making them runtime-configurable needed no
+  call-site changes at all.
 - `src/symbols.zig` — pixel-art symbol data drawn on each block color.
 - `src/state.zig` — the `Board` struct (grid, cursor, score/chain, rise state, its own RNG stream, its own
   match-popup pool, its own particle pool -- `Board.spawnPopParticles`/`tickParticles`, a short burst of 4
@@ -207,7 +255,13 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   one hidden buffer row rising in from below), exactly as the whole board used to work before the staging
   area existed, just starting at that offset. Cursor-facing code (`input.zig`, `cpu_ai.zig`) stays in
   visible-relative row terms (0 = ceiling) and only converts to an absolute logical row at the point it
-  actually touches the grid (`sim.trySwap`, `input.canSwapAt`).
+  actually touches the grid (`sim.trySwap`, `input.canSwapAt`). Also home to `GameMode`/`StoryTier` (see
+  `game_modes.zig`, which owns all the actual logic built on top of them) and the rest of the per-match mode
+  state: `story_tier`/`story_stage`/`story_game_overs` for the current story run, `versus_render_swapped` for
+  which side a versus peer's own real input actually lands in (see `render.zig`), and a second, parallel copy
+  of the player's own cursor-movement fields (`cpu_held_dir`/`cpu_das_counter`/`cpu_button_pending_swap`/
+  `cpu_cursor_idle_frames`) used only in versus mode, where GAMEPAD2 drives `cpu` as a real second player
+  through the exact same `input.zig` functions the player's own input already uses.
 - `src/board.zig` — row generation, the rising floor (automatic and the Z-button manual raise),
   `updateDangerTimer` (the actual loss condition -- a forgiveness timer gated on the board being idle with
   a block at or above the ceiling, rather than an instant check right after a rise), and (re)starting a
@@ -344,8 +398,12 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/input.zig` — gamepad (cursor movement with DAS, swap triggering, itself one-deep buffered -- a press
   that lands mid-swap is remembered and applied the instant it's possible) and touch (swipe-only: aims
   directly at the touched block, swipes left/right swap it, up/down retarget rows -- with its own one-deep
-  input buffering so a fast continuous drag chains swaps at max speed) -- always drives `state.player`; the
-  CPU has no real input (see `cpu_ai.zig`).
+  input buffering so a fast continuous drag chains swaps at max speed). The gamepad functions take an
+  explicit target `*Board` plus that board's own DAS/buffering fields, rather than always assuming
+  `state.player` -- almost always called with the player's own (see `main.zig`'s ordinary single-player call
+  sites), but versus mode (`state.GameMode`) calls them a second time with `&state.cpu` and its own parallel
+  fields (`state.cpu_held_dir` etc.), since GAMEPAD2 drives a real second player there instead of `cpu_ai`.
+  Touch has no second-player equivalent -- still always the player's own board.
 - `src/render.zig` — most drawing: the player's board (in full detail) at normal size, the cursor, panel,
   and title/setup/game-over screens. A column wobbles its settled blocks' *symbols* in place as a stress
   warning (`isColumnStressed`/`stressBounceOffset`, applied as `drawNormalCell`'s `sym_bounce`) once it has
@@ -381,7 +439,22 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   portrait's own right edge; adding the frame forced fixing this properly rather than just nudging the old
   number. The old static "COMBO"/"xN" text under the portrait is gone entirely, superseded by the match-popup
   badge (now flown to `CHAR_TEXT_X` for both the player and, via `render_cpu.zig`, the CPU) plus the
-  character's own combo/win bounce.
+  character's own combo/win bounce. `drawModeSelectScreen`/`drawStoryTierScreen` are the two new pre-game
+  screens `game_modes.zig`'s mode system added (see `state.MenuPhase`). `drawFrame`/`drawCursor`/`drawPanel`
+  all take an explicit board/character (not always `state.player`'s own) -- `render()` itself resolves which
+  is "main" (full detail) vs "mini" (via `render_cpu.draw`, also now parameterized) through
+  `mainBoard`/`miniBoard`/`mainCharacter`/`miniCharacter`, which read `state.versus_render_swapped`: normally
+  that's always `player`/`cpu` respectively, but a versus peer whose own real input is GAMEPAD2 needs to see
+  *itself* in the main seat, which means seeing `cpu` there instead (see versus mode's own doc comment
+  above). A match-popup badge's spawn coordinates are baked in at match time in whichever board's own native
+  coordinate system it actually happened in (full-scale for `player`, micro-scale for `cpu` -- see
+  `sim_matches.checkMatches`) -- for a swapped versus peer this can mismatch which coordinate system the
+  *render* call actually uses, so both `render()` and `render_cpu.draw`'s own badge calls are guarded to
+  silently skip drawing rather than ever draw one in the wrong place in that one edge case.
+  `drawGameOverPortraits`/`drawStoryGameOver` split story mode's own single-stage game-over text (stage
+  clear/game over/story clear, no running series score) out of `drawGameOver`, and the latter's own
+  "YOU WIN"/"YOU LOSE" text is resolved against whichever `Winner` value the *main* side actually corresponds
+  to (see above), not always assumed to be `.player`, so it reads correctly for a swapped versus peer too.
 - `src/render_garbage.zig` — garbage's full-detail rendering (the muted checkerboard fill and the linked-
   clump bezel look), split out from render.zig to keep that file under the project's ~500-line guideline,
   mirroring the sim.zig/sim_garbage.zig split. `drawLinkedFlash` is a phase-inverted variant of the same
@@ -434,19 +507,22 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   `FRAME_THICKNESS`) of space around the sprite. Used identically by `render.zig` (the player) and
   `render_cpu.zig` (the CPU), both now framing the in-game portrait this way, not just the setup screens'
   larger panels.
-- `src/render_cpu.zig` — the CPU's side of the panel: its character portrait (now framed the same way the
+- `src/render_cpu.zig` — the "mini" side of the panel: `draw` takes an explicit board/character/points now
+  (ordinarily `state.cpu`'s own, but see `render.zig`'s own doc comment above for versus mode's swapped
+  case) rather than always reaching into `state.cpu*` directly, so this file no longer knows or cares whose
+  perspective it's drawing. Its character portrait (now framed the same way the
   player's is, see `render_character.drawFrame`) /score and its board at a simplified micro scale (dithered
   colors, tiny per-color icons, smooth rise scrolling, a cursor, popping/recycling animation -- just
   abstracted down to fit: no bevels, linked-garbage slab, or landing squash). Its own mini board's border is
   themed the same way the player's main frame is (see `render.zig`), just simplified to 1px thick. Also draws
-  the CPU's own chain/combo match-popup badge (`badge.drawMatchPopups(&s.cpu.match_popups, ...)`, flown to
-  `TEXT_X`/`LABEL_Y + 10` -- this board's own score, not the player's) -- previously skipped for lack of room,
-  but the badge is small enough at this scale to read fine; `sim_matches.checkMatches` computes its spawn
-  point in this file's own `CPU_MICRO_TILE`/`CPU_BOARD_Y` coordinate system (promoted to `constants.zig` so
-  sim code can use them without importing rendering code) whenever the match happened on `&s.cpu` specifically
-  (checked by pointer identity against that process-wide singleton), rather than always using the player's
-  much larger-scale board coordinates the way it used to (harmless back when the CPU's own popup was never
-  rendered at all).
+  this side's own chain/combo match-popup badge (`badge.drawMatchPopups(&board.match_popups, ...)`, flown to
+  `TEXT_X`/`LABEL_Y + 10` -- this side's own score) -- previously skipped for lack of room, but the badge is
+  small enough at this scale to read fine; `sim_matches.checkMatches` computes its spawn point in this file's
+  own `CPU_MICRO_TILE`/`CPU_BOARD_Y` coordinate system (promoted to `constants.zig` so sim code can use them
+  without importing rendering code) whenever the match happened on `&s.cpu` specifically (checked by pointer
+  identity against that process-wide singleton), rather than always using the player's much larger-scale
+  board coordinates the way it used to (harmless back when the CPU's own popup was never rendered at all) --
+  only actually drawn when `board == &s.cpu` (see `render.zig`'s own doc comment on why that guard exists).
 - `src/render_badge.zig` — the chain/combo popup badge, plus the shared checkerboard-blit dithering
   primitive it's built on (reusable for any future dithered-highlight effect). `drawMatchPopups` takes its
   fly-to `target_x`/`target_y` as parameters rather than a fixed constant, since the player and CPU panels
@@ -466,18 +542,46 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   in Debug builds (see the `comptime` block in `main.zig`) -- `zig build --release=small` never includes
   this surface. Used via `tools/wasm4-harness.js`.
 - `src/main.zig` — wires the above together behind the WASM-4 `start`/`update` entry points: drives both
-  boards' input/simulation/rise each frame, and tracks who wins once either tops out. Before a series begins,
-  `state.menu_phase` steps through the title screen and the 3 setup steps in turn (see
-  `render.drawTitleScreen`/`drawSetupCharacterScreen`/`drawSetupCpuRevealScreen`/`drawSetupDifficultyScreen`) --
-  the character screen's own confirm flash (`state.setup_flash_timer`) and the CPU reveal screen's own spin
-  (`state.cpu_reveal_tick`/`cpu_reveal_timer`) both gate input and just count down each frame until they're
-  done, the same "freeze input, drive purely off a timer" shape as the countdown/closing-wipe overlays below;
-  between a countdown and real gameplay sits a frozen "3 2 1 START" overlay
+  boards' input/simulation/rise each frame, and tracks who wins once either tops out. Before a match begins,
+  `state.menu_phase` steps through the title screen, mode-select (see `state.GameMode`/`game_modes.zig`), and
+  then whichever setup steps that mode actually needs (see
+  `render.drawTitleScreen`/`drawModeSelectScreen`/`drawSetupCharacterScreen`/`drawSetupCpuRevealScreen`/
+  `drawSetupDifficultyScreen`/`drawStoryTierScreen`) -- quick match visits all of character/CPU-reveal/
+  difficulty; story visits character then its own tier screen instead (no CPU reveal -- its opponent sequence
+  is predetermined, not rolled -- see `game_modes.storyOpponentFor`); versus skips straight from mode-select
+  into a countdown. The character screen's own confirm flash (`state.setup_flash_timer`) and the CPU reveal
+  screen's own spin (`state.cpu_reveal_tick`/`cpu_reveal_timer`) both gate input and just count down each
+  frame until they're done, the same "freeze input, drive purely off a timer" shape as the countdown/
+  closing-wipe overlays below; between a countdown and real gameplay sits a frozen "3 2 1 START" overlay
   (`state.countdown_timer`, started by `board.beginCountdown`); between a match ending and the winner overlay
   sits a frozen closing wipe (`state.closing_timer`, started by `board.beginClosing`) -- both gate simulation
   entirely, only ever calling `render.render()` (which reads board state passively) plus their own overlay on
-  top. `board.awardMatchPoint` tallies the best-of-N series score and decides `state.set_winner` once one
-  side has won enough matches to take the whole series.
+  top. Quick match and versus both still run `board.awardMatchPoint`, which tallies the best-of-N series
+  score and decides `state.set_winner` once one side has won enough matches to take the whole series; story
+  mode skips it entirely (a stage is a single game) and instead advances/retries `state.story_stage` directly
+  off `state.winner` once its own closing wipe finishes, tallying `state.story_game_overs` on a loss and
+  calling `game_modes.maybeRevealXhard` the instant the final stage's own win is detected. Versus mode's
+  `cpu` board is driven by a second real player on GAMEPAD2 (through the same `input.zig` functions as the
+  player's own, just with a parallel set of DAS/buffering fields -- see `state.cpu_held_dir` etc.) instead of
+  `cpu_ai.update` -- GAMEPAD1 always drives `player` and GAMEPAD2 always drives `cpu` regardless of which
+  netplay slot is "mine" (see `render.zig`'s own doc comment for the rendering-side swap that actually makes
+  each peer see themselves in the main seat), so the simulate/resolve/release/rise call order below stays
+  byte-for-byte identical on every peer no matter who's "mine" locally -- the one thing that actually has to
+  stay in lockstep for netplay determinism.
+- `src/game_modes.zig` — the mode/difficulty-tier system behind story mode (see `state.GameMode`/
+  `state.StoryTier`, though the enums themselves live in `state.zig` alongside the rest of the per-match mode
+  state): `storyDifficultyFor` linearly ramps a tier's own (lo, hi) CPU difficulty (`cpu_ai.configFor`'s
+  1-10 scale) across the 7 stages, `xhard` flat at 10 instead of ramping (meant to be brutal from the first
+  opponent on); `storyOpponentFor` is just the stage index into `characters.ALL`, in order (a "mirror match"
+  against the player's own pick, if it comes up, is no different from any other stage); `applyStoryProfile`/
+  `applyDefaultProfile` retune `constants.zig`'s runtime-configurable POP_FRAMES/PRE_POP_*/
+  DANGER_FORGIVENESS_FRAMES/RISE_SPEED_SCALE_PCT (see that file's own doc comment) to a tier's own "stack rise
+  speed, pop delay, top loss timer" feel, or back to today's untouched baseline for quick match/versus.
+  `xhard_revealed` (persisted across sessions via `w4.Diskr`/`Diskw`, a tiny fixed-format blob) is purely a
+  cosmetic hint unlocked by `maybeRevealXhard` once a run clears Hard with zero game overs -- the secret
+  hold-left-plus-Z input that actually reaches X Hard (see `main.zig`'s `story_tier_select` handling) always
+  works regardless of whether this has ever been earned; earning it just adds an on-screen hint, on the
+  tier-select screen from then on, that the input exists at all.
 - `build.zig` / `build.zig.zon` — builds `src/main.zig` into a freestanding `wasm32` cart with the memory layout
   WASM-4 expects, and wires up `zig build test`.
 - `tools/wasm4-harness.js` — a shared Node harness for driving a compiled cart headlessly (scripted board

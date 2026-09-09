@@ -15,6 +15,15 @@ pub const MOUSE_X: *const i16 = @ptrFromInt(0x1a);
 pub const MOUSE_Y: *const i16 = @ptrFromInt(0x1c);
 pub const MOUSE_BUTTONS: *const u8 = @ptrFromInt(0x1e);
 pub const SYSTEM_FLAGS: *u8 = @ptrFromInt(0x1f);
+// Set by the host when this cart is running under netplay (launched via `w4
+// watch --host`/`--join`, or a netplay URL) -- the low 2 bits are which
+// player slot (0-3) *this* peer's own local input is broadcast as (every
+// peer's own controller always lands on GAMEPAD1 locally, but is mirrored
+// into GAMEPAD<slot+1> for every other peer -- see main.zig's versus mode,
+// which reads this to decide which board is "mine" to render in full detail).
+pub const NETPLAY: *const u8 = @ptrFromInt(0x20);
+pub const NETPLAY_PLAYER_MASK: u8 = 0x3;
+pub const NETPLAY_ACTIVE: u8 = 0x4;
 pub const FRAMEBUFFER: *[6400]u8 = @ptrFromInt(0xa0);
 
 pub const BUTTON_1: u8 = 1;

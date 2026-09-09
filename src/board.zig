@@ -16,8 +16,16 @@ const RISE_SCORE_PER_LEVEL: u32 = 1200;
 
 pub fn riseSpeedFramesPerPixel(score: u32) u32 {
     const level = score / RISE_SCORE_PER_LEVEL;
-    if (level >= RISE_START_FRAMES_PER_PIXEL - RISE_FLOOR_FRAMES_PER_PIXEL) return RISE_FLOOR_FRAMES_PER_PIXEL;
-    return RISE_START_FRAMES_PER_PIXEL - level;
+    const base = if (level >= RISE_START_FRAMES_PER_PIXEL - RISE_FLOOR_FRAMES_PER_PIXEL)
+        RISE_FLOOR_FRAMES_PER_PIXEL
+    else
+        RISE_START_FRAMES_PER_PIXEL - level;
+    // Story mode's "stack rise speed" knob (see constants.RISE_SPEED_SCALE_PCT/
+    // game_modes.applyProfile) -- 100 (quick match, versus) leaves this exactly
+    // as it always was. At least 1 frame/pixel regardless of how aggressive a
+    // tier's scale gets, so rise speed can never divide down to instant/zero.
+    const scaled = base * c.RISE_SPEED_SCALE_PCT / 100;
+    return @max(scaled, 1);
 }
 
 // Draws from the shared RNG stream (state.shared_row_rng_state) -- never

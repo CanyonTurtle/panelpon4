@@ -431,15 +431,50 @@ pub var started: bool = false;
 
 // Which of the pre-game screens is showing while `!started` and no
 // countdown is active -- see main.zig. `title` is the branded splash
-// ("PRESS X" to continue); the 3 `setup_*` phases walk through picking a
-// character, watching the CPU pick its own, then setting the difficulty,
-// in that order, one step at a time rather than everything crammed onto a
-// single screen. Reset to `.title` only when a full series concludes (see
-// set_winner above) -- mid-series, pressing X on a match's own game-over
-// screen skips straight back into a countdown, never back through any menu
-// screen.
-pub const MenuPhase = enum { title, setup_character, setup_cpu_reveal, setup_difficulty };
+// ("PRESS X" to continue), right after which is `mode_select` (1P story /
+// 1P quick match / 2P versus -- see GameMode below). The `setup_*` phases
+// walk through picking a character, watching the CPU pick its own, then
+// setting the difficulty, in that order, one step at a time rather than
+// everything crammed onto a single screen -- quick match is the only mode
+// that visits all three; story visits `setup_character` then
+// `story_tier_select` instead of the other two (its own opponents and their
+// difficulty are predetermined by the run, not picked or randomly rolled --
+// see game_modes.storyOpponentFor/storyDifficultyFor), and versus skips
+// straight from `mode_select` to a countdown (see main.zig). Reset to
+// `.mode_select` (not all the way back to `.title`) once a quick-match
+// series concludes or a story run ends -- mid-series/mid-run, pressing X on
+// a match's own game-over screen skips straight back into a countdown,
+// never back through any menu screen.
+pub const MenuPhase = enum { title, mode_select, setup_character, setup_cpu_reveal, setup_difficulty, story_tier_select };
 pub var menu_phase: MenuPhase = .title;
+
+// The 3 top-level modes (see game_modes.zig, chosen on the mode_select
+// screen): 1P story (progressively harder CPU across every character in
+// turn, own rise/pop-delay/top-loss-timer profile per tier), 1P quick match
+// (today's original single vs-CPU flow, completely unchanged), and 2P versus
+// (a second real player on GAMEPAD2 driving `cpu` instead of cpu_ai -- either
+// locally on a second controller, or remotely via WASM-4's own netplay --
+// see main.zig).
+pub const GameMode = enum { quick, story, versus };
+pub var game_mode: GameMode = .quick;
+
+// Only 3 of these are ever reachable by ordinary left/right cycling on the
+// story_tier_select screen (easy/medium/hard) -- `xhard` is "by tradition"
+// only reachable by holding left and pressing the swap button while sitting
+// on `hard`, matching classic games' hidden-hard-mode conventions. See
+// game_modes.xhard_revealed for the (purely cosmetic, on-screen-hint-only)
+// unlock that input itself always works regardless of.
+pub const StoryTier = enum { easy, medium, hard, xhard };
+pub var story_tier: StoryTier = .easy;
+// Which opponent (index into characters.ALL, see game_modes.storyOpponentFor)
+// the current story run is on, 0-based. Advances on a win; a loss retries
+// the same stage rather than moving on or restarting the run.
+pub var story_stage: u8 = 0;
+// How many times THIS story run has lost a stage so far -- reset to 0 only
+// when a fresh run begins (see main.zig), never on an individual stage
+// retry, since "beat hard with no game overs" means the whole run, start to
+// finish, not just its final stage.
+pub var story_game_overs: u32 = 0;
 
 // Counts down while the character screen's confirm flash (see
 // render.drawSetupCharacterScreen) plays, right after pressing X there --
@@ -494,6 +529,30 @@ pub var frame_count: u32 = 0;
 pub var prev_gamepad: u8 = 0;
 pub var held_dir: u8 = 0;
 pub var das_counter: u8 = 0;
+
+// The second real player's own cursor-movement state in versus mode (see
+// GameMode.versus/main.zig) -- a second, parallel copy of held_dir/
+// das_counter/button_pending_swap/cursor_idle_frames above (which stay
+// exactly `player`'s own, unchanged), since GAMEPAD2 now drives `cpu`
+// directly instead of cpu_ai in that mode, through the exact same
+// input.updateCursorMovement/updateSwap functions -- just called a second
+// time with these fields and `&cpu` instead of the player's own. Unused
+// (left at their defaults) in every other mode.
+pub var cpu_held_dir: u8 = 0;
+pub var cpu_das_counter: u8 = 0;
+pub var cpu_button_pending_swap: bool = false;
+pub var cpu_cursor_idle_frames: u32 = 0;
+
+// True only in versus mode, and only for whichever peer's own real input is
+// GAMEPAD2 (see wasm4.NETPLAY -- the low 2 bits are which slot *this* peer's
+// own controller is broadcast as; local same-console 2-controller play has
+// no such concept and always leaves this false, same as GAMEPAD1's own
+// peer/player 1 in netplay) -- every peer always wants to see *themselves*
+// in the full-detail main seat, not always whichever of player/cpu happens
+// to hold GAMEPAD1's input, so render.render() reads this to decide which
+// Board/character/points to treat as "mine" (main.zig computes it once,
+// right as a versus match's countdown begins, from wasm4.NETPLAY).
+pub var versus_render_swapped: bool = false;
 
 // Frames since the player's own cursor last actually moved (see
 // input.moveCursor/applyPendingTouchSwipe, the only places that reset this

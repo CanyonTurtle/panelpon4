@@ -32,7 +32,18 @@ pub const PANEL_X: i32 = 108;
 pub const CPU_MICRO_TILE: i32 = 7;
 pub const CPU_BOARD_Y: i32 = 66;
 
-pub const POP_FRAMES: i16 = 34; // per-block pop duration; longer gives big combos/chains more time to read
+// POP_FRAMES/PRE_POP_BLINK_FRAMES/PRE_POP_PAUSE_FRAMES/PRE_POP_TOTAL_FRAMES
+// and DANGER_FORGIVENESS_FRAMES below are `var`s, not `const`s, specifically
+// so game_modes.applyProfile can retune "pop delay" and "top loss timer" per
+// story difficulty tier at runtime (see that module) -- every read site
+// (sim.zig, sim_matches.zig, render.zig, render_cpu.zig, board.zig) uses the
+// exact same plain `c.FIELD` access either way, so making them runtime-
+// configurable required no call-site changes at all, just this declaration
+// change plus applyProfile as the one place that ever writes them. Quick
+// match and versus mode always run `game_modes.applyProfile(.default)` --
+// exactly these values -- so their feel is completely unchanged from before
+// this system existed.
+pub var POP_FRAMES: i16 = 34; // per-block pop duration; longer gives big combos/chains more time to read
 pub const POP_FLASH_FRAMES: i16 = 10;
 pub const POP_STAGGER_FRAMES: i16 = 4; // delay between each matched block's pop, so they go one at a time
 
@@ -43,9 +54,16 @@ pub const POP_STAGGER_FRAMES: i16 = 4; // delay between each matched block's pop
 // the size-wobble flash below), then holds steady, normal-looking, for a
 // short beat -- see Cell.pre_pop_timer, render.drawPoppingCell/
 // drawRecyclingCell, and render_cpu's micro mirrors.
-pub const PRE_POP_BLINK_FRAMES: i16 = 24;
-pub const PRE_POP_PAUSE_FRAMES: i16 = 12;
-pub const PRE_POP_TOTAL_FRAMES: i16 = PRE_POP_BLINK_FRAMES + PRE_POP_PAUSE_FRAMES;
+pub var PRE_POP_BLINK_FRAMES: i16 = 24;
+pub var PRE_POP_PAUSE_FRAMES: i16 = 12;
+// Kept manually in sync with the two fields above by game_modes.applyProfile
+// (whenever it changes either one) rather than computed fresh on every read
+// -- doing it this way, instead of a function call, keeps every existing
+// `c.PRE_POP_TOTAL_FRAMES` read site working completely unchanged. (A plain
+// literal here, not `PRE_POP_BLINK_FRAMES + PRE_POP_PAUSE_FRAMES` -- a var's
+// initializer must be comptime-known, and another var's value isn't, even
+// though it happens to still hold its own default right here.)
+pub var PRE_POP_TOTAL_FRAMES: i16 = 36;
 pub const LAND_FRAMES: i16 = 8;
 pub const COMBO_DISPLAY_FRAMES: u16 = 90; // 1.5s -- how long the panel's "COMBO" label lingers
 pub const POINTS_TO_WIN: u8 = 2; // best of 3 -- first to 2 match wins takes the series
@@ -108,5 +126,13 @@ pub const MANUAL_RAISE_COOLDOWN: u32 = 40;
 // above the ceiling, for this many consecutive frames (1 second at 60fps) --
 // see board.updateDangerTimer. Long enough to give a high-level player a
 // real beat to clear the danger row before it's final, short enough that it
-// never feels like the game is ignoring an obvious loss.
-pub const DANGER_FORGIVENESS_FRAMES: u32 = 60;
+// never feels like the game is ignoring an obvious loss. A `var`, not a
+// `const` -- see the POP_FRAMES block above's own doc comment on why (this
+// is story mode's "top loss timer" knob).
+pub var DANGER_FORGIVENESS_FRAMES: u32 = 60;
+
+// Multiplies board.riseSpeedFramesPerPixel's own result (a percentage: 100 =
+// unchanged, >100 = slower rise, <100 = faster) -- story mode's "stack rise
+// speed" knob, set by game_modes.applyProfile. Quick match and versus always
+// run at exactly 100.
+pub var RISE_SPEED_SCALE_PCT: u32 = 100;
