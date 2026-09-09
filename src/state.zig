@@ -430,12 +430,6 @@ pub var das_counter: u8 = 0;
 // still for a while -- a fast-playing player never sees it blink at all.
 pub var cursor_idle_frames: u32 = 0;
 
-// Counts down from a few frames the instant a swap actually goes through
-// (see input.updateSwap/applyPendingTouchSwipe) -- render.drawCursor adds an
-// extra contraction on top of the ordinary blink while this is nonzero, a
-// quick, deliberate "click" of feedback distinct from the idle pulse.
-pub var cursor_swap_flash: u8 = 0;
-
 // One-deep input buffering for the swap button (X), mirroring touch's own
 // buffering (see touch_pending_dir below): a press that lands while the
 // cursor's current pair can't swap yet (e.g. still mid-animation from the

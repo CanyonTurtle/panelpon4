@@ -76,7 +76,6 @@ pub fn updateSwap(gp: u8) void {
     if (justPressed(gp, w4.BUTTON_1)) s.button_pending_swap = true;
     if (s.button_pending_swap and canSwapAt(&s.player, s.player.cursor_row, s.player.cursor_col)) {
         sim.trySwap(&s.player);
-        s.cursor_swap_flash = c.CURSOR_SWAP_FLASH_FRAMES;
         s.button_pending_swap = false;
     }
 }
@@ -193,7 +192,6 @@ fn applyPendingTouchSwipe() void {
             s.player.cursor_row = s.touch_anchor_row;
             s.player.cursor_col = target;
             sim.trySwap(&s.player);
-            s.cursor_swap_flash = c.CURSOR_SWAP_FLASH_FRAMES;
             s.touch_anchor_col = target; // the touched block moved left with it
             s.touch_pending_dir = 0;
         },
@@ -206,7 +204,6 @@ fn applyPendingTouchSwipe() void {
             s.player.cursor_row = s.touch_anchor_row;
             s.player.cursor_col = s.touch_anchor_col;
             sim.trySwap(&s.player);
-            s.cursor_swap_flash = c.CURSOR_SWAP_FLASH_FRAMES;
             s.touch_anchor_col += 1; // the touched block moved right with it
             s.touch_pending_dir = 0;
         },

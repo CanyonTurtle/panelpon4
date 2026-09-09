@@ -139,12 +139,16 @@ fn drawBevelledBlock(x: i32, y: i32, w: i32, h: i32, color: u8) void {
     }
 }
 
-fn drawNormalCell(x: i32, y: i32, color: u8) void {
+// sym_bounce nudges only the symbol glyph up/down, not the block underneath
+// it (see isColumnStressed/stressBounceOffset) -- keeps the block's own
+// position (and anything keyed to it, like the hidden row's dither overlay)
+// perfectly still even while a stressed column's symbols wobble in place.
+fn drawNormalCell(x: i32, y: i32, color: u8, sym_bounce: i32) void {
     // Flush with the tile's top-left corner; the unused trailing 1px on the
     // right/bottom becomes the gap to the next tile (see BLOCK_SIZE).
     drawBevelledBlock(x, y, BLOCK_SIZE, BLOCK_SIZE, color);
     const sym_off = @divTrunc(BLOCK_SIZE - SYMBOL_SIZE, 2);
-    drawSymbolFor(color, x + sym_off, y + sym_off);
+    drawSymbolFor(color, x + sym_off, y + sym_off + sym_bounce);
 }
 
 // A real matched block disappearing (see CellState.popping). Garbage never
@@ -161,9 +165,9 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16) vo
         // about to pop, before the actual (staggered) pop cascade begins.
         const elapsed = c.PRE_POP_TOTAL_FRAMES - pre_pop_timer;
         if (elapsed < c.PRE_POP_BLINK_FRAMES) {
-            if (@mod(elapsed, 2) == 0) drawNormalCell(x, y, color);
+            if (@mod(elapsed, 2) == 0) drawNormalCell(x, y, color, 0);
         } else {
-            drawNormalCell(x, y, color);
+            drawNormalCell(x, y, color, 0);
         }
         return;
     }
@@ -171,7 +175,7 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16) vo
     if (elapsed < 0) {
         // Still waiting its turn in the pop cascade (see POP_STAGGER_FRAMES)
         // -- render exactly like a settled block until then.
-        drawNormalCell(x, y, color);
+        drawNormalCell(x, y, color, 0);
         return;
     }
     var size: i32 = BLOCK_SIZE;
@@ -245,7 +249,7 @@ fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: rgarbage.Edge
         rgarbage.drawLinked(x, y, edges);
         return;
     }
-    drawNormalCell(x, y, color);
+    drawNormalCell(x, y, color, 0);
 }
 
 fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool, edges: rgarbage.Edges) void {
@@ -274,7 +278,7 @@ fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool, edge
 
 fn drawSwappingCell(x: i32, y: i32, color: u8, timer: i16, dir: i8) void {
     const offset: i32 = @as(i32, dir) * @divTrunc(c.TILE * @as(i32, timer), c.SWAP_FRAMES);
-    drawNormalCell(x + offset, y, color);
+    drawNormalCell(x + offset, y, color, 0);
 }
 
 // A column with any content within this many rows of the ceiling (see
@@ -352,15 +356,22 @@ fn drawBoard(b: *s.Board) void {
             const x = c.BOARD_X + @as(i32, col) * c.TILE;
             switch (cell.state) {
                 .normal => {
-                    // Only settled blocks bounce -- cells already mid
-                    // animation (falling/landing/popping/swapping) keep
-                    // their own motion undisturbed.
-                    const y = if (col_stressed[col]) base_y + bounce else base_y;
-                    if (cell.is_garbage) rgarbage.drawLinked(x, y, rgarbage.edgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color);
+                    // Only a settled real block's *symbol* bounces (see
+                    // drawNormalCell's sym_bounce) -- the block itself, and
+                    // garbage (which has no symbol), stay put at base_y, so
+                    // nothing keyed to a block's actual position (like the
+                    // hidden row's dither overlay below) ever falls out of
+                    // sync with it.
+                    if (cell.is_garbage) {
+                        rgarbage.drawLinked(x, base_y, rgarbage.edgesAt(b, lr, col));
+                    } else {
+                        const sym_bounce = if (col_stressed[col]) bounce else 0;
+                        drawNormalCell(x, base_y, cell.color, sym_bounce);
+                    }
                 },
                 .falling => {
                     const y = base_y - cell.fall_off;
-                    if (cell.is_garbage) rgarbage.drawLinked(x, y, rgarbage.edgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color);
+                    if (cell.is_garbage) rgarbage.drawLinked(x, y, rgarbage.edgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color, 0);
                 },
                 .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.pre_pop_timer),
                 .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, rgarbage.edgesAt(b, lr, col), cell.pre_pop_timer, cell.garbage_reveals),
@@ -492,12 +503,41 @@ fn drawFrame() void {
     }
 }
 
-const CURSOR_THICKNESS: i32 = 2;
+// The gap between each bracket and the tile's true edge -- fixed, not
+// pulsed, so the cursor stays symmetric on all four sides at every moment
+// (unlike a single full outline, nothing here needs an asymmetric fudge
+// factor for BLOCK_SIZE's 1px gap, since a bracket's short arms never
+// actually reach the corner pixel itself). The blink pulses each arm's
+// *length* instead (see drawCursor) -- pulsing this inset instead would pull
+// opposite corners close enough on a 12px tile to overlap into a solid
+// outline at the tightest point, which is exactly what corner brackets are
+// meant not to look like.
+const CURSOR_INSET: i32 = 1;
+const CURSOR_CORNER_LEN_MIN: i32 = 2;
 const CURSOR_PULSE_PERIOD: i32 = 30;
 const CURSOR_PULSE_AMOUNT: i32 = 2;
-
-const CURSOR_PUSH: i32 = 1;
 const CURSOR_DITHER_HUES = badge.WARM_DITHER_HUES;
+
+// One tile's own 4 corner brackets -- like a photo mounted by its own four
+// corner tabs, not a single box traced around it (the classic Panel de Pon
+// cursor look).
+fn drawCursorCorners(x: i32, y: i32, arm_len: i32, hues: [2]u8) void {
+    const x0 = x + CURSOR_INSET;
+    const y0 = y + CURSOR_INSET;
+    const x1 = x + c.TILE - 1 - CURSOR_INSET;
+    const y1 = y + c.TILE - 1 - CURSOR_INSET;
+    var i: i32 = 0;
+    while (i < arm_len) : (i += 1) {
+        plotDithered(x0 + i, y0, hues); // top-left
+        plotDithered(x0, y0 + i, hues);
+        plotDithered(x1 - i, y0, hues); // top-right
+        plotDithered(x1, y0 + i, hues);
+        plotDithered(x0 + i, y1, hues); // bottom-left
+        plotDithered(x0, y1 - i, hues);
+        plotDithered(x1 - i, y1, hues); // bottom-right
+        plotDithered(x1, y1 - i, hues);
+    }
+}
 
 // Always the player's own cursor -- the CPU has no cursor to show (its board
 // is drawn too small for one to read well, and it has no real input anyway).
@@ -506,64 +546,41 @@ const CURSOR_DITHER_HUES = badge.WARM_DITHER_HUES;
 // touched tile, so there's nothing the player needs to see it for.
 fn drawCursor() void {
     if (s.winner != .none or s.cursor_hidden) return;
-    const base_x = c.BOARD_X + @as(i32, s.player.cursor_col) * c.TILE;
-    const base_y = c.BOARD_Y + @as(i32, s.player.cursor_row) * c.TILE - @as(i32, @intCast(s.player.scroll_px));
+    const row = s.player.cursor_row;
+    const col = s.player.cursor_col;
+    const base_x = c.BOARD_X + @as(i32, col) * c.TILE;
+    const base_y = c.BOARD_Y + @as(i32, row) * c.TILE - @as(i32, @intCast(s.player.scroll_px));
 
-    // Blink by contracting slightly instead of changing color -- driven by
-    // cursor_idle_frames (time since the cursor last actually moved), not
-    // raw frame_count, and phase-shifted so idle_frames == 0 lands right on
-    // the most-contracted point of the cycle: the cursor snaps to its
-    // small, settled outline the instant it moves, eases back out over the
-    // next half-period, and only starts ambiently blinking again if it's
-    // still sitting there once that resolves -- a fast-playing player never
-    // sees it blink at all.
+    // Blink by pulsing each arm's length (short == tight/settled, long ==
+    // fully drawn) instead of changing color -- driven by cursor_idle_frames
+    // (time since the cursor last actually moved), not raw frame_count, and
+    // phase-shifted so idle_frames == 0 lands right on the shortest point of
+    // the cycle: the cursor snaps to its tightest mark the instant it moves,
+    // eases back out over the next half-period, and only starts ambiently
+    // blinking again if it's still sitting there once that resolves -- a
+    // fast-playing player never sees it blink at all.
     const half = @divTrunc(CURSOR_PULSE_PERIOD, 2);
     const t: i32 = @intCast(@mod(s.cursor_idle_frames + @as(u32, @intCast(half)), @as(u32, @intCast(CURSOR_PULSE_PERIOD))));
     const tri: i32 = if (t < half) t else CURSOR_PULSE_PERIOD - t;
-    var contract = @divTrunc(tri * CURSOR_PULSE_AMOUNT, half);
+    // tri itself peaks (== half) right at idle_frames == 0, so it's inverted
+    // here (subtracted from its own max) to get an arm length that's instead
+    // shortest at that instant and grows from there.
+    const arm_len = CURSOR_CORNER_LEN_MIN + CURSOR_PULSE_AMOUNT - @divTrunc(tri * CURSOR_PULSE_AMOUNT, half);
 
-    // A quick, deliberate extra squeeze right when a swap actually goes
-    // through (state.cursor_swap_flash, set in input.zig) -- distinct
-    // feedback from the ambient idle blink above, on top of it rather than
-    // replacing it.
-    if (s.cursor_swap_flash > 0) contract += 2;
+    // Rather than staying pinned to the two static grid tiles, each slot's
+    // corners ride along with whatever block is actually there right now --
+    // so a live swap (see CellState.swapping/drawSwappingCell's identical
+    // offset formula) visibly carries the cursor along with the two blocks
+    // as they trade places, instead of the cursor sitting still while the
+    // blocks slide underneath it.
+    const abs_row = row + c.SPAWN_ROWS;
+    const left = s.player.cellAt(abs_row, col);
+    const right = s.player.cellAt(abs_row, col + 1);
+    const left_offset: i32 = if (left.state == .swapping) @as(i32, left.swap_dir) * @divTrunc(c.TILE * @as(i32, left.timer), c.SWAP_FRAMES) else 0;
+    const right_offset: i32 = if (right.state == .swapping) @as(i32, right.swap_dir) * @divTrunc(c.TILE * @as(i32, right.timer), c.SWAP_FRAMES) else 0;
 
-    // Pushed out so the cursor straddles the boundary of its two tiles and
-    // the surrounding ones, rather than tracing exactly over them. Blocks
-    // are flush with their tile's top-left corner (only the right/bottom
-    // get a natural 1px gap from BLOCK_SIZE), so a push of the same size on
-    // every side would land right on a neighbor's fill on the right/bottom
-    // but fall a pixel short into the gap on the top/left. The extra 1px on
-    // top/left makes it reach the neighboring fill the same amount on every
-    // side.
-    const push_left = CURSOR_PUSH + 1 - contract;
-    const push_top = CURSOR_PUSH + 1 - contract;
-    const push_right = CURSOR_PUSH - contract;
-    const push_bottom = CURSOR_PUSH - contract;
-    const x = base_x - push_left;
-    const y = base_y - push_top;
-    const w = c.TILE * 2 + push_left + push_right;
-    const h = c.TILE + push_top + push_bottom;
-
-    // A background-colored outline reads as invisible against the (also
-    // dark) background whenever the cursor sits over empty board space, so
-    // it's drawn as a 1px checkerboard dither of red and yellow instead --
-    // both bright, and never the same as the background either way.
-    drawDitheredRectOutline(x, y, w, h, CURSOR_DITHER_HUES);
-    if (w > 2 and h > 2) {
-        drawDitheredRectOutline(x + 1, y + 1, w - 2, h - 2, CURSOR_DITHER_HUES);
-    }
-
-    // A small crosshair right at the boundary between the cursor's two
-    // tiles, so its exact center reads clearly even while it's contracted
-    // or mid-pulse.
-    const cx = base_x + c.TILE;
-    const cy = base_y + @divTrunc(c.TILE, 2);
-    var i: i32 = -2;
-    while (i <= 2) : (i += 1) {
-        plotDithered(cx + i, cy, CURSOR_DITHER_HUES);
-        plotDithered(cx, cy + i, CURSOR_DITHER_HUES);
-    }
+    drawCursorCorners(base_x + left_offset, base_y, arm_len, CURSOR_DITHER_HUES);
+    drawCursorCorners(base_x + c.TILE + right_offset, base_y, arm_len, CURSOR_DITHER_HUES);
 }
 
 // The player's own character portrait, animated per render_character.zig,

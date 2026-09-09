@@ -98,7 +98,6 @@ export fn update() void {
     }
 
     if (s.winner == .none) {
-        if (s.cursor_swap_flash > 0) s.cursor_swap_flash -= 1;
         input.updateCursorMovement(gp);
         input.updateSwap(gp);
         // Held (not just a fresh press) so the raise keeps going for as long
