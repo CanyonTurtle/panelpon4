@@ -201,7 +201,12 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/cpu_ai.zig` — the CPU opponent's move picker, branching on `state.difficulty` (see `configFor`):
   every level from 1-10 runs `cpu_engine.zig`'s actual search, differing only in how often they listen to
   it (a steep chance to ignore its pick and play a random legal swap instead at the low end, falling to
-  zero by level 10), search depth, and reaction speed.
+  zero by level 10), search depth, and reaction speed. Doesn't wait for the whole board to go idle before
+  thinking/acting -- like a player, whose own input is never blocked by unrelated activity elsewhere (see
+  `input.updateSwap`) -- it reasons about and can act on whatever's true right now, including cells still
+  falling/landing/mid-swap elsewhere (see `cpu_grid.Grid.fromBoard`); `sim.trySwap`'s own per-cell check
+  still decides whether a given swap actually succeeds, exactly as it does for the player, so this never
+  lets the CPU do anything a player couldn't also do from the same position.
 - `src/cpu_engine.zig` — the actual move-search engine behind the CPU: snapshots the board into a small
   `Grid`, tries every legal swap on a copy, resolves each one's full logical cascade (gravity, matches,
   garbage propagation, repeated for chains) to score it, and adds a bitboard-driven structural heuristic
@@ -224,6 +229,10 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   -- tests in the companion `src/cpu_engine_test.zig`.
 - `src/cpu_grid.zig` — the engine's board snapshot (`Grid`), split out into its own file purely so
   `cpu_engine.zig` and `cpu_engine_garbage.zig` can each depend on it without depending on each other.
+  `fromBoard` reads `.falling`/`.landing`/`.swapping` real cells as their true color (they already have
+  their final logical position decided -- only the visual animation is still catching up), not holes, so
+  the engine can reason about a board that isn't fully idle yet; `.popping`/`.recycling` still read as
+  empty, since what they resolve to is genuinely undecided from here.
 - `src/cpu_engine_garbage.zig` — garbage's rigid-body gravity for the engine's `Grid`, a port of
   `sim_garbage.zig`'s own algorithm into the engine's instant, no-animation model: a connected garbage
   body falls and lands as one piece (so a wide slab resting unevenly across towers of different heights

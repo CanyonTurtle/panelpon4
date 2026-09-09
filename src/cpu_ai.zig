@@ -3,8 +3,15 @@
 // actual move search (see configFor) -- lower levels are simply worse at it
 // (a much higher chance to ignore the engine's pick and play a random legal
 // swap instead, a shallower search, and a slower reaction time), not a
-// different kind of AI. It still waits for the board to settle first, like a
-// player naturally would, and picks at most one action per timer interval.
+// different kind of AI. It picks at most one action per timer interval, but
+// -- like a player, whose own input is never blocked by unrelated activity
+// elsewhere on the board (see input.updateSwap) -- no longer waits for the
+// *whole* board to go idle first: it reasons about (see cpu_grid.Grid.
+// fromBoard) and can act on whatever's true right now, including cells
+// that are still falling/landing/mid-swap elsewhere. sim.trySwap's own
+// per-cell check is still what actually decides whether a given swap
+// succeeds, exactly as it does for the player, so this never lets the CPU
+// do anything a player couldn't also do from the same position.
 
 const c = @import("constants.zig");
 const s = @import("state.zig");
@@ -49,7 +56,6 @@ fn randomMove(self: *s.Board) void {
 }
 
 pub fn update(self: *s.Board) void {
-    if (self.boardBusy()) return; // wait for the board to settle, like a player naturally would
     const cfg = configFor(s.difficulty);
     move_timer += 1;
     if (move_timer < cfg.move_interval) return;
@@ -84,16 +90,26 @@ test "cpu AI stays put for the first move_interval-1 idle frames" {
     try testing.expectEqual(orig_col, b.cursor_col);
 }
 
-test "cpu AI waits while its board is busy" {
+test "cpu AI acts on an obvious winning swap even while the board is busy elsewhere" {
     move_timer = 0;
-    s.difficulty = 6;
+    s.difficulty = 10; // depth 3, mistake_pct 0 -- deterministic best play
     var b: s.Board = .{};
-    b.cellAt(0, 0).state = .falling;
-    const orig_row = b.cursor_row;
-    const orig_col = b.cursor_col;
-    for (0..configFor(s.difficulty).move_interval * 2) |_| update(&b);
-    try testing.expectEqual(orig_row, b.cursor_row);
-    try testing.expectEqual(orig_col, b.cursor_col);
+    // Same obvious winning swap as the "finds and plays" test below...
+    b.cellAt(5 + c.SPAWN_ROWS, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5 + c.SPAWN_ROWS, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5 + c.SPAWN_ROWS, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(5 + c.SPAWN_ROWS, 3).* = .{ .color = 1, .state = .normal };
+    // ...but with something unrelated still falling elsewhere, making
+    // boardBusy() true. Unlike before, the CPU no longer waits for this to
+    // settle first -- it still finds and plays the swap above.
+    b.cellAt(5 + c.SPAWN_ROWS, 5).* = .{ .color = 3, .state = .falling };
+    try testing.expect(b.boardBusy());
+
+    for (0..configFor(s.difficulty).move_interval) |_| update(&b);
+
+    try testing.expectEqual(@as(u8, 5), b.cursor_row);
+    try testing.expectEqual(@as(u8, 2), b.cursor_col);
+    try testing.expectEqual(s.CellState.swapping, b.cellAt(5 + c.SPAWN_ROWS, 2).state);
 }
 
 test "at an engine level, the cpu finds and plays an obvious winning swap" {

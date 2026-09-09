@@ -21,10 +21,22 @@ pub const GARBAGE: i8 = -2;
 pub const Grid = struct {
     cell: [ROWS][COLS]i8 = [_][COLS]i8{[_]i8{EMPTY} ** COLS} ** ROWS,
 
-    // Snapshots the currently-interactable window of a real board. Only
-    // meaningful while the board is idle (see Board.boardBusy) -- every
-    // occupied cell is then guaranteed to be `.normal`, so there's no
-    // mid-animation state to reason about.
+    // Snapshots the currently-interactable window of a real board -- now
+    // safe to call even while the board is busy (see cpu_ai.update, which no
+    // longer waits for full idle before doing this): `.falling`/`.landing`/
+    // `.swapping` all already have their final logical color/column decided
+    // (a swap exchanges cell data immediately and only animates the visual
+    // slide -- see sim.trySwap; falling/landing cells simply haven't
+    // finished moving down *within their own column* yet), so they're read
+    // as real content here, not holes. cpu_engine.simulateCascade's own
+    // gravity pass (cpu_engine_garbage.settle) then naturally resolves a
+    // still-falling cell down to wherever it will actually land as part of
+    // ordinary evaluation -- no frame-by-frame simulation needed for this to
+    // work. `.popping`/`.recycling` cells are read as EMPTY still: what they
+    // become is genuinely undecided from here (a pop clears for good; a
+    // recycling garbage cell may or may not convert), so treating that
+    // uncertainty as a hole the AI might fall into is the honest default
+    // rather than a real fix in scope here.
     pub fn fromBoard(b: *s.Board) Grid {
         var g: Grid = .{};
         for (0..ROWS) |lr| {
@@ -34,7 +46,11 @@ pub const Grid = struct {
                 // has an offscreen staging area above the ceiling (see
                 // Board.physRow).
                 const cell = b.cellAt(@intCast(lr + c.SPAWN_ROWS), @intCast(col));
-                g.cell[lr][col] = if (cell.state != .normal)
+                const has_content = switch (cell.state) {
+                    .normal, .falling, .landing, .swapping => true,
+                    .empty, .popping, .recycling => false,
+                };
+                g.cell[lr][col] = if (!has_content)
                     EMPTY
                 else if (cell.is_garbage)
                     GARBAGE

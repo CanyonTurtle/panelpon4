@@ -4,20 +4,49 @@ const c = @import("constants.zig");
 const s = @import("state.zig");
 const engine = @import("cpu_engine.zig");
 
-test "fromBoard reads color, garbage, and non-normal cells correctly" {
+test "fromBoard reads color, garbage, and in-flight cells correctly" {
     var b: s.Board = .{};
     b.cellAt(10, 0).* = .{ .color = 2, .state = .normal };
     b.cellAt(10, 1).* = .{ .state = .normal, .is_garbage = true };
-    // Mid-animation -- shouldn't happen in practice (the AI only snapshots
-    // while boardBusy() is false), but fromBoard should still treat it as
-    // empty rather than reading a stale color out of it.
+    // Falling/landing/swapping cells already have their final logical
+    // color/column decided (see cpu_grid.Grid.fromBoard's own doc comment),
+    // so the AI can now reason about them mid-cascade instead of treating
+    // them as holes -- this is what lets it act on (and see the true shape
+    // of) a board that isn't fully idle yet.
     b.cellAt(10, 2).* = .{ .color = 3, .state = .falling };
+    b.cellAt(10, 3).* = .{ .color = 4, .state = .landing };
+    b.cellAt(10, 4).* = .{ .color = 1, .state = .swapping };
+    // A pop/recycle's eventual outcome is genuinely undecided from here, so
+    // these still read as empty.
+    b.cellAt(10, 5).* = .{ .color = 2, .state = .popping };
 
     const grid = engine.Grid.fromBoard(&b);
     try testing.expectEqual(@as(i8, 2), grid.cell[0][0]);
     try testing.expectEqual(engine.GARBAGE, grid.cell[0][1]);
-    try testing.expectEqual(engine.EMPTY, grid.cell[0][2]);
-    try testing.expectEqual(engine.EMPTY, grid.cell[0][3]);
+    try testing.expectEqual(@as(i8, 3), grid.cell[0][2]);
+    try testing.expectEqual(@as(i8, 4), grid.cell[0][3]);
+    try testing.expectEqual(@as(i8, 1), grid.cell[0][4]);
+    try testing.expectEqual(engine.EMPTY, grid.cell[0][5]);
+}
+
+test "bestMove sees a currently-falling cell's true color, not an empty hole" {
+    var b: s.Board = .{};
+    // Identical to "finds the swap that completes an immediate match" below,
+    // except the piece that needs to land in the match is still .falling,
+    // not yet .normal. Before Grid.fromBoard read falling cells for real,
+    // this column would have looked like an empty hole here, and swapping
+    // col 2 into it would just relocate a lone color-2 cell into empty
+    // space -- no match, and the engine would have no way to recognize this
+    // as the winning swap it actually is.
+    b.cellAt(15, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 2).* = .{ .color = 2, .state = .normal };
+    b.cellAt(15, 3).* = .{ .color = 1, .state = .falling };
+
+    const grid = engine.Grid.fromBoard(&b);
+    const mv = engine.bestMove(grid, 1) orelse return error.NoMoveFound;
+    try testing.expectEqual(@as(u8, 5), mv.row);
+    try testing.expectEqual(@as(u8, 2), mv.col);
 }
 
 test "bestMove finds the swap that completes an immediate match" {
