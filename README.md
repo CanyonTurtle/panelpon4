@@ -45,10 +45,11 @@ each with your own full board -- yours at normal size on the left, the CPU's at 
 the side panel. Both run the exact same rules and physics.
 
 - **Arrow keys**: move the two-tile cursor -- a classic Panel de Pon-style corner bracket at each of its two
-  tiles (like a photo mounted by its own four corner tabs), not one box traced around both. Snaps to its
-  shortest, tightest marks the instant it moves and only eases back out into a fuller idle blink once it's
-  been sitting still for a while, so a fast-playing player never sees it blink at all. While a swap is
-  actually in progress, each side's brackets ride along with the block sliding underneath them instead of
+  tiles (like a photo mounted by its own four corner tabs), not one box traced around both, centered on the
+  block it targets and sitting just outside its edges. Snaps to its contracted, resting size the instant it
+  moves and only breathes out a pixel further once it's been sitting still for a while, so a fast-playing
+  player never sees it breathe at all. While a swap is actually in progress, each side's brackets ride along
+  with the block sliding underneath them instead of
   staying pinned to the two static tiles -- the cursor visibly swaps along with the blocks themselves.
 - **X**: swap the two blocks under the cursor. Buffers a single press if the cursor's pair can't swap yet
   (still animating from the previous swap), firing it automatically the instant it can, so mashing X chains
@@ -279,12 +280,17 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   any content within `STRESS_WARNING_ROWS` rows of the ceiling (logical row `constants.SPAWN_ROWS`), not only
   once it's already touching the top -- matching other Panel de Pon clients' more generous warning zone. Only
   the symbol glyph moves; the block underneath it (and anything keyed to a block's actual position, like the
-  hidden row's dither overlay) stays perfectly still. The cursor itself is a classic Panel de Pon-style corner
-  bracket at each of its two tiles (`drawCursorCorners`), not a single box around both -- it pulses each
-  bracket's arm length for its idle blink (shortest right when the cursor moves) and, while a swap is
-  actually in progress, offsets each side's brackets to ride along with the block sliding underneath it
-  (the same offset formula as `drawSwappingCell`), rather than sitting still while the blocks trade places.
-  `drawFrame`'s main-frame border is themed by whichever character the player picked on the setup screen
+  hidden row's dither overlay) stays perfectly still. The bounce itself is an explicit per-frame timing chart
+  (`BOUNCE_KEYFRAMES`), not a plain linear triangle wave -- it holds longest on the highest position and
+  second-longest on the next-highest, spending comparatively little time in the quick transit between them,
+  standard slow-in/slow-out keyframe spacing for a bounce rather than constant-speed motion. The cursor
+  itself is a classic Panel de Pon-style corner bracket at each of its two tiles (`drawCursorCorners`),
+  centered on the block it targets and sitting just outside its edges, not a single box around both -- it
+  pulses how far out those brackets sit for its idle breathing (most contracted right when the cursor moves)
+  and, while a swap is actually in progress, offsets each side's brackets to ride along with the block
+  sliding underneath it (the same offset formula as `drawSwappingCell`), rather than sitting still while the
+  blocks trade places. `drawFrame`'s main-frame border is themed by whichever character the player picked on
+  the setup screen
   (`drawThemedBand`, see `characters.BorderStyle`) -- color and fill pattern both.
 - `src/render_garbage.zig` — garbage's full-detail rendering (the muted checkerboard fill and the linked-
   clump bezel look), split out from render.zig to keep that file under the project's ~500-line guideline,
