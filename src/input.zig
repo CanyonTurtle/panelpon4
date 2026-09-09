@@ -17,8 +17,22 @@ const s = @import("state.zig");
 const w4 = @import("wasm4.zig");
 const sim = @import("sim.zig");
 
-pub fn justPressed(gp: u8, btn: u8) bool {
-    return (gp & btn) != 0 and (s.prev_gamepad & btn) == 0;
+// `prev` is an explicit parameter, not always state.prev_gamepad, so this
+// works correctly for a second real player too (see updateSwap below): that
+// player's own "was this held last frame" has to be tracked against THEIR
+// OWN previous gamepad snapshot (state.cpu_prev_gamepad in versus mode, see
+// main.zig), never against the first player's (state.prev_gamepad) -- an
+// earlier version of this always read state.prev_gamepad regardless of
+// whose input was actually being checked, which meant the second player's
+// own swap button was compared against the *first* player's press history
+// instead of their own: since the first player usually isn't holding X at
+// all, that history reads as permanently "not pressed", so this returned
+// true every single frame the second player merely *held* X down, not just
+// the one frame they first pressed it -- reported as "rapidly switches
+// blocks back and forth on a single press" (see updateSwap's own repeated
+// re-triggering once `pending` gets consumed and immediately re-armed).
+pub fn justPressed(gp: u8, prev: u8, btn: u8) bool {
+    return (gp & btn) != 0 and (prev & btn) == 0;
 }
 
 pub fn moveCursor(board: *s.Board, idle_frames: *u32, dir: u8) void {
@@ -79,9 +93,13 @@ pub fn updateCursorMovement(board: *s.Board, held: *u8, counter: *u8, idle_frame
 // is buffered (`pending`) instead of dropped, and retried here again every
 // frame until it succeeds -- see canSwapAt below, shared with touch's own
 // buffering. Lets mashing X chain swaps at the fastest rate the swap
-// animation allows, with none silently lost to bad timing.
-pub fn updateSwap(board: *s.Board, pending: *bool, gp: u8) void {
-    if (justPressed(gp, w4.BUTTON_1)) pending.* = true;
+// animation allows, with none silently lost to bad timing. `prev` is that
+// player's own previous-frame gamepad snapshot (state.prev_gamepad for the
+// player, state.cpu_prev_gamepad for versus mode's second real player --
+// see justPressed's own doc comment for why this can't just be one shared
+// global).
+pub fn updateSwap(board: *s.Board, pending: *bool, gp: u8, prev: u8) void {
+    if (justPressed(gp, prev, w4.BUTTON_1)) pending.* = true;
     if (pending.* and canSwapAt(board, board.cursor_row, board.cursor_col)) {
         sim.trySwap(board);
         pending.* = false;

@@ -73,12 +73,16 @@ Right after the title screen, a mode-select screen (**left/right** to cycle, **X
   (GAMEPAD2) -- either physically local (two controllers, one console) or remote via WASM-4's own built-in
   netplay (`w4 watch --host`/`--join`, or a netplay URL -- the cart itself doesn't implement any networking
   of its own; WASM-4's runtime keeps both peers' GAMEPAD1-4 states in sync transparently). No
-  character/difficulty picking -- straight from mode-select into the countdown. Each peer always sees
+  character/difficulty picking -- a confirm screen ("connect via netplay now, then press X") comes first
+  instead, a deliberate manual gate rather than falling straight into a countdown: netplay's own connection
+  handshake happens entirely outside the cart (sharing/opening the join link), and joining mid-match desyncs
+  the two peers' simulations, so this makes sure that actually happens first. Each peer always sees
   *themselves* in the full-detail main seat regardless of which of the two boards their own real input
   happens to land in over the network (`wasm4.NETPLAY`'s low 2 bits say which slot -- 0 or 1 -- a peer's own
-  controller is broadcast as; see `state.versus_render_swapped`) -- but the actual simulation's own board
-  identities and per-frame call order never change between peers, only which one gets rendered where, since
-  that's what netplay's lockstep determinism actually depends on staying identical everywhere.
+  controller is broadcast as; see `state.versus_render_swapped`, read only once the confirm screen is
+  actually dismissed) -- but the actual simulation's own board identities and per-frame call order never
+  change between peers, only which one gets rendered where, since that's what netplay's lockstep determinism
+  actually depends on staying identical everywhere.
 
 - **Arrow keys**: move the two-tile cursor -- a classic Panel de Pon-style corner bracket at each of its two
   tiles (like a photo mounted by its own four corner tabs), not one box traced around both, centered on the
@@ -156,7 +160,8 @@ Right after the title screen, a mode-select screen (**left/right** to cycle, **X
   mode's own setup: quick match's is 3 steps in order -- pick your **character**, watch the **CPU** pick its
   own, then set the **difficulty** -- each its own screen rather than everything crammed onto one; story's is
   2 steps (character, then its own difficulty **tier** screen, no CPU reveal -- its opponents are
-  predetermined, not rolled); versus skips straight to the countdown. On quick match's difficulty screen,
+  predetermined, not rolled); versus's own single step is a confirm screen ("connect via netplay, then press
+  X") rather than a countdown straight away. On quick match's difficulty screen,
   **left/right** sets it, 1-10, shown as a filled-in bar rather than a bare number (press X to begin). Every
   level runs the same move-search
   engine (see `src/cpu_engine.zig`) and always plays
@@ -403,7 +408,14 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   `state.player` -- almost always called with the player's own (see `main.zig`'s ordinary single-player call
   sites), but versus mode (`state.GameMode`) calls them a second time with `&state.cpu` and its own parallel
   fields (`state.cpu_held_dir` etc.), since GAMEPAD2 drives a real second player there instead of `cpu_ai`.
-  Touch has no second-player equivalent -- still always the player's own board.
+  Touch has no second-player equivalent -- still always the player's own board. `justPressed` takes the
+  relevant previous-frame gamepad snapshot as an explicit parameter too (`state.prev_gamepad` for the player,
+  `state.cpu_prev_gamepad` for versus's second player) rather than always reading `state.prev_gamepad` --
+  an earlier version always read that one regardless of whose input was being checked, which meant the
+  second player's own swap button was being compared against the *first* player's press history (almost
+  always all-zero, since the host usually isn't also holding X), so it read as "just pressed" on every single
+  frame the second player merely held X down, not just the one frame they first pressed it -- symptom: their
+  swap rapidly flickered back and forth on what should have been a single press.
 - `src/render.zig` — most drawing: the player's board (in full detail) at normal size, the cursor, panel,
   and title/setup/game-over screens. A column wobbles its settled blocks' *symbols* in place as a stress
   warning (`isColumnStressed`/`stressBounceOffset`, applied as `drawNormalCell`'s `sym_bounce`) once it has
@@ -546,10 +558,13 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   `state.menu_phase` steps through the title screen, mode-select (see `state.GameMode`/`game_modes.zig`), and
   then whichever setup steps that mode actually needs (see
   `render.drawTitleScreen`/`drawModeSelectScreen`/`drawSetupCharacterScreen`/`drawSetupCpuRevealScreen`/
-  `drawSetupDifficultyScreen`/`drawStoryTierScreen`) -- quick match visits all of character/CPU-reveal/
-  difficulty; story visits character then its own tier screen instead (no CPU reveal -- its opponent sequence
-  is predetermined, not rolled -- see `game_modes.storyOpponentFor`); versus skips straight from mode-select
-  into a countdown. The character screen's own confirm flash (`state.setup_flash_timer`) and the CPU reveal
+  `drawSetupDifficultyScreen`/`drawStoryTierScreen`/`drawVersusConfirmScreen`) -- quick match visits all of
+  character/CPU-reveal/difficulty; story visits character then its own tier screen instead (no CPU reveal --
+  its opponent sequence is predetermined, not rolled -- see `game_modes.storyOpponentFor`); versus visits its
+  own confirm screen instead ("connect via netplay, then press X" -- a deliberate manual gate, not a
+  countdown right away, so `wasm4.NETPLAY` is only ever read and a countdown only ever begun once the player
+  has confirmed the second peer/controller is actually ready; joining mid-match desyncs netplay). The
+  character screen's own confirm flash (`state.setup_flash_timer`) and the CPU reveal
   screen's own spin (`state.cpu_reveal_tick`/`cpu_reveal_timer`) both gate input and just count down each
   frame until they're done, the same "freeze input, drive purely off a timer" shape as the countdown/
   closing-wipe overlays below; between a countdown and real gameplay sits a frozen "3 2 1 START" overlay

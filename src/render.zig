@@ -753,6 +753,25 @@ pub fn drawModeSelectScreen() void {
     w4.Text("PRESS X", 52, y + 92);
 }
 
+// A manual gate between picking versus mode and actually starting a
+// countdown (see state.MenuPhase's own doc comment on why this exists) --
+// makes sure the second player has actually joined via netplay (or is ready
+// on a second local controller) before `main.zig` ever reads `wasm4.NETPLAY`
+// or resets the boards, since joining mid-match would desync the two peers.
+pub fn drawVersusConfirmScreen() void {
+    const y = drawMenuPanelFill(30, 100);
+    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100);
+    w4.DRAW_COLORS.* = 0x0003;
+    w4.Text("2P VERSUS", 40, y + 10);
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text("CONNECT VIA", 34, y + 34);
+    w4.Text("NETPLAY NOW", 34, y + 46);
+    w4.Text("(OR READY P2", 30, y + 62);
+    w4.Text("ON GAMEPAD 2)", 26, y + 74);
+    w4.DRAW_COLORS.* = 0x0004;
+    w4.Text("THEN PRESS X", 28, y + 90);
+}
+
 // One filled-in segment per difficulty level (1-10), replacing the old
 // plain "LEVEL {d}" text with something that reads at a glance without
 // needing to parse a number.

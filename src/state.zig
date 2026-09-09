@@ -439,13 +439,18 @@ pub var started: bool = false;
 // that visits all three; story visits `setup_character` then
 // `story_tier_select` instead of the other two (its own opponents and their
 // difficulty are predetermined by the run, not picked or randomly rolled --
-// see game_modes.storyOpponentFor/storyDifficultyFor), and versus skips
-// straight from `mode_select` to a countdown (see main.zig). Reset to
-// `.mode_select` (not all the way back to `.title`) once a quick-match
-// series concludes or a story run ends -- mid-series/mid-run, pressing X on
-// a match's own game-over screen skips straight back into a countdown,
-// never back through any menu screen.
-pub const MenuPhase = enum { title, mode_select, setup_character, setup_cpu_reveal, setup_difficulty, story_tier_select };
+// see game_modes.storyOpponentFor/storyDifficultyFor). Versus skips all of
+// that and instead visits `versus_confirm` -- a deliberate manual gate
+// ("connect via netplay, then press X") before `main.zig` ever reads
+// `wasm4.NETPLAY` or starts a countdown, since netplay's own connection
+// handshake happens entirely outside the cart (sharing/opening the join
+// link) and the second player joining mid-match desyncs the two peers'
+// simulations -- this screen's whole job is making sure that happens first,
+// not mid-game. Reset to `.mode_select` (not all the way back to `.title`)
+// once a quick-match series concludes or a story run ends -- mid-series/
+// mid-run, pressing X on a match's own game-over screen skips straight back
+// into a countdown, never back through any menu screen.
+pub const MenuPhase = enum { title, mode_select, setup_character, setup_cpu_reveal, setup_difficulty, story_tier_select, versus_confirm };
 pub var menu_phase: MenuPhase = .title;
 
 // The 3 top-level modes (see game_modes.zig, chosen on the mode_select
@@ -532,6 +537,13 @@ pub var cpu_character: u8 = 1;
 
 pub var frame_count: u32 = 0;
 pub var prev_gamepad: u8 = 0;
+// GAMEPAD2's own previous-frame snapshot, tracked separately from
+// prev_gamepad (GAMEPAD1's) -- versus mode's second real player needs their
+// own "was this just pressed" history to check their swap button against,
+// never the first player's (see input.justPressed's own doc comment for the
+// bug this fixes: comparing GAMEPAD2 against GAMEPAD1's history meant it
+// read as "just pressed" on every single frame GAMEPAD2 merely held X down).
+pub var cpu_prev_gamepad: u8 = 0;
 pub var held_dir: u8 = 0;
 pub var das_counter: u8 = 0;
 

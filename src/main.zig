@@ -63,6 +63,11 @@ export fn start() void {
 export fn update() void {
     s.frame_count += 1;
     const gp = w4.GAMEPAD1.*;
+    // GAMEPAD2 is read every frame regardless of mode (cheap register read)
+    // so state.cpu_prev_gamepad -- versus mode's own second real player's
+    // "was this just pressed" history -- stays accurate across the countdown
+    // and menu screens too, not just while a match is actually running.
+    const gp2 = w4.GAMEPAD2.*;
     const was_over = s.winner != .none;
     // Any gamepad button (a direction or X) brings the cursor back -- see
     // state.cursor_hidden and input.updateTouch, which hides it the instant
@@ -80,6 +85,7 @@ export fn update() void {
         render.drawCountdown();
         if (s.countdown_timer <= 0) s.started = true;
         s.prev_gamepad = gp;
+        s.cpu_prev_gamepad = gp2;
         return;
     }
 
@@ -89,34 +95,44 @@ export fn update() void {
         switch (s.menu_phase) {
             .title => {
                 render.drawTitleScreen();
-                if (input.justPressed(gp, w4.BUTTON_1)) s.menu_phase = .mode_select;
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) s.menu_phase = .mode_select;
             },
             .mode_select => {
                 render.drawModeSelectScreen();
-                if (input.justPressed(gp, w4.BUTTON_LEFT)) s.game_mode = prevMode(s.game_mode);
-                if (input.justPressed(gp, w4.BUTTON_RIGHT)) s.game_mode = nextMode(s.game_mode);
-                if (input.justPressed(gp, w4.BUTTON_1)) {
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_LEFT)) s.game_mode = prevMode(s.game_mode);
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_RIGHT)) s.game_mode = nextMode(s.game_mode);
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
                     switch (s.game_mode) {
                         .quick, .story => s.menu_phase = .setup_character,
-                        .versus => {
-                            // No character/difficulty picking for versus --
-                            // the opponent is a real second player, not a
-                            // rolled or ramped CPU (see state.GameMode's own
-                            // doc comment). Figure out once, right now,
-                            // whether *this* peer's own real input is
-                            // GAMEPAD2 (see wasm4.NETPLAY) -- if so, this
-                            // peer needs to see itself in the main seat by
-                            // swapping which board render.render() treats as
-                            // "mine", since GAMEPAD1 always drives `player`
-                            // and GAMEPAD2 always drives `cpu` regardless of
-                            // slot (see the in-match input routing below).
-                            game_modes.applyDefaultProfile();
-                            const netplay = w4.NETPLAY.*;
-                            const my_slot = netplay & w4.NETPLAY_PLAYER_MASK;
-                            s.versus_render_swapped = (netplay & w4.NETPLAY_ACTIVE != 0) and my_slot == 1;
-                            board.beginCountdown();
-                        },
+                        // No character/difficulty picking for versus -- the
+                        // opponent is a real second player, not a rolled or
+                        // ramped CPU (see state.GameMode's own doc comment).
+                        // A confirm screen comes first, not straight into a
+                        // countdown: netplay's own connection handshake
+                        // happens entirely outside the cart (sharing/opening
+                        // the join link), and joining mid-match desyncs the
+                        // two peers' simulations -- see versus_confirm below.
+                        .versus => s.menu_phase = .versus_confirm,
                     }
+                }
+            },
+            .versus_confirm => {
+                render.drawVersusConfirmScreen();
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
+                    // Figure out once, right now, whether *this* peer's own
+                    // real input is GAMEPAD2 (see wasm4.NETPLAY) -- if so,
+                    // this peer needs to see itself in the main seat by
+                    // swapping which board render.render() treats as "mine",
+                    // since GAMEPAD1 always drives `player` and GAMEPAD2
+                    // always drives `cpu` regardless of slot (see the
+                    // in-match input routing below). Reading it only here,
+                    // right as the player confirms they've actually
+                    // connected, is the whole point of this screen existing.
+                    game_modes.applyDefaultProfile();
+                    const netplay = w4.NETPLAY.*;
+                    const my_slot = netplay & w4.NETPLAY_PLAYER_MASK;
+                    s.versus_render_swapped = (netplay & w4.NETPLAY_ACTIVE != 0) and my_slot == 1;
+                    board.beginCountdown();
                 }
             },
             .setup_character => {
@@ -151,13 +167,13 @@ export fn update() void {
                     // Left/right cycles the player's own character -- a
                     // horizontal row reads more naturally with left/right
                     // than up/down did.
-                    if (input.justPressed(gp, w4.BUTTON_LEFT)) {
+                    if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_LEFT)) {
                         s.player_character = (s.player_character + characters.COUNT - 1) % characters.COUNT;
                     }
-                    if (input.justPressed(gp, w4.BUTTON_RIGHT)) {
+                    if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_RIGHT)) {
                         s.player_character = (s.player_character + 1) % characters.COUNT;
                     }
-                    if (input.justPressed(gp, w4.BUTTON_1)) s.setup_flash_timer = c.SETUP_FLASH_TOTAL_FRAMES;
+                    if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) s.setup_flash_timer = c.SETUP_FLASH_TOTAL_FRAMES;
                 }
             },
             .setup_cpu_reveal => {
@@ -180,9 +196,9 @@ export fn update() void {
                 // state.difficulty and cpu_ai.configFor) -- revisitable here
                 // again once a series concludes and this screen comes back
                 // around, but fixed for the whole series in between.
-                if (input.justPressed(gp, w4.BUTTON_LEFT) and s.difficulty > 1) s.difficulty -= 1;
-                if (input.justPressed(gp, w4.BUTTON_RIGHT) and s.difficulty < 10) s.difficulty += 1;
-                if (input.justPressed(gp, w4.BUTTON_1)) {
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_LEFT) and s.difficulty > 1) s.difficulty -= 1;
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_RIGHT) and s.difficulty < 10) s.difficulty += 1;
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
                     // Guarantees a clean baseline even if a story run earlier
                     // this session left its own tier's profile active (see
                     // game_modes.zig's own doc comment).
@@ -210,15 +226,15 @@ export fn update() void {
                 // it to Hard immediately, same as arriving there -- no such
                 // ambiguity going that direction.
                 if (s.story_tier == .xhard) {
-                    if (input.justPressed(gp, w4.BUTTON_LEFT)) s.story_tier = .hard;
+                    if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_LEFT)) s.story_tier = .hard;
                 } else if (s.story_tier == .hard) {
-                    if (input.justPressed(gp, w4.BUTTON_LEFT)) s.story_left_grace_timer = c.STORY_SECRET_GRACE_FRAMES;
+                    if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_LEFT)) s.story_left_grace_timer = c.STORY_SECRET_GRACE_FRAMES;
                     if (s.story_left_grace_timer > 0) {
                         if (gp & w4.BUTTON_LEFT == 0) {
                             // Released before Z ever joined -- an ordinary tap.
                             s.story_tier = .medium;
                             s.story_left_grace_timer = 0;
-                        } else if (input.justPressed(gp, w4.BUTTON_2)) {
+                        } else if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_2)) {
                             s.story_tier = .xhard;
                             s.story_left_grace_timer = 0;
                         } else {
@@ -226,20 +242,20 @@ export fn update() void {
                             if (s.story_left_grace_timer == 0) s.story_tier = .medium; // grace ran out, no Z -- ordinary tap
                         }
                     }
-                } else if (input.justPressed(gp, w4.BUTTON_LEFT)) {
+                } else if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_LEFT)) {
                     s.story_tier = switch (s.story_tier) {
                         .easy => .easy,
                         .medium => .easy,
                         .hard, .xhard => unreachable, // handled above
                     };
-                } else if (input.justPressed(gp, w4.BUTTON_RIGHT)) {
+                } else if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_RIGHT)) {
                     s.story_tier = switch (s.story_tier) {
                         .easy => .medium,
                         .medium => .hard,
                         .hard, .xhard => unreachable, // handled above
                     };
                 }
-                if (input.justPressed(gp, w4.BUTTON_1)) {
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
                     game_modes.applyStoryProfile(s.story_tier);
                     s.difficulty = game_modes.storyDifficultyFor(s.story_tier, s.story_stage);
                     board.beginCountdown();
@@ -247,12 +263,13 @@ export fn update() void {
             },
         }
         s.prev_gamepad = gp;
+        s.cpu_prev_gamepad = gp2;
         return;
     }
 
     if (s.winner == .none) {
         input.updateCursorMovement(&s.player, &s.held_dir, &s.das_counter, &s.cursor_idle_frames, gp);
-        input.updateSwap(&s.player, &s.button_pending_swap, gp);
+        input.updateSwap(&s.player, &s.button_pending_swap, gp, s.prev_gamepad);
         // Held (not just a fresh press) so the raise keeps going for as long
         // as Z stays down -- tryManualRaise already no-ops on its own while
         // still cooling down or mid-raise, so calling it every held frame
@@ -270,9 +287,8 @@ export fn update() void {
         // peer, which is what actually has to stay in sync for netplay).
         // Every other mode still hands `cpu` to the AI as always.
         if (s.game_mode == .versus) {
-            const gp2 = w4.GAMEPAD2.*;
             input.updateCursorMovement(&s.cpu, &s.cpu_held_dir, &s.cpu_das_counter, &s.cpu_cursor_idle_frames, gp2);
-            input.updateSwap(&s.cpu, &s.cpu_button_pending_swap, gp2);
+            input.updateSwap(&s.cpu, &s.cpu_button_pending_swap, gp2, s.cpu_prev_gamepad);
             if (gp2 & w4.BUTTON_2 != 0) board.tryManualRaise(&s.cpu);
         } else {
             cpu_ai.update(&s.cpu);
@@ -326,7 +342,7 @@ export fn update() void {
         // has actually finished popping.
         s.closing_timer -= 1;
     } else {
-        if (input.justPressed(gp, w4.BUTTON_1)) {
+        if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
             switch (s.game_mode) {
                 .story => {
                     if (s.winner == .player) {
@@ -377,4 +393,5 @@ export fn update() void {
     if (s.winner != .none and s.closing_timer <= 0) render.drawGameOver();
 
     s.prev_gamepad = gp;
+    s.cpu_prev_gamepad = gp2;
 }
