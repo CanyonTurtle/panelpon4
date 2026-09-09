@@ -159,10 +159,12 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/symbols.zig` — pixel-art symbol data drawn on each block color.
 - `src/state.zig` — the `Board` struct (grid, cursor, score/chain, rise state, its own RNG stream, its own
   match-popup pool, its own particle pool -- `Board.spawnPopParticles`/`tickParticles`, a short burst of 4
-  small particles flying diagonally outward from a real block's own center, in its own color, the instant
-  *that* block's own staggered pop animation finishes (called from `sim.simulate`'s per-cell `timer == 0`
-  handling -- the same instant its pop-tick sound plays -- not once for the whole match at once, so each
-  block's own burst lands right as it transforms and pops, not after every block in the match already has);
+  small particles flying diagonally outward from a real block's own center, in its own color, right as
+  *that* block's own staggered pop animation actually starts shrinking away (called from `sim.simulate`'s
+  per-cell timer handling at the exact frame `render.drawPoppingCell`'s own elapsed time crosses from its
+  initial flash wobble into the shrink-to-nothing phase -- the same instant its pop-tick sound plays -- not
+  once for the whole match at once, and not once each block has already finished shrinking and vanished
+  either, so each block's own burst plays out *alongside* it visibly shrinking, not before or after);
   `s.player`'s own pool is drawn by `render.drawParticles`; purely cosmetic, exactly like `MatchPopup`) plus
   its small methods (ring-buffer indexing, RNG, board-busy query), and the two live
   instances of it, `player`/`cpu`. Every other module takes an explicit `*Board` rather than reaching into

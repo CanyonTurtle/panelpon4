@@ -108,12 +108,22 @@ pub fn simulate(self: *s.Board, opponent: *s.Board) void {
                         cell.pre_pop_timer -= 1;
                     } else {
                         cell.timer -= 1;
-                        if (cell.timer == 0) {
+                        // render.drawPoppingCell's own elapsed = POP_FRAMES -
+                        // timer: elapsed 0..POP_FLASH_FRAMES-1 is the initial
+                        // wobble, POP_FLASH_FRAMES..POP_FRAMES is the actual
+                        // shrink-to-nothing -- so timer == POP_FRAMES -
+                        // POP_FLASH_FRAMES is elapsed == POP_FLASH_FRAMES,
+                        // the exact instant THIS block's shrink actually
+                        // begins (timer == 0 -- elapsed == POP_FRAMES -- is
+                        // instead the instant it's already finished
+                        // shrinking and fully vanished, too late for either
+                        // cue to still land "with" the animation).
+                        if (cell.timer == c.POP_FRAMES - c.POP_FLASH_FRAMES) {
                             audio.playPopTick();
-                            // A little impact feedback right as THIS block's
-                            // own shrink animation finishes -- one burst per
-                            // block, each timed to its own staggered pop
-                            // (see POP_STAGGER_FRAMES), not one burst for the
+                            // A little impact feedback right as THIS block
+                            // starts shrinking away -- one burst per block,
+                            // each timed to its own staggered pop (see
+                            // POP_STAGGER_FRAMES), not one burst for the
                             // whole match at once, so it reads as each block
                             // transforming and popping in turn. Garbage
                             // cracks open in place instead of shrinking away
