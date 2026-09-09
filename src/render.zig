@@ -685,40 +685,20 @@ fn drawPanel() void {
     }
 }
 
-// A slow sine-wave offset -- gives the menu panel below a gentle, alive
-// bobbing motion ("personality") rather than sitting dead still, distinct
-// from every other motion in the game (which all use a triangle-wave/linear
-// ease -- see stressBounceOffset, drawCursor's pulse -- since a menu panel
-// idling for a long time is the one place a true sinusoid's smoothness is
-// worth the float math over the cheaper approximations used elsewhere).
-fn menuSinOffset(period_frames: i32, amplitude_px: i32) i32 {
-    const t: f32 = @floatFromInt(@mod(s.frame_count, @as(u32, @intCast(period_frames))));
-    const phase = t / @as(f32, @floatFromInt(period_frames)) * std.math.tau;
-    return @intFromFloat(@sin(phase) * @as(f32, @floatFromInt(amplitude_px)));
-}
-
 const MENU_PANEL_X: i32 = 20;
 const MENU_PANEL_W: i32 = 120;
-const MENU_SIN_PERIOD: i32 = 180; // 3s
-const MENU_SIN_AMOUNT: i32 = 4;
 
-fn menuPanelY(base_y: i32) i32 {
-    return base_y + menuSinOffset(MENU_SIN_PERIOD, MENU_SIN_AMOUNT);
-}
-
-// Common backdrop for both pre-game screens: the parallaxing background
-// (see render_bg.zig) plus the panel's own fill, gently bobbing (see
-// menuPanelY) -- callers draw their own border (the title screen's neutral
-// bezel vs. the setup screen's character-themed one) and content into the
-// returned Y. `base_y`/`h` differ between the two screens (setup has more
-// to fit), so both are the caller's own choice rather than shared
-// constants.
+// Common backdrop for every pre-game screen: the parallaxing background
+// (see render_bg.zig) plus the panel's own fill, held perfectly still --
+// callers draw their own border (the title screen's neutral bezel vs. the
+// setup screens' character-themed one) and content into the returned Y.
+// `base_y`/`h` differ per screen (some have more to fit than others), so
+// both are the caller's own choice rather than shared constants.
 fn drawMenuPanelFill(base_y: i32, h: i32) i32 {
     bg.draw();
-    const y = menuPanelY(base_y);
     w4.DRAW_COLORS.* = 0x0001;
-    w4.Rect(MENU_PANEL_X, y, MENU_PANEL_W, @intCast(h));
-    return y;
+    w4.Rect(MENU_PANEL_X, base_y, MENU_PANEL_W, @intCast(h));
+    return base_y;
 }
 
 pub fn drawTitleScreen() void {
@@ -759,11 +739,16 @@ fn charSlotX(index: u8) i32 {
     return start + @as(i32, index) * (rchar.W + CHAR_SLOT_GAP);
 }
 
-pub fn drawSetupScreen() void {
-    const y = drawMenuPanelFill(14, 140);
+// The setup flow's own screen position -- held fixed across all 3 steps
+// (character, CPU reveal, difficulty) so the panel doesn't jump around
+// between them, just its height/content changes.
+const SETUP_BASE_Y: i32 = 24;
+
+pub fn drawSetupCharacterScreen() void {
+    const y = drawMenuPanelFill(SETUP_BASE_Y, 100);
     // Retheme the panel border itself to whichever character is currently
     // selected -- "switching should retheme the setup menu".
-    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 140, characters.ALL[s.player_character]);
+    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100, characters.ALL[s.player_character]);
 
     w4.DRAW_COLORS.* = 0x0003;
     w4.Text("SETUP", 58, y + 6);
@@ -771,45 +756,111 @@ pub fn drawSetupScreen() void {
     w4.Text("CHARACTER", 40, y + 18);
 
     // All 4 characters are shown at once (not just the current pick) --
-    // up/down cycles the player's own selection (see main.zig), highlighted
-    // with a dithered outline; the CPU's own auto-pick (always a different
-    // one -- see characters.cpuPickFor) is marked with a small arrow above
-    // it instead, never itself selectable.
+    // left/right cycles the player's own selection (see main.zig),
+    // highlighted with a dithered outline -- solid normally, blinking on/off
+    // for a moment right after confirming (see state.setup_flash_timer)
+    // before moving on to watch the CPU pick its own.
     const frame = rchar.currentFrame();
     const row_y = y + 34;
+    const flashing = s.setup_flash_timer > 0;
+    const flash_on = !flashing or blinkOn(c.SETUP_FLASH_TOTAL_FRAMES - s.setup_flash_timer, c.SETUP_FLASH_TOGGLE_FRAMES);
     for (0..characters.COUNT) |i| {
         const cx = charSlotX(@intCast(i));
         rchar.draw(cx, row_y, @intCast(i), .normal, frame);
-        if (i == s.player_character) {
+        if (i == s.player_character and flash_on) {
             drawDitheredRectOutline(cx - 2, row_y - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
-        }
-        if (i == s.cpu_character) {
-            w4.DRAW_COLORS.* = 0x0004;
-            w4.Rect(cx + @divTrunc(rchar.W, 2) - 1, row_y - 5, 3, 1);
-            w4.Rect(cx + @divTrunc(rchar.W, 2) - 2, row_y - 4, 5, 1);
         }
     }
 
     w4.DRAW_COLORS.* = 0x0002;
-    var buf2: [24]u8 = undefined;
-    const you_label = std.fmt.bufPrint(&buf2, "YOU: {s}", .{characters.ALL[s.player_character].name}) catch "YOU";
-    w4.Text(you_label, 28, row_y + rchar.H + 6);
-    w4.DRAW_COLORS.* = 0x0004;
-    var buf3: [24]u8 = undefined;
-    const cpu_label = std.fmt.bufPrint(&buf3, "CPU: {s}", .{characters.ALL[s.cpu_character].name}) catch "CPU";
-    w4.Text(cpu_label, 28, row_y + rchar.H + 16);
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("^ up   down v", 30, row_y + rchar.H + 28);
-
-    w4.Text("DIFFICULTY", 40, y + 96);
-    drawDifficultyBar(40, y + 108);
     var buf: [24]u8 = undefined;
+    const you_label = std.fmt.bufPrint(&buf, "YOU: {s}", .{characters.ALL[s.player_character].name}) catch "YOU";
+    w4.Text(you_label, 28, row_y + rchar.H + 6);
+    if (!flashing) {
+        w4.Text("<-      ->", 40, row_y + rchar.H + 18);
+        w4.Text("PRESS X", 52, row_y + rchar.H + 30);
+    }
+}
+
+// True during the "on" half of a simple on/off blink -- elapsed frames
+// since some start point, toggling every `period` frames.
+fn blinkOn(elapsed: u16, period: u16) bool {
+    return @mod(elapsed, period * 2) < period;
+}
+
+// Left edge of one of 2 side-by-side portraits (see drawSetupCpuRevealScreen)
+// -- same centered-row idea as charSlotX, just for 2 slots instead of 4.
+const REVEAL_GAP: i32 = 24;
+fn revealSlotX(which: u8) i32 {
+    const total_w = rchar.W * 2 + REVEAL_GAP;
+    const start = MENU_PANEL_X + @divTrunc(MENU_PANEL_W - total_w, 2);
+    return start + @as(i32, which) * (rchar.W + REVEAL_GAP);
+}
+
+pub fn drawSetupCpuRevealScreen() void {
+    const y = drawMenuPanelFill(SETUP_BASE_Y, 80);
+    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 80, characters.ALL[s.player_character]);
+
+    w4.DRAW_COLORS.* = 0x0003;
+    w4.Text("SETUP", 58, y + 6);
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text("CPU IS CHOOSING", 26, y + 18);
+
+    const frame = rchar.currentFrame();
+    const row_y = y + 34;
+    const you_x = revealSlotX(0);
+    const cpu_x = revealSlotX(1);
+    rchar.draw(you_x, row_y, s.player_character, .normal, frame);
+    drawDitheredRectOutline(you_x - 2, row_y - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
+
+    // Spins through every character once per tick, holding each a little
+    // longer than the last (see state.cpu_reveal_tick/constants.
+    // CPU_REVEAL_HOLD_*), landing for good on the real pick at the final
+    // tick -- a slot machine slowing to a stop rather than an instant reveal.
+    const done = s.cpu_reveal_tick >= c.CPU_REVEAL_STEPS - 1;
+    const spin_index: u8 = if (done) s.cpu_character else @intCast(s.cpu_reveal_tick % characters.COUNT);
+    rchar.draw(cpu_x, row_y, spin_index, .normal, frame);
+    drawDitheredRectOutline(cpu_x - 2, row_y - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
+
+    w4.DRAW_COLORS.* = 0x0002;
+    var buf: [24]u8 = undefined;
+    const you_label = std.fmt.bufPrint(&buf, "YOU: {s}", .{characters.ALL[s.player_character].name}) catch "YOU";
+    w4.Text(you_label, 22, row_y + rchar.H + 8);
+    w4.DRAW_COLORS.* = 0x0004;
+    var buf2: [24]u8 = undefined;
+    const cpu_label = if (done)
+        std.fmt.bufPrint(&buf2, "CPU: {s}", .{characters.ALL[s.cpu_character].name}) catch "CPU"
+    else
+        "CPU: ???";
+    w4.Text(cpu_label, 22, row_y + rchar.H + 20);
+}
+
+pub fn drawSetupDifficultyScreen() void {
+    const y = drawMenuPanelFill(SETUP_BASE_Y, 110);
+    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 110, characters.ALL[s.player_character]);
+
+    w4.DRAW_COLORS.* = 0x0003;
+    w4.Text("SETUP", 58, y + 6);
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text("DIFFICULTY", 40, y + 18);
+
+    var buf: [24]u8 = undefined;
+    const you_label = std.fmt.bufPrint(&buf, "YOU: {s}", .{characters.ALL[s.player_character].name}) catch "YOU";
+    w4.Text(you_label, 28, y + 32);
+    w4.DRAW_COLORS.* = 0x0004;
+    var buf2: [24]u8 = undefined;
+    const cpu_label = std.fmt.bufPrint(&buf2, "CPU: {s}", .{characters.ALL[s.cpu_character].name}) catch "CPU";
+    w4.Text(cpu_label, 28, y + 44);
+
+    w4.DRAW_COLORS.* = 0x0002;
+    drawDifficultyBar(40, y + 62);
+    var buf3: [24]u8 = undefined;
     // Every level runs cpu_engine's actual move search -- see
     // cpu_ai.configFor -- lower levels just listen to it far less reliably.
-    const label = std.fmt.bufPrint(&buf, "LEVEL {d}", .{s.difficulty}) catch "LEVEL ?";
-    w4.Text(label, 58, y + 120);
-    w4.Text("<-      ->", 40, y + 132);
-    w4.Text("PRESS X", 52, y + 144);
+    const label = std.fmt.bufPrint(&buf3, "LEVEL {d}", .{s.difficulty}) catch "LEVEL ?";
+    w4.Text(label, 58, y + 74);
+    w4.Text("<-      ->", 40, y + 88);
+    w4.Text("PRESS X", 52, y + 100);
 }
 
 // Bezeled orange border for a full-screen overlay panel (the countdown and

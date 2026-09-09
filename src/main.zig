@@ -1,5 +1,6 @@
 const builtin = @import("builtin");
 const w4 = @import("wasm4.zig");
+const c = @import("constants.zig");
 const s = @import("state.zig");
 const board = @import("board.zig");
 const sim = @import("sim.zig");
@@ -69,27 +70,57 @@ export fn update() void {
         switch (s.menu_phase) {
             .title => {
                 render.drawTitleScreen();
-                if (input.justPressed(gp, w4.BUTTON_1)) s.menu_phase = .setup;
+                if (input.justPressed(gp, w4.BUTTON_1)) s.menu_phase = .setup_character;
             },
-            .setup => {
-                render.drawSetupScreen();
+            .setup_character => {
+                render.drawSetupCharacterScreen();
+                if (s.setup_flash_timer > 0) {
+                    // Confirmed -- ignore input and just let the flash play
+                    // out (see render.drawSetupCharacterScreen) until it's
+                    // done, then roll the CPU's own pick (see
+                    // characters.cpuPickFor) and move on to watch it reveal.
+                    s.setup_flash_timer -= 1;
+                    if (s.setup_flash_timer == 0) {
+                        s.cpu_character = characters.cpuPickFor(s.player_character, s.player.rngNext());
+                        s.cpu_reveal_tick = 0;
+                        s.cpu_reveal_timer = c.CPU_REVEAL_HOLD_BASE;
+                        s.menu_phase = .setup_cpu_reveal;
+                    }
+                } else {
+                    // Left/right cycles the player's own character -- a
+                    // horizontal row reads more naturally with left/right
+                    // than up/down did.
+                    if (input.justPressed(gp, w4.BUTTON_LEFT)) {
+                        s.player_character = (s.player_character + characters.COUNT - 1) % characters.COUNT;
+                    }
+                    if (input.justPressed(gp, w4.BUTTON_RIGHT)) {
+                        s.player_character = (s.player_character + 1) % characters.COUNT;
+                    }
+                    if (input.justPressed(gp, w4.BUTTON_1)) s.setup_flash_timer = c.SETUP_FLASH_TOTAL_FRAMES;
+                }
+            },
+            .setup_cpu_reveal => {
+                render.drawSetupCpuRevealScreen();
+                // No input here -- the spin always plays out in full (see
+                // state.cpu_reveal_tick/cpu_reveal_timer) before moving on.
+                s.cpu_reveal_timer -= 1;
+                if (s.cpu_reveal_timer == 0) {
+                    s.cpu_reveal_tick += 1;
+                    if (s.cpu_reveal_tick >= c.CPU_REVEAL_STEPS) {
+                        s.menu_phase = .setup_difficulty;
+                    } else {
+                        s.cpu_reveal_timer = c.CPU_REVEAL_HOLD_BASE + s.cpu_reveal_tick * c.CPU_REVEAL_HOLD_GROWTH;
+                    }
+                }
+            },
+            .setup_difficulty => {
+                render.drawSetupDifficultyScreen();
                 // Sets the CPU's difficulty for the whole series (see
                 // state.difficulty and cpu_ai.configFor) -- revisitable here
                 // again once a series concludes and this screen comes back
                 // around, but fixed for the whole series in between.
                 if (input.justPressed(gp, w4.BUTTON_LEFT) and s.difficulty > 1) s.difficulty -= 1;
                 if (input.justPressed(gp, w4.BUTTON_RIGHT) and s.difficulty < 10) s.difficulty += 1;
-                // Up/down cycles the player's own character; the CPU's pick
-                // is always recomputed to differ from it (see
-                // characters.cpuPickFor), never chosen directly.
-                if (input.justPressed(gp, w4.BUTTON_UP)) {
-                    s.player_character = (s.player_character + characters.COUNT - 1) % characters.COUNT;
-                    s.cpu_character = characters.cpuPickFor(s.player_character);
-                }
-                if (input.justPressed(gp, w4.BUTTON_DOWN)) {
-                    s.player_character = (s.player_character + 1) % characters.COUNT;
-                    s.cpu_character = characters.cpuPickFor(s.player_character);
-                }
                 if (input.justPressed(gp, w4.BUTTON_1)) board.beginCountdown();
             },
         }

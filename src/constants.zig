@@ -44,6 +44,21 @@ pub const POINTS_TO_WIN: u8 = 2; // best of 3 -- first to 2 match wins takes the
 pub const GARBAGE_PUNISH_DISPLAY_FRAMES: u16 = 90; // 1.5s -- how long a character's "punish" reaction lingers
 pub const CHARACTER_ANIM_FRAME_TICKS: u32 = 20; // frames each of a character's 2 animation frames holds
 
+// The character screen's confirm flash (see state.setup_flash_timer) --
+// blinks the selection outline on/off every TOGGLE frames for the whole
+// span, 3 full on/off cycles.
+pub const SETUP_FLASH_TOTAL_FRAMES: u16 = 24;
+pub const SETUP_FLASH_TOGGLE_FRAMES: u16 = 4;
+
+// The CPU reveal screen's "spinning to a stop" animation (see
+// state.cpu_reveal_tick/cpu_reveal_timer) -- each of CPU_REVEAL_STEPS ticks
+// holds longer than the last (tick i holds CPU_REVEAL_HOLD_BASE +
+// i*CPU_REVEAL_HOLD_GROWTH frames), reading as a slot machine slowing down
+// before landing on the real pick at the final tick.
+pub const CPU_REVEAL_STEPS: u16 = 10;
+pub const CPU_REVEAL_HOLD_BASE: u16 = 3;
+pub const CPU_REVEAL_HOLD_GROWTH: u16 = 3;
+
 // The "3 2 1 START" countdown overlay at match start (see
 // board.beginCountdown/state.countdown_timer/render.drawCountdown): "3",
 // "2", "1" each rise a couple pixels then hold steady for about a second;

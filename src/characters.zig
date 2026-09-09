@@ -96,9 +96,12 @@ pub const ALL = [COUNT]Character{
 };
 
 // The CPU always picks a different character than the player's current
-// pick (see main.zig) -- deterministic (not randomized) is plenty: there's
-// no expectation of variety run-to-run here, only that the two sides never
-// visually clash.
-pub fn cpuPickFor(player_pick: u8) u8 {
-    return (player_pick + 1) % COUNT;
+// pick (see main.zig, which now plays this out as its own animated reveal
+// screen) -- `roll` (any value; only taken mod COUNT - 1) picks uniformly
+// among the COUNT - 1 characters that aren't player_pick, so the CPU's
+// choice genuinely varies run to run instead of always being "the next
+// one" -- only that the two sides never visually clash is guaranteed.
+pub fn cpuPickFor(player_pick: u8, roll: u32) u8 {
+    const offset: u8 = @intCast(roll % (COUNT - 1));
+    return (player_pick + 1 + offset) % COUNT;
 }

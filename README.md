@@ -115,9 +115,11 @@ the side panel. Both run the exact same rules and physics.
   small row of pips next to each side's own score fills in as they win matches; losing a match doesn't end
   the series, just that one match -- press X to move straight into the next one, same difficulty, running
   score carried over as pips, not reset.
-- Two screens lead into a series: a branded **title** screen (press X to continue), then a **setup** screen
-  where **left/right** sets the CPU's difficulty, 1-10, shown as a filled-in bar rather than a bare number
-  (press X to begin). Every level runs the same move-search engine (see `src/cpu_engine.zig`) and always plays
+- Four screens lead into a series: a branded **title** screen (press X to continue), then 3 setup steps in
+  order -- pick your **character**, watch the **CPU** pick its own, then set the **difficulty** -- each its
+  own screen rather than everything crammed onto one. On the difficulty screen, **left/right** sets it, 1-10,
+  shown as a filled-in bar rather than a bare number (press X to begin). Every level runs the same move-search
+  engine (see `src/cpu_engine.zig`) and always plays
   its actual best-scored move -- never a random or deliberately mistaken one. Weaker levels play *correctly*,
   just *myopically*: a shallower search, a slower reaction time, and a much lower preference for a chain over
   an equivalently-sized flat match, so they settle for slowly grabbing whatever match is right in front of
@@ -132,22 +134,26 @@ the side panel. Both run the exact same rules and physics.
   raising out of necessity -- gated well clear of the danger threshold, so it can never itself run a stack
   into the ceiling. Difficulty and character are both fixed for the whole series, but revisitable in setup
   again once one concludes.
-- The setup screen also shows all 4 selectable characters at once (see `src/characters.zig`) -- a lizard, a
-  mermaid, a bug, and a cloud puff, each a real pixel-art figure, not just a colored square. **Up/down**
-  cycles your own pick (highlighted with a dithered outline); the CPU always auto-picks a different one (a
-  small arrow marks its pick instead, never itself selectable), recomputed whenever yours changes. Switching
-  rethemes the setup screen's own menu panel border to match your current pick live. Both screens share the
-  same gently-bobbing panel (a true sine-wave ease, "personality") over a slow diagonal-scrolling background
-  of faint drifting blocks.
+- The character screen shows all 4 selectable characters at once (see `src/characters.zig`) -- a lizard, a
+  mermaid, a bug, and a cloud puff, each a real pixel-art figure, not just a colored square. **Left/right**
+  cycles your own pick (highlighted with a dithered outline, rethemeing the screen's own menu panel border to
+  match live); pressing **X** blinks that outline a few times (a short, explicit "confirmed" flash) before
+  moving on. The CPU screen right after plays out its own pick as a brief reveal, not an instant assignment --
+  its portrait spins through the roster once per tick, each tick held a little longer than the last (a slot
+  machine slowing to a stop), before landing for good on a genuinely random pick (never the same character as
+  yours, but otherwise no more likely to be any one of the other 3 -- see `characters.cpuPickFor`) with no
+  further input needed. Every pre-game screen shares the same background (a slow diagonal-scrolling drift of
+  faint blocks) and an identically-positioned menu panel that stays perfectly still -- no bobbing or other
+  idle motion -- so nothing shifts around between steps except the content itself.
 - Your chosen character themes your own main-frame border (its own color and a distinct border pattern --
   solid, checkered, dashed, or a thin double outline) and gives you an animated portrait next to your score,
   reacting to what's actually happening: idle otherwise, excited on a combo or chain, wincing for a moment
   right after taking a garbage attack, and celebrating on the game-over screen if you won (the losing side's
   own character shows there too, wincing, rather than only the winner appearing) -- both characters stay
   visible and animated straight through the countdown and closing-wipe transitions between matches, never
-  just popping in once gameplay resumes. The CPU picks its
-  own character the same way, always a different one than yours (see `characters.cpuPickFor`), theming its
-  own mini board's border and getting the identical portrait treatment next to its own score.
+  just popping in once gameplay resumes. Whichever character the CPU picked (see the reveal screen above)
+  themes its own mini board's border the same way and gets the identical portrait treatment next to its own
+  score.
 - Press **X** to (re)start a match -- both boards reset immediately, but simulation stays frozen behind a
   brief "3 2 1 START" countdown first (each number rises up a couple pixels then holds for about a second;
   "START" rises the same way but then blinks a few times) before the match actually begins. Losing plays out
@@ -383,9 +389,11 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
 - `src/characters.zig` — the 4 selectable characters: a real pixel-art sprite each (same text-art bitmap
   convention as `symbols.zig`) -- a lizard, a mermaid, a bug, and a cloud puff -- plus a hue/dither pair, a
   main-frame border style, and a `face` anchor (where `render_character.zig`'s shared expression logic
-  centers on top of that sprite). `cpuPickFor` always returns a different character than whichever one is
-  passed in, so the CPU's own pick (set in `main.zig` whenever the player changes theirs on the setup screen)
-  never matches the player's.
+  centers on top of that sprite). `cpuPickFor(player_pick, roll)` picks uniformly among the 3 characters that
+  aren't `player_pick`, using `roll` (any value; only taken mod `COUNT - 1`) to choose which -- called once in
+  `main.zig` with a fresh `s.player.rngNext()` right as the character screen's confirm flash finishes, so the
+  CPU's pick genuinely varies run to run (never the player's own, but otherwise no more likely to be any one
+  of the other 3) rather than always being "the next one in the list".
 - `src/render_character.zig` — shared character-portrait rendering: draws a character's own sprite in its
   own hue(s), then an animated face reacting to `stateFor` (a board's own `garbage_punish_timer`/
   `combo_display_timer`/`chain` decide punish/combo/normal; `win` is passed explicitly by the game-over
@@ -414,8 +422,12 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   this surface. Used via `tools/wasm4-harness.js`.
 - `src/main.zig` — wires the above together behind the WASM-4 `start`/`update` entry points: drives both
   boards' input/simulation/rise each frame, and tracks who wins once either tops out. Before a series begins,
-  `state.menu_phase` steps through the title and setup screens (see `render.drawTitleScreen`/
-  `drawSetupScreen`); between a countdown and real gameplay sits a frozen "3 2 1 START" overlay
+  `state.menu_phase` steps through the title screen and the 3 setup steps in turn (see
+  `render.drawTitleScreen`/`drawSetupCharacterScreen`/`drawSetupCpuRevealScreen`/`drawSetupDifficultyScreen`) --
+  the character screen's own confirm flash (`state.setup_flash_timer`) and the CPU reveal screen's own spin
+  (`state.cpu_reveal_tick`/`cpu_reveal_timer`) both gate input and just count down each frame until they're
+  done, the same "freeze input, drive purely off a timer" shape as the countdown/closing-wipe overlays below;
+  between a countdown and real gameplay sits a frozen "3 2 1 START" overlay
   (`state.countdown_timer`, started by `board.beginCountdown`); between a match ending and the winner overlay
   sits a frozen closing wipe (`state.closing_timer`, started by `board.beginClosing`) -- both gate simulation
   entirely, only ever calling `render.render()` (which reads board state passively) plus their own overlay on

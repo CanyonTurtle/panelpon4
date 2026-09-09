@@ -429,15 +429,34 @@ pub var set_winner: Winner = .none;
 
 pub var started: bool = false;
 
-// Which of the two pre-game screens is showing while `!started` and no
+// Which of the pre-game screens is showing while `!started` and no
 // countdown is active -- see main.zig. `title` is the branded splash
-// ("PRESS X" to continue); `setup` is where the CPU difficulty is actually
-// adjusted before a series begins. Reset to `.title` only when a full
-// series concludes (see set_winner above) -- mid-series, pressing X on a
-// match's own game-over screen skips straight back into a countdown, never
-// back through either menu screen.
-pub const MenuPhase = enum { title, setup };
+// ("PRESS X" to continue); the 3 `setup_*` phases walk through picking a
+// character, watching the CPU pick its own, then setting the difficulty,
+// in that order, one step at a time rather than everything crammed onto a
+// single screen. Reset to `.title` only when a full series concludes (see
+// set_winner above) -- mid-series, pressing X on a match's own game-over
+// screen skips straight back into a countdown, never back through any menu
+// screen.
+pub const MenuPhase = enum { title, setup_character, setup_cpu_reveal, setup_difficulty };
 pub var menu_phase: MenuPhase = .title;
+
+// Counts down while the character screen's confirm flash (see
+// render.drawSetupCharacterScreen) plays, right after pressing X there --
+// nonzero means input is ignored and the selection outline is blinking
+// instead of solid; once it reaches 0, main.zig rolls the CPU's own pick
+// and moves on to `.setup_cpu_reveal`.
+pub var setup_flash_timer: u16 = 0;
+
+// Drives the CPU reveal screen's own "spinning to a stop" animation (see
+// render.drawSetupCpuRevealScreen) -- `cpu_reveal_tick` is which step of the
+// spin is currently showing (the portrait cycles once per tick, holding
+// each a little longer than the last -- see constants.CPU_REVEAL_HOLD_BASE/
+// GROWTH -- until the final tick, which always shows the real pick already
+// stored in `cpu_character` below), and `cpu_reveal_timer` counts down the
+// current tick's own hold.
+pub var cpu_reveal_tick: u16 = 0;
+pub var cpu_reveal_timer: u16 = 0;
 
 // A brief "3 2 1 START" overlay shown once per match, right after both
 // boards (and the shared row cache) reset but before real simulation
