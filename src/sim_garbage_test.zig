@@ -73,10 +73,75 @@ test "recycling cells in the same group are staggered one at a time, not simulta
     const earlier = b.cellAt(7, 2).timer;
     const later = b.cellAt(6, 2).timer;
     try testing.expectEqual(earlier + c.POP_STAGGER_FRAMES, later);
-    // Both members (and the 3 real matched cells) share the same whole-group
-    // resolution timer regardless of their own individual stagger.
+    // Both garbage members share the same whole-group resolution timer
+    // (see real_group_end/group_end in checkMatches -- garbage always
+    // resolves on the full group's schedule), and here it also happens to
+    // equal the real matched cells' own resolution timer, since in this
+    // particular layout the *real* cells (5,0)-(5,2) are the last members
+    // in the whole group's stagger order anyway (garbage sorts before them
+    // -- see the bottom-right-to-top-left ordering). That's a coincidence
+    // of this specific arrangement, not a general guarantee -- see the next
+    // test for a layout where they genuinely differ.
     try testing.expectEqual(b.cellAt(5, 0).pop_group_end, b.cellAt(6, 2).pop_group_end);
     try testing.expectEqual(b.cellAt(6, 2).pop_group_end, b.cellAt(7, 2).pop_group_end);
+}
+
+test "a real match's own cells free up for gravity as soon as their own pop finishes, not held hostage by a slower-finishing garbage clump in the same group" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    // Real match on row 6; garbage at row 5 touches it from above. Row 5
+    // sorts *after* row 6 in the group's bottom-right-to-top-left stagger
+    // order, so this garbage cell ends up the very last member overall --
+    // its own group resolution (which stays on the full group's schedule)
+    // finishes a full POP_STAGGER_FRAMES later than the real cells' own.
+    b.cellAt(6, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(6, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(6, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5, 2).* = .{ .state = .normal, .is_garbage = true };
+    // A block sitting directly above one of the real matched cells, with
+    // nothing else supporting it -- once (6,1) actually clears to empty,
+    // this should immediately start falling into the freed space, proving
+    // the space is genuinely usable again right then, not just visually
+    // "gone" while still logically blocked.
+    b.cellAt(5, 1).* = .{ .color = 2, .state = .normal };
+    _ = sim.checkMatches(&b, &opp, no_settled);
+
+    const member_count = 4; // 3 real + 1 garbage
+    const real_group_end: i16 = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + 2 * c.POP_STAGGER_FRAMES; // real cells are i=0,1,2
+    const full_group_end: i16 = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + (member_count - 1) * c.POP_STAGGER_FRAMES; // garbage is i=3
+
+    try testing.expect(full_group_end > real_group_end);
+    try testing.expectEqual(real_group_end, b.cellAt(6, 0).pop_group_end);
+    try testing.expectEqual(real_group_end, b.cellAt(6, 1).pop_group_end);
+    try testing.expectEqual(real_group_end, b.cellAt(6, 2).pop_group_end);
+    try testing.expectEqual(full_group_end, b.cellAt(5, 2).pop_group_end);
+
+    for (0..@intCast(real_group_end - 1)) |_| sim.simulate(&b, &opp);
+    try testing.expectEqual(s.CellState.popping, b.cellAt(6, 1).state); // not yet -- one frame short
+
+    sim.simulate(&b, &opp); // the real cells' own resolution frame
+    try testing.expectEqual(s.CellState.empty, b.cellAt(6, 0).state);
+    try testing.expectEqual(s.CellState.empty, b.cellAt(6, 2).state);
+    // The block that was resting above (6,1) already started falling into
+    // the newly-freed space, same frame -- the space is immediately usable,
+    // not just visually cleared.
+    try testing.expectEqual(s.CellState.falling, b.cellAt(6, 1).state);
+    // Garbage is a wholly separate piece from the real match -- it just sits
+    // there, inert, still mid-recycle, completely unaffected by the real
+    // match resolving around it.
+    try testing.expectEqual(s.CellState.recycling, b.cellAt(5, 2).state);
+    try testing.expect(b.cellAt(5, 2).is_garbage);
+
+    for (0..@intCast(full_group_end - real_group_end)) |_| sim.simulate(&b, &opp);
+    // The garbage cell has now finished its own, separate resolution --
+    // this piece's only cell, so it converts to a real, chainable block --
+    // and, same frame, immediately starts falling into (6,2), which the
+    // real match freed long before this piece was done. `(5,2)` itself is
+    // left empty behind it.
+    try testing.expectEqual(s.CellState.falling, b.cellAt(6, 2).state);
+    try testing.expect(!b.cellAt(6, 2).is_garbage);
+    try testing.expect(b.cellAt(6, 2).chainable);
+    try testing.expectEqual(s.CellState.empty, b.cellAt(5, 2).state);
 }
 
 test "an unrelated garbage cell elsewhere does not recycle" {

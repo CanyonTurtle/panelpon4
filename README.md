@@ -198,7 +198,13 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   color-run, just an ongoing `.popping`/`.recycling` one) -- but only while that group is still in its shared
   pre-pop preamble (`Cell.pre_pop_timer > 0`), not once it's already progressed into its own staggered reveal
   cascade, so a piece that only happens to land on an already-resolving clump much later doesn't get swept
-  into a pop it was never actually part of. The one hidden ring-buffer row still rising in from below
+  into a pop it was never actually part of. Real matched cells resolve (clear to empty, freeing their space
+  for gravity) on their own schedule -- the longest stagger among just the *real* members of a group -- not
+  the mixed group's as a whole: a garbage clump pulled into the same event by propagation can legitimately
+  take much longer to finish its own staggered reveal, but that never holds the real match's own space
+  hostage in the meantime (`real_group_end` vs. `group_end` in `checkMatches`) -- the garbage itself is
+  entirely unaffected by this and keeps resolving (staying put, converting or reverting in place) exactly as
+  it always has, on the full group's schedule. The one hidden ring-buffer row still rising in from below
   (`constants.ROWS - 1`) never seeds a match or gets pulled into one via propagation/late-join, even though
   gravity treats it like any other row -- it only becomes matchable once a rise promotes it into the lowest
   row the cursor can actually reach (see `render.drawBoard`'s dithered overlay for the matching visual cue).
@@ -229,9 +235,15 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   still decides whether a given swap actually succeeds, exactly as it does for the player, so this never
   lets the CPU do anything a player couldn't also do from the same position.
 - `src/cpu_engine.zig` — the actual move-search engine behind the CPU: snapshots the board into a small
-  `Grid`, tries every legal swap on a copy, resolves each one's full logical cascade (gravity, matches,
-  garbage propagation, repeated for chains) to score it, and adds a bitboard-driven structural heuristic
-  (same-color adjacency, column height) so moves that don't pop anything yet are still ranked sensibly --
+  `Grid`, tries every *legal* swap on a copy (`legalSwap` excludes not just garbage/both-empty pairings but
+  also two cells of the identical color -- a strict no-op that leaves the grid unchanged, so at depth > 1 it
+  could otherwise still collect a full discounted lookahead credit for whatever already was the board's best
+  next move, a bonus that had nothing to do with this swap ever being played -- letting a true no-op
+  occasionally outscore every real option and trap the CPU reselecting, and "playing", the exact same no-op
+  swap forever, since playing it never actually changes the board), resolves each one's full logical cascade
+  (gravity, matches, garbage propagation, repeated for chains) to score it, and adds a bitboard-driven
+  structural heuristic (same-color adjacency, column height) so moves that don't pop anything yet are still
+  ranked sensibly --
   plus a discounted look at the best follow-up move (a shallow best-first search, compounding the same
   discount again each ply deeper) for the higher levels, rewarding a setup move that enables a strong reply
   over a shallow immediate pop. Each cascade pass's real-block score scales with the *cube* of chain depth

@@ -386,14 +386,35 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
             // ordinary staggered pop duration, so the group doesn't resolve
             // before the preamble even finishes playing.
             const group_end: i16 = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + @as(i16, @intCast(member_count - 1)) * c.POP_STAGGER_FRAMES;
+            // Real matched cells vanish together once their *own* longest
+            // stagger finishes -- not the mixed group's as a whole. They
+            // still need a shared resolution moment among themselves (see
+            // group_end's own doc comment: gravity should react to a whole
+            // match clearing at once, not to each gap opening one at a
+            // time), but a slower-finishing garbage clump pulled into the
+            // same event has no business holding that moment hostage: real
+            // cells are genuinely gone once their pop animation ends, and
+            // the match's own space should free up for gravity/new blocks
+            // right then, while any garbage that happens to still be mid-
+            // recycle simply keeps sitting there inert, resolving on its own
+            // schedule (see below), exactly as it always does on its own.
+            var real_last_i: ?usize = null;
+            for (0..member_count) |i| {
+                if (!self.cellAt(members[i][0], members[i][1]).is_garbage) real_last_i = i;
+            }
+            const real_group_end: i16 = if (real_last_i) |ri|
+                c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + @as(i16, @intCast(ri)) * c.POP_STAGGER_FRAMES
+            else
+                group_end; // unreachable in practice: a group with no real members never formed from a color match
             for (0..member_count) |i| {
                 const pos = members[i];
                 const cell = self.cellAt(pos[0], pos[1]);
                 // A real matched cell pops (.popping); a garbage cell pulled
                 // in via propagation recycles (.recycling) instead -- see
                 // CellState and render.drawRecyclingCell. Both share the same
-                // per-member stagger (timer) and the same whole-group
-                // resolution timer (pop_group_end).
+                // per-member stagger (timer), but resolve (pop_group_end)
+                // on their own separate schedules -- see real_group_end
+                // above.
                 cell.state = if (cell.is_garbage) .recycling else .popping;
                 cell.timer = c.POP_FRAMES + @as(i16, @intCast(i)) * c.POP_STAGGER_FRAMES;
                 // Identical for every member (no i offset) -- see
@@ -401,7 +422,7 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
                 // lockstep; `timer` above doesn't start counting down until
                 // this reaches 0 (see sim.simulate).
                 cell.pre_pop_timer = c.PRE_POP_TOTAL_FRAMES;
-                cell.pop_group_end = group_end;
+                cell.pop_group_end = if (cell.is_garbage) group_end else real_group_end;
                 if (cell.is_garbage) {
                     // A piece taller than one row only ever converts its
                     // bottom-most (per column) row per event -- decided per

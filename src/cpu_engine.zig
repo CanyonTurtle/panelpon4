@@ -70,12 +70,26 @@ fn swappable(v: i8) bool {
 }
 
 // Mirrors sim.trySwap's own guard (see input.canSwapAt too): neither side
-// garbage, and not both empty (there'd be nothing to actually swap).
+// garbage, and not both empty (there'd be nothing to actually swap) -- plus
+// one guard sim.trySwap doesn't need: identical values on both sides. A
+// player swapping two same-colored blocks is harmless (just a wasted
+// button press), but offering it to the *engine* as a legal candidate is
+// actively dangerous: swapping two equal values leaves the grid perfectly
+// unchanged, so its own immediate score is always exactly baseline -- yet
+// at depth > 1 it still collects evaluateMove's full discounted lookahead
+// bonus for whatever already was the board's best follow-up move, a bonus
+// that was available whether or not this pointless swap was ever played.
+// That free, unearned credit can let a true no-op outscore every real
+// option on a quiet board, and since playing it never actually changes
+// anything, the next decide tick faces the exact same board and reaches
+// the exact same conclusion -- the CPU gets stuck reselecting (and
+// "playing") the identical no-op swap forever. Excluding it here means it
+// never enters the search at all, so it can never win by default.
 fn legalSwap(grid: *const Grid, row: u8, col: u8) bool {
     const a = grid.cell[row][col];
     const b = grid.cell[row][col + 1];
     if (!swappable(a) or !swappable(b)) return false;
-    if (a == EMPTY and b == EMPTY) return false;
+    if (a == b) return false;
     return true;
 }
 

@@ -80,6 +80,32 @@ test "bestMove never proposes swapping a garbage cell, and still finds a real wi
     try testing.expectEqual(@as(u8, 3), mv.col);
 }
 
+test "bestMove never proposes swapping two cells of the identical color, even when a lookahead bonus would otherwise make it look best" {
+    var b: s.Board = .{};
+    // (5,2)/(5,3) are the SAME color -- swapping them is a strict no-op (the
+    // grid comes out byte-for-byte identical), so it must never be a legal
+    // candidate at all. Before this was excluded, its own immediate value
+    // (always exactly the board's baseline structural score, since nothing
+    // changed) could still pick up a full discounted lookahead credit for
+    // whatever already was the board's best next move -- see (8,0)-(8,3)
+    // below, a genuine winning swap elsewhere -- a bonus that had nothing to
+    // do with this swap ever being played. That let a true no-op occasionally
+    // outscore every real option, and since playing it never changes the
+    // board, the next decide tick reached the exact same conclusion --
+    // exactly the reported "CPU spins forever swapping the same two blocks"
+    // bug.
+    b.cellAt(5 + c.SPAWN_ROWS, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(5 + c.SPAWN_ROWS, 3).* = .{ .color = 1, .state = .normal };
+    b.cellAt(8 + c.SPAWN_ROWS, 0).* = .{ .color = 2, .state = .normal };
+    b.cellAt(8 + c.SPAWN_ROWS, 1).* = .{ .color = 2, .state = .normal };
+    b.cellAt(8 + c.SPAWN_ROWS, 2).* = .{ .color = 3, .state = .normal };
+    b.cellAt(8 + c.SPAWN_ROWS, 3).* = .{ .color = 2, .state = .normal };
+
+    const grid = engine.Grid.fromBoard(&b);
+    const mv = engine.bestMove(grid, 3) orelse return error.NoMoveFound;
+    try testing.expect(!(mv.row == 5 and mv.col == 2));
+}
+
 test "bestMove on a completely empty board finds no legal swap" {
     var b: s.Board = .{};
     const grid = engine.Grid.fromBoard(&b);
