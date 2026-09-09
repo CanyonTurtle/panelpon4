@@ -1,17 +1,19 @@
-// Shared character-portrait rendering (see characters.zig for the roster)
-// -- used by both render.zig (the player) and render_cpu.zig (the CPU),
-// so the two sides get identical treatment regardless of which character
-// either one is playing as.
+// Shared character-portrait rendering (see characters.zig for the roster
+// and each one's own pixel-art sprite) -- used by both render.zig (the
+// player) and render_cpu.zig (the CPU), so the two sides get identical
+// treatment regardless of which character either one is playing as.
 
 const w4 = @import("wasm4.zig");
 const c = @import("constants.zig");
 const s = @import("state.zig");
 const characters = @import("characters.zig");
-const sym = @import("symbols.zig");
 
 // Mirrors render.zig's own DC_BG/HUE_DRAWCOLOR mapping.
 const DC_BG: u16 = 1;
 const HUE_DRAWCOLOR = [3]u16{ 2, 3, 4 };
+
+pub const W: i32 = @intCast(characters.SPRITE_W);
+pub const H: i32 = @intCast(characters.SPRITE_H);
 
 pub const CharState = enum { normal, combo, punish, win };
 
@@ -32,54 +34,32 @@ pub fn currentFrame() u1 {
     return @intCast(@mod(@divTrunc(s.frame_count, c.CHARACTER_ANIM_FRAME_TICKS), 2));
 }
 
-fn fillHues(hues: [2]u8, x: i32, y: i32, size: i32) void {
-    if (hues[0] == hues[1]) {
-        w4.DRAW_COLORS.* = HUE_DRAWCOLOR[hues[0]];
-        w4.Rect(x, y, @intCast(size), @intCast(size));
-        return;
-    }
-    var dy: i32 = 0;
-    while (dy < size) : (dy += 1) {
-        var dx: i32 = 0;
-        while (dx < size) : (dx += 1) {
-            w4.DRAW_COLORS.* = if (@mod(dx + dy, 2) == 0) HUE_DRAWCOLOR[hues[0]] else HUE_DRAWCOLOR[hues[1]];
-            w4.Rect(x + dx, y + dy, 1, 1);
-        }
-    }
-}
-
 fn plot(x: i32, y: i32) void {
     w4.Rect(x, y, 1, 1);
 }
 
-// A small animated portrait, SIZE x SIZE: filled with the character's own
-// hue(s) (solid, or a dithered blend for a two-hue character), a chamfered
-// corner punch (the same bevel technique used throughout the game), its
-// emblem in the bottom-right corner (reusing symbols.MICRO_SYMBOLS, already
-// in the game for the CPU's micro board), and an animated face reacting to
-// `state` -- 2 frames (`frame`, from currentFrame() above), the same shared
-// expression logic for every character regardless of which one it is.
-pub const SIZE: i32 = 14;
-
+// Draws a character's own pixel-art sprite (see characters.zig), filled
+// with its hue(s) (solid, or a dithered blend for a two-hue character), then
+// an animated face reacting to `state` -- 2 frames (`frame`, from
+// currentFrame() above) -- centered on the character's own `face` anchor,
+// the same shared expression logic for every character regardless of which
+// one it is.
 pub fn draw(x: i32, y: i32, char_index: u8, state: CharState, frame: u1) void {
     const char = characters.ALL[char_index];
-    fillHues(char.hues, x, y, SIZE);
+    const dithered = char.hues[0] != char.hues[1];
 
-    w4.DRAW_COLORS.* = DC_BG;
-    plot(x, y);
-    plot(x + SIZE - 1, y);
-    plot(x, y + SIZE - 1);
-    plot(x + SIZE - 1, y + SIZE - 1);
-
-    const rows = sym.MICRO_SYMBOLS[char.emblem];
-    for (rows, 0..) |row, ry| {
+    for (char.sprite, 0..) |row, ry| {
         for (row, 0..) |ch, rx| {
-            if (ch == '#') plot(x + SIZE - 4 + @as(i32, @intCast(rx)), y + SIZE - 4 + @as(i32, @intCast(ry)));
+            if (ch != '#') continue;
+            const hue_idx: usize = if (!dithered) 0 else @intCast(@mod(rx + ry, 2));
+            w4.DRAW_COLORS.* = HUE_DRAWCOLOR[char.hues[hue_idx]];
+            plot(x + @as(i32, @intCast(rx)), y + @as(i32, @intCast(ry)));
         }
     }
 
-    const cx = x + @divTrunc(SIZE, 2);
-    const cy = y + @divTrunc(SIZE, 2);
+    w4.DRAW_COLORS.* = DC_BG;
+    const cx = x + char.face[0];
+    const cy = y + char.face[1];
     const ex1 = cx - 4;
     const ex2 = cx + 2;
     const ey = cy - 3;
@@ -110,8 +90,8 @@ pub fn draw(x: i32, y: i32, char_index: u8, state: CharState, frame: u1) void {
             plot(cx, cy + 2);
             plot(cx - 1, cy + 3);
             plot(cx, cy + 3);
-            const spark_x = if (frame == 0) x + 2 else x + SIZE - 3;
-            plot(spark_x, y + 2);
+            const spark_x = if (frame == 0) x + 1 else x + W - 2;
+            plot(spark_x, y + 1);
         },
         .punish => {
             // A furrowed, angled brow and a small flat mouth -- the second
@@ -138,7 +118,7 @@ pub fn draw(x: i32, y: i32, char_index: u8, state: CharState, frame: u1) void {
             plot(cx - 1, cy + 3);
             plot(cx, cy + 3);
             plot(cx + 1, cy + 2);
-            if (frame == 0) plot(x + SIZE - 3, y + 2);
+            if (frame == 0) plot(x + W - 2, y + 1);
         },
     }
 }

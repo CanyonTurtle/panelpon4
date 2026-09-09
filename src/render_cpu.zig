@@ -301,7 +301,7 @@ pub fn draw() void {
     // own panel layout in render.drawPanel).
     rchar.draw(c.PANEL_X, LABEL_Y, s.cpu_character, rchar.stateFor(&s.cpu), rchar.currentFrame());
 
-    const text_x = c.PANEL_X + rchar.SIZE + 2;
+    const text_x = c.PANEL_X + rchar.W + 2;
     w4.DRAW_COLORS.* = 0x0002;
     var buf: [12]u8 = undefined;
     const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.cpu.score}) catch "0";

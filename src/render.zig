@@ -417,6 +417,18 @@ fn drawThemedBand(x: i32, y: i32, w: i32, h: i32, hues: [2]u8, style: characters
     }
 }
 
+// A plain (unchamfered) themed border around an arbitrary panel -- used by
+// the setup screen to retheme itself to whichever character is currently
+// selected (see drawSetupScreen), the same color+pattern treatment
+// drawFrame below gives the real game board.
+fn drawThemedPanelBorder(x: i32, y: i32, w: i32, h: i32, char: characters.Character) void {
+    const t = FRAME_THICKNESS;
+    drawThemedBand(x, y, w, t, char.hues, char.border_style, true);
+    drawThemedBand(x, y + h - t, w, t, char.hues, char.border_style, true);
+    drawThemedBand(x, y, t, h, char.hues, char.border_style, false);
+    drawThemedBand(x + w - t, y, t, h, char.hues, char.border_style, false);
+}
+
 // Frame around the playable area with a 2px-radius chamfer at each corner
 // (WASM-4's rect() has no rounded-corner support, so the corners are faked
 // by punching a small diagonal notch out of the frame in the background
@@ -523,7 +535,7 @@ fn drawCursor() void {
 fn drawPanel() void {
     rchar.draw(c.PANEL_X, 0, s.player_character, rchar.stateFor(&s.player), rchar.currentFrame());
 
-    const text_x = c.PANEL_X + rchar.SIZE + 2;
+    const text_x = c.PANEL_X + rchar.H + 2;
     w4.DRAW_COLORS.* = 0x0002;
     var buf: [12]u8 = undefined;
     const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.player.score}) catch "0";
@@ -542,10 +554,10 @@ fn drawPanel() void {
         var buf2: [12]u8 = undefined;
         const chain_str = std.fmt.bufPrint(&buf2, "x{d}", .{s.player.chain}) catch "";
         w4.DRAW_COLORS.* = 0x0004;
-        w4.Text(chain_str, c.PANEL_X, rchar.SIZE + 2);
+        w4.Text(chain_str, c.PANEL_X, rchar.H + 2);
     } else if (s.player.combo_display_timer > 0) {
         w4.DRAW_COLORS.* = 0x0004;
-        w4.Text("COMBO", c.PANEL_X, rchar.SIZE + 2);
+        w4.Text("COMBO", c.PANEL_X, rchar.H + 2);
     }
 }
 
@@ -571,21 +583,23 @@ fn menuPanelY(base_y: i32) i32 {
 }
 
 // Common backdrop for both pre-game screens: the parallaxing background
-// (see render_bg.zig) plus the bezeled panel itself, gently bobbing (see
-// menuPanelY) -- callers just draw their own content into the returned Y.
-// `base_y`/`h` differ between the two screens (setup has more to fit), so
-// both are the caller's own choice rather than shared constants.
-fn drawMenuPanel(base_y: i32, h: i32) i32 {
+// (see render_bg.zig) plus the panel's own fill, gently bobbing (see
+// menuPanelY) -- callers draw their own border (the title screen's neutral
+// bezel vs. the setup screen's character-themed one) and content into the
+// returned Y. `base_y`/`h` differ between the two screens (setup has more
+// to fit), so both are the caller's own choice rather than shared
+// constants.
+fn drawMenuPanelFill(base_y: i32, h: i32) i32 {
     bg.draw();
     const y = menuPanelY(base_y);
     w4.DRAW_COLORS.* = 0x0001;
     w4.Rect(MENU_PANEL_X, y, MENU_PANEL_W, @intCast(h));
-    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, h);
     return y;
 }
 
 pub fn drawTitleScreen() void {
-    const y = drawMenuPanel(30, 100);
+    const y = drawMenuPanelFill(30, 100);
+    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100);
     w4.DRAW_COLORS.* = 0x0003;
     w4.Text("PANELPON4", 40, y + 24);
     w4.DRAW_COLORS.* = 0x0002;
@@ -612,40 +626,66 @@ fn drawDifficultyBar(x: i32, y: i32) void {
     }
 }
 
+// Left edge of each of the 4 portraits in the setup screen's character row
+// -- evenly spaced, centered in the panel's own width.
+const CHAR_SLOT_GAP: i32 = 8;
+const CHAR_ROW_W: i32 = characters.COUNT * rchar.W + (characters.COUNT - 1) * CHAR_SLOT_GAP;
+fn charSlotX(index: u8) i32 {
+    const start = MENU_PANEL_X + @divTrunc(MENU_PANEL_W - CHAR_ROW_W, 2);
+    return start + @as(i32, index) * (rchar.W + CHAR_SLOT_GAP);
+}
+
 pub fn drawSetupScreen() void {
-    const y = drawMenuPanel(14, 140);
+    const y = drawMenuPanelFill(14, 140);
+    // Retheme the panel border itself to whichever character is currently
+    // selected -- "switching should retheme the setup menu".
+    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 140, characters.ALL[s.player_character]);
+
     w4.DRAW_COLORS.* = 0x0003;
     w4.Text("SETUP", 58, y + 6);
-
-    // Character picker: the player's own pick on the left (cycled with
-    // up/down -- see main.zig), the CPU's own auto-pick (always a
-    // different one -- see characters.cpuPickFor) shown alongside on the
-    // right, never selectable itself.
     w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("CHARACTER", 40, y + 20);
-    const p_char = characters.ALL[s.player_character];
-    const cpu_char = characters.ALL[s.cpu_character];
+    w4.Text("CHARACTER", 40, y + 18);
+
+    // All 4 characters are shown at once (not just the current pick) --
+    // up/down cycles the player's own selection (see main.zig), highlighted
+    // with a dithered outline; the CPU's own auto-pick (always a different
+    // one -- see characters.cpuPickFor) is marked with a small arrow above
+    // it instead, never itself selectable.
     const frame = rchar.currentFrame();
-    rchar.draw(30, y + 32, s.player_character, .normal, frame);
-    rchar.draw(116, y + 32, s.cpu_character, .normal, frame);
-    w4.DRAW_COLORS.* = 0x0004;
-    w4.Text("VS", 74, y + 36);
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text(p_char.name, 22, y + 50);
-    w4.Text(cpu_char.name, 108, y + 50);
-    w4.Text("^", 34, y + 62);
-    w4.Text("v", 34, y + 70);
+    const row_y = y + 34;
+    for (0..characters.COUNT) |i| {
+        const cx = charSlotX(@intCast(i));
+        rchar.draw(cx, row_y, @intCast(i), .normal, frame);
+        if (i == s.player_character) {
+            drawDitheredRectOutline(cx - 2, row_y - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
+        }
+        if (i == s.cpu_character) {
+            w4.DRAW_COLORS.* = 0x0004;
+            w4.Rect(cx + @divTrunc(rchar.W, 2) - 1, row_y - 5, 3, 1);
+            w4.Rect(cx + @divTrunc(rchar.W, 2) - 2, row_y - 4, 5, 1);
+        }
+    }
 
     w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("DIFFICULTY", 40, y + 84);
-    drawDifficultyBar(40, y + 96);
+    var buf2: [24]u8 = undefined;
+    const you_label = std.fmt.bufPrint(&buf2, "YOU: {s}", .{characters.ALL[s.player_character].name}) catch "YOU";
+    w4.Text(you_label, 28, row_y + rchar.H + 6);
+    w4.DRAW_COLORS.* = 0x0004;
+    var buf3: [24]u8 = undefined;
+    const cpu_label = std.fmt.bufPrint(&buf3, "CPU: {s}", .{characters.ALL[s.cpu_character].name}) catch "CPU";
+    w4.Text(cpu_label, 28, row_y + rchar.H + 16);
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text("^ up   down v", 30, row_y + rchar.H + 28);
+
+    w4.Text("DIFFICULTY", 40, y + 96);
+    drawDifficultyBar(40, y + 108);
     var buf: [24]u8 = undefined;
     // Every level runs cpu_engine's actual move search -- see
     // cpu_ai.configFor -- lower levels just listen to it far less reliably.
     const label = std.fmt.bufPrint(&buf, "LEVEL {d}", .{s.difficulty}) catch "LEVEL ?";
-    w4.Text(label, 58, y + 108);
-    w4.Text("<-      ->", 40, y + 120);
-    w4.Text("PRESS X", 52, y + 132);
+    w4.Text(label, 58, y + 120);
+    w4.Text("<-      ->", 40, y + 132);
+    w4.Text("PRESS X", 52, y + 144);
 }
 
 // Bezeled orange border for a full-screen overlay panel (the countdown and
@@ -690,13 +730,22 @@ pub fn drawGameOver() void {
     w4.Rect(x, y, w, h);
     drawPanelBorder(x, y, w, h);
 
-    // The winning side's own character, celebrating -- not shown for a
-    // draw, since neither side actually won.
-    switch (s.winner) {
-        .player => rchar.draw(x + w - rchar.SIZE - 4, y + 4, s.player_character, .win, rchar.currentFrame()),
-        .cpu => rchar.draw(x + w - rchar.SIZE - 4, y + 4, s.cpu_character, .win, rchar.currentFrame()),
-        .draw, .none => {},
-    }
+    // Both characters stay visible through the transition -- the winning
+    // side celebrating on the right, the losing side wincing on the left
+    // (a draw shows both idle, since neither actually won or lost).
+    const frame = rchar.currentFrame();
+    const player_state: rchar.CharState = switch (s.winner) {
+        .player => .win,
+        .cpu => .punish,
+        .draw, .none => .normal,
+    };
+    const cpu_state: rchar.CharState = switch (s.winner) {
+        .cpu => .win,
+        .player => .punish,
+        .draw, .none => .normal,
+    };
+    rchar.draw(x + 4, y + 4, s.player_character, player_state, frame);
+    rchar.draw(x + w - rchar.W - 4, y + 4, s.cpu_character, cpu_state, frame);
 
     w4.DRAW_COLORS.* = 0x0004;
     w4.Text("MATCH OVER", 40, 58);
