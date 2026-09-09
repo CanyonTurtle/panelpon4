@@ -15,6 +15,7 @@ pub fn justPressed(gp: u8, btn: u8) bool {
 }
 
 pub fn moveCursor(dir: u8) void {
+    s.cursor_idle_frames = 0;
     if (dir == w4.BUTTON_LEFT) {
         if (s.player.cursor_col > 0) s.player.cursor_col -= 1;
     } else if (dir == w4.BUTTON_RIGHT) {
@@ -53,6 +54,7 @@ fn stepDas(cur_dir: u8, held: *u8, counter: *u8) void {
 }
 
 pub fn updateCursorMovement(gp: u8) void {
+    s.cursor_idle_frames += 1; // moveCursor resets this back to 0 if a move actually happens this frame
     const dirs = [_]u8{ w4.BUTTON_LEFT, w4.BUTTON_RIGHT, w4.BUTTON_UP, w4.BUTTON_DOWN };
     var cur_dir: u8 = 0;
     for (dirs) |d| {
@@ -72,8 +74,9 @@ pub fn updateCursorMovement(gp: u8) void {
 // the swap animation allows, with none silently lost to bad timing.
 pub fn updateSwap(gp: u8) void {
     if (justPressed(gp, w4.BUTTON_1)) s.button_pending_swap = true;
-    if (s.button_pending_swap and canSwapAt(s.player.cursor_row, s.player.cursor_col)) {
+    if (s.button_pending_swap and canSwapAt(&s.player, s.player.cursor_row, s.player.cursor_col)) {
         sim.trySwap(&s.player);
+        s.cursor_swap_flash = c.CURSOR_SWAP_FLASH_FRAMES;
         s.button_pending_swap = false;
     }
 }
@@ -87,14 +90,16 @@ const TOUCH_SWIPE_THRESHOLD: i32 = 8;
 // now -- mirrors sim.trySwap's own guard exactly, without performing the
 // swap, so a pending touch swipe can tell "not valid, ever" (off the board)
 // apart from "not valid *yet*" (e.g. still mid-animation from the previous
-// swap) and keep retrying only the latter.
-fn canSwapAt(row: u8, col: u8) bool {
+// swap) and keep retrying only the latter. Generic over which board (not
+// just the player's) so cpu_ai.zig's own restricted, step-by-step cursor
+// movement can share this exact check rather than duplicating it.
+pub fn canSwapAt(board: *s.Board, row: u8, col: u8) bool {
     // row is relative to the visible window (cursor_row/touch_anchor_row) --
     // add SPAWN_ROWS to reach the matching absolute logical row (see
     // sim.trySwap's identical conversion).
     const abs_row = row + c.SPAWN_ROWS;
-    const a = s.player.cellAt(abs_row, col);
-    const b = s.player.cellAt(abs_row, col + 1);
+    const a = board.cellAt(abs_row, col);
+    const b = board.cellAt(abs_row, col + 1);
     if (!sim.swappable(a.state) or !sim.swappable(b.state)) return false;
     if (a.is_garbage or b.is_garbage) return false;
     if (a.state == .empty and b.state == .empty) return false;
@@ -169,10 +174,12 @@ pub fn updateTouch() void {
 fn applyPendingTouchSwipe() void {
     switch (s.touch_pending_dir) {
         w4.BUTTON_UP => {
+            s.cursor_idle_frames = 0;
             if (s.touch_anchor_row > 0) s.touch_anchor_row -= 1;
             s.touch_pending_dir = 0;
         },
         w4.BUTTON_DOWN => {
+            s.cursor_idle_frames = 0;
             if (s.touch_anchor_row < c.VISIBLE_ROWS - 1) s.touch_anchor_row += 1;
             s.touch_pending_dir = 0;
         },
@@ -182,10 +189,11 @@ fn applyPendingTouchSwipe() void {
                 return;
             }
             const target = s.touch_anchor_col - 1;
-            if (!canSwapAt(s.touch_anchor_row, target)) return; // keep pending, retry next frame
+            if (!canSwapAt(&s.player, s.touch_anchor_row, target)) return; // keep pending, retry next frame
             s.player.cursor_row = s.touch_anchor_row;
             s.player.cursor_col = target;
             sim.trySwap(&s.player);
+            s.cursor_swap_flash = c.CURSOR_SWAP_FLASH_FRAMES;
             s.touch_anchor_col = target; // the touched block moved left with it
             s.touch_pending_dir = 0;
         },
@@ -194,10 +202,11 @@ fn applyPendingTouchSwipe() void {
                 s.touch_pending_dir = 0;
                 return;
             }
-            if (!canSwapAt(s.touch_anchor_row, s.touch_anchor_col)) return;
+            if (!canSwapAt(&s.player, s.touch_anchor_row, s.touch_anchor_col)) return;
             s.player.cursor_row = s.touch_anchor_row;
             s.player.cursor_col = s.touch_anchor_col;
             sim.trySwap(&s.player);
+            s.cursor_swap_flash = c.CURSOR_SWAP_FLASH_FRAMES;
             s.touch_anchor_col += 1; // the touched block moved right with it
             s.touch_pending_dir = 0;
         },

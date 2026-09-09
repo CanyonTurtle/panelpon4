@@ -44,7 +44,11 @@ Each board is the traditional Panel de Pon size, 6 columns by 12 rows. You play 
 each with your own full board -- yours at normal size on the left, the CPU's at a simplified micro scale in
 the side panel. Both run the exact same rules and physics.
 
-- **Arrow keys**: move the two-tile cursor.
+- **Arrow keys**: move the two-tile cursor. It snaps back to its small, settled outline the instant it
+  moves and only starts idle-blinking again once it's been sitting still for a while, so a fast-playing
+  player never sees it blink at all; a small crosshair marks its exact center, and it contracts further for
+  a few frames right when a swap actually goes through, a quick tactile "click" of feedback distinct from
+  the idle pulse.
 - **X**: swap the two blocks under the cursor. Buffers a single press if the cursor's pair can't swap yet
   (still animating from the previous swap), firing it automatically the instant it can, so mashing X chains
   swaps at full speed instead of dropping presses that land at the wrong instant.
@@ -80,6 +84,9 @@ the side panel. Both run the exact same rules and physics.
   the same way. A connected clump of garbage falls and lands as one rigid piece (a piece touching
   down stops the whole clump at once), rendering as a single seamless bezeled slab rather than individual
   tiles.
+- The single new row rising in from below isn't playable yet: it's marked with a sparse dither overlay and
+  can't be matched into (or match on its own) until it's fully risen into the lowest row you can actually
+  reach with the cursor, at which point the dithering clears and it's live like any other row.
 - A column with blocks near the top bounces in place as a warning that it's close to the rise hazard.
 - Each board's floor rises forever, faster as that board's own score climbs -- true for the CPU too, so a
   CPU that's playing efficiently is also accelerating its own rise. Topping out isn't instant, though: once
@@ -184,7 +191,13 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   separate late-join sweep additionally lets a garbage cell that finishes falling *after* an adjacent match
   has already started popping still join that same still-active group (inheriting its current
   timer/pop_group_end rather than being missed forever because the match it touches is no longer a fresh
-  color-run, just an ongoing `.popping`/`.recycling` one).
+  color-run, just an ongoing `.popping`/`.recycling` one) -- but only while that group is still in its shared
+  pre-pop preamble (`Cell.pre_pop_timer > 0`), not once it's already progressed into its own staggered reveal
+  cascade, so a piece that only happens to land on an already-resolving clump much later doesn't get swept
+  into a pop it was never actually part of. The one hidden ring-buffer row still rising in from below
+  (`constants.ROWS - 1`) never seeds a match or gets pulled into one via propagation/late-join, even though
+  gravity treats it like any other row -- it only becomes matchable once a rise promotes it into the lowest
+  row the cursor can actually reach (see `render.drawBoard`'s dithered overlay for the matching visual cue).
 - `src/sim_garbage.zig` — garbage's rigid-body group gravity (a connected clump falls and lands as one piece,
   computed by connectivity fresh every frame), its spawn placement, and the queueing lifecycle between the
   two (`queueChainGarbage`/`queueComboGarbage` record what a combo or a still-growing chain would send,
@@ -200,11 +213,15 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   leaves a piece queued and retries it next frame if `spawnGarbage` reports it didn't fit yet.
 - `src/cpu_ai.zig` — the CPU opponent's move picker, branching on `state.difficulty` (see `configFor`):
   every level from 1-10 runs `cpu_engine.zig`'s actual search, differing only in how often they listen to
-  it (a steep chance to ignore its pick and play a random legal swap instead at the low end, falling to
-  zero by level 10), search depth, and reaction speed. Doesn't wait for the whole board to go idle before
-  thinking/acting -- like a player, whose own input is never blocked by unrelated activity elsewhere (see
-  `input.updateSwap`) -- it reasons about and can act on whatever's true right now, including cells still
-  falling/landing/mid-swap elsewhere (see `cpu_grid.Grid.fromBoard`); `sim.trySwap`'s own per-cell check
+  it (a steep chance to ignore its pick and target a random legal-looking swap instead at the low end,
+  falling to zero by level 10), search depth, and reaction speed. Doesn't wait for the whole board to go
+  idle before thinking/acting -- like a player, whose own input is never blocked by unrelated activity
+  elsewhere (see `input.updateSwap`) -- it reasons about and can act on whatever's true right now, including
+  cells still falling/landing/mid-swap elsewhere (see `cpu_grid.Grid.fromBoard`). Crucially, the engine only
+  ever *decides* a target cell -- the CPU cursor then walks toward it one cell at a time, at the same pace a
+  player's own cursor moves, only actually swapping once it's genuinely arrived (giving up and re-deciding if
+  the board changes underneath it while walking over, e.g. the target cell fell away or popped); it can never
+  teleport straight to any two cells on the board the way it used to. `sim.trySwap`'s own per-cell check
   still decides whether a given swap actually succeeds, exactly as it does for the player, so this never
   lets the CPU do anything a player couldn't also do from the same position.
 - `src/cpu_engine.zig` — the actual move-search engine behind the CPU: snapshots the board into a small
@@ -213,20 +230,26 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   (same-color adjacency, column height) so moves that don't pop anything yet are still ranked sensibly --
   plus a discounted look at the best follow-up move (a shallow best-first search, compounding the same
   discount again each ply deeper) for the higher levels, rewarding a setup move that enables a strong reply
-  over a shallow immediate pop. The *lookahead* -- never the top-level decision itself, which always weighs
-  every legal candidate -- is beam-pruned (see `BEAM_WIDTH`): only the most promising handful of a ply's
-  candidates get a real recursive search of their own, the rest keep just their immediate value, which is
-  what keeps a beam-searched depth 3-4 roughly as cheap as an exhaustive depth 2 used to be (memory was
-  never the constraint -- `Grid` is 72 bytes with no heap allocation, and recursion depth maps straight to
-  a handful of small stack frames -- the branching factor is). Also weighs
+  over a shallow immediate pop. Each cascade pass's real-block score scales with the *cube* of chain depth
+  (not just its square), so a genuine multi-link chain decisively outranks an equally-sized pile of
+  unconnected single matches rather than merely edging it out. The *lookahead* -- never the top-level
+  decision itself, which always weighs every legal candidate -- is beam-pruned (see `BEAM_WIDTH`): only the
+  most promising handful of a ply's candidates get a real recursive search of their own, the rest keep just
+  their immediate value, which is what keeps a beam-searched depth 3-4 roughly as cheap as an exhaustive
+  depth 2 used to be (memory was never the constraint -- `Grid` is 72 bytes with no heap allocation, and
+  recursion depth maps straight to a handful of small stack frames -- the branching factor is). Also weighs
   raising the stack (see `raiseValue`) against the best available swap: worth more the fewer real blocks
   are left on the board, worth less than any real match regardless, so it only wins when the board is
   genuinely short on material and has nothing better to do -- and it's judged against the height a raise
   would actually leave the tallest column at, not the current one, so a materially-poor but dangerously
   tall, skinny stack doesn't get raised straight into topping out (the same steep height-danger penalty
-  also discourages any *swap* that would leave a column that close to the top, not just raising). Deliberately
-  its own small simulator rather than reusing `sim.zig` directly -- see the module's own doc comment for why
-  -- tests in the companion `src/cpu_engine_test.zig`.
+  also discourages any *swap* that would leave a column that close to the top, not just raising). `bestAction`
+  weighs both the best swap and raising against simply doing nothing (the board's own current structural
+  score, `NO_OP_EPSILON` apart): when neither meaningfully improves on the status quo, it returns `.none`
+  rather than shuffling blocks back and forth forever chasing a razor-thin, meaningless edge -- the fix for
+  a reported "spins in place endlessly" bug on boards with no genuinely good option. Deliberately its own
+  small simulator rather than reusing `sim.zig` directly -- see the module's own doc comment for why -- tests
+  in the companion `src/cpu_engine_test.zig`.
 - `src/cpu_grid.zig` — the engine's board snapshot (`Grid`), split out into its own file purely so
   `cpu_engine.zig` and `cpu_engine_garbage.zig` can each depend on it without depending on each other.
   `fromBoard` reads `.falling`/`.landing`/`.swapping` real cells as their true color (they already have

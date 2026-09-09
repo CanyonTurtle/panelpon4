@@ -28,9 +28,30 @@ fn matchEligible(state: s.CellState) bool {
     return state == .normal or state == .landing;
 }
 
-fn isActivePop(state: s.CellState) bool {
-    return state == .popping or state == .recycling;
+// True only while a cell is *both* actively popping/recycling *and* still in
+// its group's shared pre-pop preamble (see Cell.pre_pop_timer) -- i.e. it
+// hasn't actually started its own staggered reveal/pop cascade yet. The
+// late-join sweep below only ever attaches to a neighbor in this window: a
+// piece landing that early is plausibly part of the very same cascade
+// moment, just a frame or more behind (see the sweep's own doc comment for
+// why that's worth catching) -- but a piece that only arrives *after* the
+// preamble, once the group is already visibly resolving, is a separate,
+// later event that merely happens to touch it, and should never be swept
+// into a pop it was never actually part of (a genuinely different piece
+// landing on an already-recycling clump does not itself pop).
+fn isLateJoinable(cell: *const s.Cell) bool {
+    return (cell.state == .popping or cell.state == .recycling) and cell.pre_pop_timer > 0;
 }
+
+// The one hidden ring-buffer row rising in from below (see board.doRise) --
+// not reachable by the cursor (input.zig/cpu_ai.zig both stay within
+// VISIBLE_ROWS), but still a real part of the grid gravity operates on, so a
+// block can rest there like anywhere else. It just isn't *matchable* yet:
+// see the settled_color/settled_chainable overrides below, which keep it
+// out of both seeding a run and being pulled in via propagation, until a
+// rise actually promotes it into the lowest accessible row (see
+// render.drawBoard's dithered overlay for the matching visual cue).
+const HIDDEN_ROW = c.ROWS - 1;
 
 fn colorAt(grid: *const [c.ROWS][c.COLS]i16, row: i32, col: i32) i16 {
     if (row < 0 or row >= c.ROWS or col < 0 or col >= c.COLS) return -1;
@@ -69,6 +90,12 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
             settled_chainable[lr][col] = matchEligible(cell.state) and cell.chainable;
         }
     }
+    // The hidden row never seeds or joins a match -- see HIDDEN_ROW's own
+    // doc comment.
+    for (0..c.COLS) |col| {
+        settled_color[HIDDEN_ROW][col] = -1;
+        settled_chainable[HIDDEN_ROW][col] = false;
+    }
 
     // Sweeps a garbage cell that only *just* became match-eligible (it
     // finished its own landing bounce, or just settled, this frame) into an
@@ -94,25 +121,26 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
         late_joined = false;
         for (0..c.ROWS) |lr| {
             for (0..c.COLS) |col| {
+                if (lr == HIDDEN_ROW) continue;
                 const cell = self.cellAt(@intCast(lr), @intCast(col));
                 if (!cell.is_garbage or !matchEligible(cell.state)) continue;
 
                 var anchor: ?*s.Cell = null;
                 if (lr > 0) {
                     const n = self.cellAt(@intCast(lr - 1), @intCast(col));
-                    if (isActivePop(n.state)) anchor = n;
+                    if (isLateJoinable(n)) anchor = n;
                 }
                 if (anchor == null and lr + 1 < c.ROWS) {
                     const n = self.cellAt(@intCast(lr + 1), @intCast(col));
-                    if (isActivePop(n.state)) anchor = n;
+                    if (isLateJoinable(n)) anchor = n;
                 }
                 if (anchor == null and col > 0) {
                     const n = self.cellAt(@intCast(lr), @intCast(col - 1));
-                    if (isActivePop(n.state)) anchor = n;
+                    if (isLateJoinable(n)) anchor = n;
                 }
                 if (anchor == null and col + 1 < c.COLS) {
                     const n = self.cellAt(@intCast(lr), @intCast(col + 1));
-                    if (isActivePop(n.state)) anchor = n;
+                    if (isLateJoinable(n)) anchor = n;
                 }
                 const a = anchor orelse continue;
 
@@ -215,7 +243,7 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
         propagated = false;
         for (0..c.ROWS) |lr| {
             for (0..c.COLS) |col| {
-                if (matched[lr][col]) continue;
+                if (matched[lr][col] or lr == HIDDEN_ROW) continue;
                 const cell = self.cellAt(@intCast(lr), @intCast(col));
                 if (!matchEligible(cell.state) or !cell.is_garbage) continue;
                 const touches_matched =

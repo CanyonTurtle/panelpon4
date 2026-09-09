@@ -275,3 +275,39 @@ test "a big combo drops garbage on the opponent's board, never the triggering bo
     for (0..3) |col| try testing.expect(opp.cellAt(0, @intCast(col)).is_garbage);
     for (0..c.COLS) |col| try testing.expectEqual(s.CellState.empty, b.cellAt(0, @intCast(col)).state);
 }
+
+test "the hidden ring-buffer row never seeds a match on its own" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    // A vertical run of 3, with the bottom cell sitting in the one hidden
+    // row (c.ROWS-1, rising in from below -- see board.doRise) -- not yet
+    // promoted into the lowest *accessible* row, so this must not match.
+    b.cellAt(c.ROWS - 3, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(c.ROWS - 2, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(c.ROWS - 1, 0).* = .{ .color = 1, .state = .normal };
+    try testing.expect(!sim.checkMatches(&b, &opp, no_settled));
+    try testing.expectEqual(s.CellState.normal, b.cellAt(c.ROWS - 1, 0).state);
+}
+
+test "the same run one row higher, fully within accessible rows, does match" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    b.cellAt(c.ROWS - 4, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(c.ROWS - 3, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(c.ROWS - 2, 0).* = .{ .color = 1, .state = .normal };
+    try testing.expect(sim.checkMatches(&b, &opp, no_settled));
+}
+
+test "propagation does not pull the hidden row's garbage into an adjacent match" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    b.cellAt(c.ROWS - 2, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(c.ROWS - 2, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(c.ROWS - 2, 2).* = .{ .color = 1, .state = .normal };
+    // Touches the match from directly below, but sits in the hidden row.
+    b.cellAt(c.ROWS - 1, 0).* = .{ .state = .normal, .is_garbage = true };
+
+    try testing.expect(sim.checkMatches(&b, &opp, no_settled)); // the real match itself still pops
+    try testing.expectEqual(s.CellState.normal, b.cellAt(c.ROWS - 1, 0).state); // the hidden garbage isn't pulled in
+    try testing.expect(b.cellAt(c.ROWS - 1, 0).is_garbage);
+}

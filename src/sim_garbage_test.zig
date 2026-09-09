@@ -512,3 +512,29 @@ test "a late-joining garbage cell still follows the per-piece bottom-row rule, n
     try testing.expect(!b.cellAt(15, 3).garbage_reveals);
     try testing.expect(b.cellAt(16, 3).garbage_reveals);
 }
+
+test "a garbage piece that lands well after the preamble ends does not get swept into an already-resolving group" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    b.cellAt(15, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(15, 2).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(&b, &opp, no_settled);
+    try testing.expectEqual(s.CellState.popping, b.cellAt(15, 0).state);
+
+    // Run the group past its shared pre-pop preamble (see Cell.pre_pop_timer)
+    // -- it's now genuinely mid-cascade, not just "about to start".
+    for (0..@intCast(c.PRE_POP_TOTAL_FRAMES + 2)) |_| sim.simulate(&b, &opp);
+    try testing.expectEqual(@as(i16, 0), b.cellAt(15, 0).pre_pop_timer);
+    try testing.expect(b.cellAt(15, 0).pop_group_end > 0); // still active
+
+    // A separate garbage piece then lands touching it -- too late to
+    // plausibly be part of the same original cascade moment (see
+    // isLateJoinable's own doc comment) -- it must not pop just because it
+    // happens to touch an already-recycling clump.
+    b.cellAt(15, 3).* = .{ .state = .normal, .is_garbage = true };
+    _ = sim.checkMatches(&b, &opp, no_settled);
+
+    try testing.expectEqual(s.CellState.normal, b.cellAt(15, 3).state);
+    try testing.expect(b.cellAt(15, 3).is_garbage);
+}

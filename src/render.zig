@@ -349,7 +349,6 @@ fn drawBoard(b: *s.Board) void {
         var col: u8 = 0;
         while (col < c.COLS) : (col += 1) {
             const cell = b.cellAt(lr, col);
-            if (cell.state == .empty) continue;
             const x = c.BOARD_X + @as(i32, col) * c.TILE;
             switch (cell.state) {
                 .normal => {
@@ -368,6 +367,23 @@ fn drawBoard(b: *s.Board) void {
                 .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, rgarbage.edgesAt(b, lr, col)),
                 .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},
+            }
+            // The one hidden ring-buffer row (see sim_matches.HIDDEN_ROW):
+            // not yet promoted into the lowest accessible row, so a sparse
+            // dither overlay marks the whole row as still "arriving" --
+            // clearing the instant a rise actually promotes it (at which
+            // point this same content renders one `lr` lower and no longer
+            // matches this check at all).
+            if (lr == c.ROWS - 1) {
+                var dy: i32 = 0;
+                while (dy < c.TILE) : (dy += 1) {
+                    var dx: i32 = 0;
+                    while (dx < c.TILE) : (dx += 1) {
+                        if (@mod(dx + dy, 2) != 0) continue;
+                        w4.DRAW_COLORS.* = DC_BG;
+                        w4.Rect(x + dx, base_y + dy, 1, 1);
+                    }
+                }
             }
         }
     }
@@ -493,11 +509,24 @@ fn drawCursor() void {
     const base_x = c.BOARD_X + @as(i32, s.player.cursor_col) * c.TILE;
     const base_y = c.BOARD_Y + @as(i32, s.player.cursor_row) * c.TILE - @as(i32, @intCast(s.player.scroll_px));
 
-    // Blink by contracting slightly instead of changing color.
+    // Blink by contracting slightly instead of changing color -- driven by
+    // cursor_idle_frames (time since the cursor last actually moved), not
+    // raw frame_count, and phase-shifted so idle_frames == 0 lands right on
+    // the most-contracted point of the cycle: the cursor snaps to its
+    // small, settled outline the instant it moves, eases back out over the
+    // next half-period, and only starts ambiently blinking again if it's
+    // still sitting there once that resolves -- a fast-playing player never
+    // sees it blink at all.
     const half = @divTrunc(CURSOR_PULSE_PERIOD, 2);
-    const t: i32 = @intCast(@mod(s.frame_count, @as(u32, @intCast(CURSOR_PULSE_PERIOD))));
+    const t: i32 = @intCast(@mod(s.cursor_idle_frames + @as(u32, @intCast(half)), @as(u32, @intCast(CURSOR_PULSE_PERIOD))));
     const tri: i32 = if (t < half) t else CURSOR_PULSE_PERIOD - t;
-    const contract = @divTrunc(tri * CURSOR_PULSE_AMOUNT, half);
+    var contract = @divTrunc(tri * CURSOR_PULSE_AMOUNT, half);
+
+    // A quick, deliberate extra squeeze right when a swap actually goes
+    // through (state.cursor_swap_flash, set in input.zig) -- distinct
+    // feedback from the ambient idle blink above, on top of it rather than
+    // replacing it.
+    if (s.cursor_swap_flash > 0) contract += 2;
 
     // Pushed out so the cursor straddles the boundary of its two tiles and
     // the surrounding ones, rather than tracing exactly over them. Blocks
@@ -523,6 +552,17 @@ fn drawCursor() void {
     drawDitheredRectOutline(x, y, w, h, CURSOR_DITHER_HUES);
     if (w > 2 and h > 2) {
         drawDitheredRectOutline(x + 1, y + 1, w - 2, h - 2, CURSOR_DITHER_HUES);
+    }
+
+    // A small crosshair right at the boundary between the cursor's two
+    // tiles, so its exact center reads clearly even while it's contracted
+    // or mid-pulse.
+    const cx = base_x + c.TILE;
+    const cy = base_y + @divTrunc(c.TILE, 2);
+    var i: i32 = -2;
+    while (i <= 2) : (i += 1) {
+        plotDithered(cx + i, cy, CURSOR_DITHER_HUES);
+        plotDithered(cx, cy + i, CURSOR_DITHER_HUES);
     }
 }
 

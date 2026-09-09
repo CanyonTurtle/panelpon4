@@ -181,9 +181,15 @@ fn findAndClearMatches(grid: *Grid) MatchResult {
 // mirroring the real cascade (a pop causes a fall, which may complete a new
 // match, and so on -- see sim.simulate/checkMatches) but resolved instantly
 // rather than frame-by-frame. Weighted so a deeper chain always scores above
-// an equally-sized single pop (chain_depth is squared), and a combo (a
-// single pass popping more than the 3-block minimum) adds on top of that --
-// see the module doc comment for the full rationale.
+// an equally-sized single pop -- and by more than a merely-quadratic margin
+// (chain_depth is *cubed*, not squared): a plain combo only ever grows
+// linearly with how many blocks happen to be in one pass, so without a
+// steeper-than-quadratic chain curve, several small unconnected matches can
+// out-score a genuine 2-3 step chain of the same total size, and the engine
+// ends up greedily grabbing whatever's immediately available instead of
+// setting up the chain that's actually worth more. A combo (a single pass
+// popping more than the 3-block minimum) adds on top of that -- see the
+// module doc comment for the full rationale.
 //
 // Public (not just for cpu_ai's move search) so cpu_engine_garbage_test.zig
 // can also use it to resolve a static grid to its final rest state --
@@ -197,7 +203,7 @@ pub fn simulateCascade(grid: *Grid) i32 {
         const result = findAndClearMatches(grid);
         if (!result.any) break;
         chain_depth += 1;
-        var pass_score = @as(i32, @intCast(result.real_count)) * BASE_WEIGHT * chain_depth * chain_depth;
+        var pass_score = @as(i32, @intCast(result.real_count)) * BASE_WEIGHT * chain_depth * chain_depth * chain_depth;
         pass_score += @as(i32, @intCast(result.garbage_count)) * GARBAGE_WEIGHT;
         if (result.real_count > 3) pass_score += @as(i32, @intCast(result.real_count - 3)) * COMBO_WEIGHT;
         total += pass_score;
@@ -452,18 +458,33 @@ pub fn raiseValue(grid: Grid) i32 {
     return value - heightDangerPenalty(maxColumnHeight(&grid) + 1);
 }
 
-pub const Action = union(enum) { swap: Move, raise };
+// How much the best available swap or raise must beat doing nothing by to
+// actually be worth acting on -- small, on the order of a single adjacency-
+// weight unit, just enough to absorb near-zero structural noise. Without
+// this, a board with no genuinely good options left could still have the
+// engine pick whichever swap scores a hair above another purely by
+// structural jitter, then next turn pick the *reverse* swap for the same
+// reason (undoing its own last move), oscillating forever between two
+// moves that never actually accomplish anything -- see bestAction.
+const NO_OP_EPSILON: i32 = 2;
 
-// The engine's entry point (see cpu_ai.update): either the best legal swap,
-// or a request to raise the stack instead, whichever scores higher right
-// now. A real match/chain (always worth several hundred points -- see
-// simulateCascade/BASE_WEIGHT) will always beat raising by a wide margin
-// regardless of material, so this never passes up an actual win; raising
-// only wins when there's no good swap AND material is genuinely short (see
-// raiseValue), or when there's no legal swap at all.
+pub const Action = union(enum) { swap: Move, raise, none };
+
+// The engine's entry point (see cpu_ai.update): the best legal swap, a
+// request to raise the stack instead, or neither -- whichever scores
+// highest right now, judged against doing nothing at all (see
+// NO_OP_EPSILON). A real match/chain (always worth several hundred points
+// -- see simulateCascade/BASE_WEIGHT) will always beat both raising and
+// doing nothing by a wide margin regardless of material, so this never
+// passes up an actual win; raising only wins when there's no good swap AND
+// material is genuinely short (see raiseValue), and `.none` only wins when
+// neither meaningfully improves on the board as it already stands.
 pub fn bestAction(grid: Grid, depth: u8) Action {
     const swap_result = bestSwapScored(grid, depth);
     const swap_value = if (swap_result) |r| r.value else std.math.minInt(i32);
-    if (raiseValue(grid) > swap_value) return .raise;
+    const raise_value = raiseValue(grid);
+    const baseline = structuralScore(&grid);
+    if (@max(swap_value, raise_value) <= baseline + NO_OP_EPSILON) return .none;
+    if (raise_value > swap_value) return .raise;
     return .{ .swap = swap_result.?.move };
 }

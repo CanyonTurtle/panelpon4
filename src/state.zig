@@ -422,6 +422,20 @@ pub var prev_gamepad: u8 = 0;
 pub var held_dir: u8 = 0;
 pub var das_counter: u8 = 0;
 
+// Frames since the player's own cursor last actually moved (see
+// input.moveCursor/applyPendingTouchSwipe, the only places that reset this
+// to 0) -- render.drawCursor uses it (instead of raw frame_count) to drive
+// the idle blink, so the cursor snaps back to its small, settled outline the
+// instant it moves and only starts blinking again once it's been sitting
+// still for a while -- a fast-playing player never sees it blink at all.
+pub var cursor_idle_frames: u32 = 0;
+
+// Counts down from a few frames the instant a swap actually goes through
+// (see input.updateSwap/applyPendingTouchSwipe) -- render.drawCursor adds an
+// extra contraction on top of the ordinary blink while this is nonzero, a
+// quick, deliberate "click" of feedback distinct from the idle pulse.
+pub var cursor_swap_flash: u8 = 0;
+
 // One-deep input buffering for the swap button (X), mirroring touch's own
 // buffering (see touch_pending_dir below): a press that lands while the
 // cursor's current pair can't swap yet (e.g. still mid-animation from the

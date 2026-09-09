@@ -188,6 +188,35 @@ test "bestAction refuses to raise a skinny pillar that's already dangerously tal
     try testing.expect(action != .raise);
 }
 
+test "bestAction does nothing when the best swap and raising are both within epsilon of the status quo" {
+    var b: s.Board = .{};
+    // The whole board, filled with a (row + 2*col) % 5 pattern using all 5
+    // colors. A plain (row + col) % k stripe always lets some swap realign
+    // two cells to match their neighbor (the pattern is diagonal-invariant:
+    // shifting one row is the same as shifting one column), handing the
+    // engine a free adjacency-score improvement from nowhere -- this one
+    // isn't, by construction (swapping two cells in the same row moves each
+    // by +-2*col worth of value, which never lines up with the +-1*row step
+    // to its new vertical neighbors, and symmetrically for column swaps).
+    // No swap here can improve on the status quo or set off a real match
+    // (no three consecutive cells in either direction ever share a color to
+    // begin with), and there's plenty of material (72 real cells, well
+    // above LOW_MATERIAL_THRESHOLD) with no dangerous height, so raising is
+    // disfavored too. With nothing better to do, the engine should just sit
+    // still rather than shuffle blocks around or raise for no reason.
+    var lr: u8 = 0;
+    while (lr < c.VISIBLE_ROWS) : (lr += 1) {
+        for (0..c.COLS) |col_usize| {
+            const col: u8 = @intCast(col_usize);
+            b.cellAt(lr + c.SPAWN_ROWS, col).* = .{ .color = @intCast((@as(u32, lr) + 2 * col) % 5), .state = .normal };
+        }
+    }
+
+    const grid = engine.Grid.fromBoard(&b);
+    const action = engine.bestAction(grid, 1);
+    try testing.expectEqual(engine.Action.none, action);
+}
+
 test "raiseValue penalizes a dangerously tall column enough to outweigh scarce material" {
     var b: s.Board = .{};
     var lr: u8 = 2;
