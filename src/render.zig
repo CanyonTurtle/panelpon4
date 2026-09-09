@@ -343,11 +343,6 @@ fn drawBoard(b: *s.Board) void {
     for (0..c.COLS) |ci| col_stressed[ci] = isColumnStressed(b, @intCast(ci));
     const bounce = stressBounceOffset();
     const wiped = closingWipedRows();
-    // One glyph per settled garbage piece (see rgarbage.markCenters) -- lets
-    // two different pieces resting against each other, rendered as one
-    // seamless slab with no visible seam (see rgarbage.drawLinked), still
-    // read as visually distinct blocks instead of one bigger one.
-    const garbage_centers = rgarbage.markCenters(b);
 
     // Starts at SPAWN_ROWS, not 0 -- rows before that are the offscreen
     // garbage staging area (see constants.SPAWN_ROWS/Board.physRow), never
@@ -371,7 +366,6 @@ fn drawBoard(b: *s.Board) void {
                     // sync with it.
                     if (cell.is_garbage) {
                         rgarbage.drawLinked(x, base_y, rgarbage.edgesAt(b, lr, col));
-                        if (garbage_centers[lr][col]) rgarbage.drawMark(x, base_y);
                     } else {
                         const sym_bounce = if (col_stressed[col]) bounce else 0;
                         drawNormalCell(x, base_y, cell.color, sym_bounce);
@@ -406,6 +400,16 @@ fn drawBoard(b: *s.Board) void {
             }
         }
     }
+
+    // One mark per settled garbage piece, at its own true pixel-space
+    // centroid (see garbage_pieces.pieceCenters) -- drawn as its own pass,
+    // on top of everything above, since a centroid can straddle several
+    // cells rather than belonging to any single one of them. Lets two
+    // different pieces resting against each other, rendered as one seamless
+    // slab with no visible seam (see rgarbage.drawLinked), still read as
+    // visually distinct blocks instead of one bigger one.
+    const centers = rgarbage.pieceCenters(b);
+    for (centers.items[0..centers.count]) |pc| rgarbage.drawMark(pc.x, pc.y);
 }
 
 // Covers over whatever drawBoard just drew below BOARD_BOTTOM -- a row

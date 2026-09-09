@@ -83,27 +83,6 @@ pub const SYM_STAR = [SYMBOL_SIZE][]const u8{
     ".....#.....",
     "...........",
 };
-// A small solid rivet/mark, not paired with any block color -- used instead
-// to mark the center of a contiguous garbage piece (see
-// render_garbage.markCenters/drawMark), one per piece, so two different
-// pieces resting against each other (rendered as one seamless slab, no
-// visible seam -- see render_garbage.drawLinked) still read as visually
-// distinct blocks. Deliberately much smaller and solid, unlike the larger
-// hollow SYM_DIAMOND above, so it can never be mistaken for a real block's
-// own color symbol.
-pub const SYM_GARBAGE_MARK = [SYMBOL_SIZE][]const u8{
-    "...........",
-    "...........",
-    "...........",
-    ".....#.....",
-    "....###....",
-    "...#####...",
-    "....###....",
-    ".....#.....",
-    "...........",
-    "...........",
-    "...........",
-};
 // Colors 0-2 are the solid hues (red, teal, yellow). Colors 3-4 are dithered
 // checkerboard blends of two adjacent hues -- red+teal reads as purple, and
 // teal+yellow reads as green -- giving 5 distinguishable block colors out of

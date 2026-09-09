@@ -110,6 +110,20 @@ pub fn simulate(self: *s.Board, opponent: *s.Board) void {
                         cell.timer -= 1;
                         if (cell.timer == 0) {
                             audio.playPopTick();
+                            // A little impact feedback right as THIS block's
+                            // own shrink animation finishes -- one burst per
+                            // block, each timed to its own staggered pop
+                            // (see POP_STAGGER_FRAMES), not one burst for the
+                            // whole match at once, so it reads as each block
+                            // transforming and popping in turn. Garbage
+                            // cracks open in place instead of shrinking away
+                            // (see the pop_group_end branch below), so it
+                            // gets no burst of its own here.
+                            if (!cell.is_garbage) {
+                                const px = c.BOARD_X + @as(i32, @intCast(col)) * c.TILE + @divTrunc(c.TILE, 2);
+                                const py = c.BOARD_Y + (@as(i32, @intCast(lr)) - @as(i32, c.SPAWN_ROWS)) * c.TILE - @as(i32, @intCast(self.scroll_px)) + @divTrunc(c.TILE, 2);
+                                self.spawnPopParticles(px, py, cell.color);
+                            }
                         }
                     }
                     cell.pop_group_end -= 1;
@@ -166,13 +180,6 @@ pub fn simulate(self: *s.Board, opponent: *s.Board) void {
                             cell.pop_group_end = 0;
                             cell.garbage_reveals = false;
                         } else {
-                            // A little impact feedback right as the block
-                            // actually vanishes -- see Board.spawnPopParticles.
-                            // Pixel center, same math as sim_matches.zig's own
-                            // match-popup placement.
-                            const px = c.BOARD_X + @as(i32, @intCast(col)) * c.TILE + @divTrunc(c.TILE, 2);
-                            const py = c.BOARD_Y + (@as(i32, @intCast(lr)) - @as(i32, c.SPAWN_ROWS)) * c.TILE - @as(i32, @intCast(self.scroll_px)) + @divTrunc(c.TILE, 2);
-                            self.spawnPopParticles(px, py, cell.color);
                             cell.* = s.Cell{};
                             just_cleared[lr][col] = true;
                         }
