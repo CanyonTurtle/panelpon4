@@ -515,7 +515,14 @@ fn drawFrame() void {
 const CURSOR_OUT_BASE: i32 = 1;
 const CURSOR_OUT_PULSE: i32 = 1;
 const CURSOR_CORNER_LEN: i32 = 3;
-const CURSOR_PULSE_PERIOD: i32 = 30;
+// A discrete 2-frame animation (contracted/expanded), not a smooth
+// interpolation -- the same idiom as every other animation in the game
+// (see render_character.currentFrame), holding each state for this many
+// engine frames before toggling to the other. A gradual per-pixel slide
+// instead reads as the dithered checkerboard's two hues swapping in place
+// (since which hue lands on a given pixel depends on its absolute
+// position -- see plotDithered) rather than an actual size change.
+const CURSOR_BREATHE_HOLD_FRAMES: u32 = 15;
 const CURSOR_DITHER_HUES = badge.WARM_DITHER_HUES;
 
 // One tile's own 4 corner brackets -- like a photo mounted by its own four
@@ -553,23 +560,16 @@ fn drawCursor() void {
     const base_x = c.BOARD_X + @as(i32, col) * c.TILE;
     const base_y = c.BOARD_Y + @as(i32, row) * c.TILE - @as(i32, @intCast(s.player.scroll_px));
 
-    // Breathe by pulsing how far out the brackets sit (contracted/settled at
-    // CURSOR_OUT_BASE, breathing out to CURSOR_OUT_BASE + CURSOR_OUT_PULSE
-    // and back) instead of changing color -- driven by cursor_idle_frames
-    // (time since the cursor last actually moved), not raw frame_count, and
-    // phase-shifted so idle_frames == 0 lands right on the most-contracted
-    // point of the cycle: the cursor snaps to it the instant it moves, eases
-    // out over the next half-period, and only starts ambiently breathing
-    // again if it's still sitting there once that resolves -- a
-    // fast-playing player never sees it breathe at all.
-    const half = @divTrunc(CURSOR_PULSE_PERIOD, 2);
-    const t: i32 = @intCast(@mod(s.cursor_idle_frames + @as(u32, @intCast(half)), @as(u32, @intCast(CURSOR_PULSE_PERIOD))));
-    const tri: i32 = if (t < half) t else CURSOR_PULSE_PERIOD - t;
-    // tri itself peaks (== half) right at idle_frames == 0, so it's inverted
-    // here (subtracted from its own max) to get a pulse that's instead zero
-    // (fully contracted) at that instant and grows from there.
-    const pulse = CURSOR_OUT_PULSE - @divTrunc(tri * CURSOR_OUT_PULSE, half);
-    const out = CURSOR_OUT_BASE + pulse;
+    // Breathe by alternating between two discrete sizes (contracted at
+    // CURSOR_OUT_BASE, expanded at CURSOR_OUT_BASE + CURSOR_OUT_PULSE) --
+    // driven by cursor_idle_frames (time since the cursor last actually
+    // moved), not raw frame_count, so idle_frames == 0 always lands on the
+    // contracted frame: the cursor snaps to it the instant it moves, and
+    // only starts alternating again once it's been sitting there for a
+    // whole CURSOR_BREATHE_HOLD_FRAMES -- a fast-playing player never sees
+    // it breathe at all.
+    const expanded = @mod(@divTrunc(s.cursor_idle_frames, CURSOR_BREATHE_HOLD_FRAMES), 2) == 1;
+    const out = if (expanded) CURSOR_OUT_BASE + CURSOR_OUT_PULSE else CURSOR_OUT_BASE;
 
     // Rather than staying pinned to the two static grid tiles, each slot's
     // corners ride along with whatever block is actually there right now --

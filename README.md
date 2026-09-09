@@ -286,9 +286,12 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   standard slow-in/slow-out keyframe spacing for a bounce rather than constant-speed motion. The cursor
   itself is a classic Panel de Pon-style corner bracket at each of its two tiles (`drawCursorCorners`),
   centered on the block it targets and sitting just outside its edges, not a single box around both -- it
-  pulses how far out those brackets sit for its idle breathing (most contracted right when the cursor moves)
-  and, while a swap is actually in progress, offsets each side's brackets to ride along with the block
-  sliding underneath it (the same offset formula as `drawSwappingCell`), rather than sitting still while the
+  alternates between two discrete sizes for its idle breathing (contracted right when the cursor moves, same
+  2-frame-animation idiom as `render_character.currentFrame` -- a gradual pixel-by-pixel slide instead reads
+  as the dithered checkerboard's two hues swapping in place rather than an actual size change, since which
+  hue lands on a given pixel depends on its absolute position) and, while a swap is actually in progress,
+  offsets each side's brackets to ride along with the block sliding underneath it (the same offset formula
+  as `drawSwappingCell`), rather than sitting still while the
   blocks trade places. `drawFrame`'s main-frame border is themed by whichever character the player picked on
   the setup screen
   (`drawThemedBand`, see `characters.BorderStyle`) -- color and fill pattern both.
