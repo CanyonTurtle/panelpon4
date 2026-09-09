@@ -118,6 +118,32 @@ fn drawSymbolFor(color: u8, x: i32, y: i32) void {
     }
 }
 
+// Like drawSymbolFor, but the glyph itself is vertically compressed into
+// (SYMBOL_SIZE - squash) rows (simple nearest-row sampling) and the result
+// re-centered within the normal SYMBOL_SIZE-tall space -- the panic squish
+// (see PANIC_SQUISH_AMOUNT/drawNormalCell) squishes only the symbol, never
+// the block it's drawn on, so this leaves the block's own bevel/fill
+// completely untouched -- only the glyph inside it looks compressed.
+fn drawSymbolSquished(color: u8, x: i32, y: i32, squash: i32) void {
+    if (squash <= 0) {
+        drawSymbolFor(color, x, y);
+        return;
+    }
+    const new_h = SYMBOL_SIZE - squash;
+    if (new_h <= 0) return;
+    w4.DRAW_COLORS.* = DC_BG;
+    const rows = sym.SYMBOLS[color];
+    const y_off = @divTrunc(squash, 2);
+    var oy: i32 = 0;
+    while (oy < new_h) : (oy += 1) {
+        const src_row: usize = @intCast(@divTrunc(oy * SYMBOL_SIZE, new_h));
+        const row = rows[src_row];
+        for (row, 0..) |ch, rx| {
+            if (ch == '#') w4.Rect(x + @as(i32, @intCast(rx)), y + y_off + oy, 1, 1);
+        }
+    }
+}
+
 // Fills a w x h block and punches its 4 corner pixels to background color --
 // the same chamfer technique as the frame's rounded corners, just at a fixed
 // 1px radius -- giving a subtly rounded look instead of a hard square edge.
@@ -143,12 +169,17 @@ fn drawBevelledBlock(x: i32, y: i32, w: i32, h: i32, color: u8) void {
 // it (see isColumnStressed/stressBounceOffset) -- keeps the block's own
 // position (and anything keyed to it, like the hidden row's dither overlay)
 // perfectly still even while a stressed column's symbols wobble in place.
-fn drawNormalCell(x: i32, y: i32, color: u8, sym_bounce: i32) void {
+// squash instead vertically compresses only the symbol glyph itself (see
+// drawSymbolSquished/PANIC_SQUISH_AMOUNT) -- the block's own bevel/fill is
+// never touched by either one, only ever the symbol drawn on top of it.
+// Mutually exclusive with sym_bounce in practice (see drawBoard), so both
+// are never meaningfully nonzero at once.
+fn drawNormalCell(x: i32, y: i32, color: u8, sym_bounce: i32, squash: i32) void {
     // Flush with the tile's top-left corner; the unused trailing 1px on the
     // right/bottom becomes the gap to the next tile (see BLOCK_SIZE).
     drawBevelledBlock(x, y, BLOCK_SIZE, BLOCK_SIZE, color);
     const sym_off = @divTrunc(BLOCK_SIZE - SYMBOL_SIZE, 2);
-    drawSymbolFor(color, x + sym_off, y + sym_off + sym_bounce);
+    drawSymbolSquished(color, x + sym_off, y + sym_off + sym_bounce, squash);
 }
 
 // A real matched block disappearing (see CellState.popping). Garbage never
@@ -165,9 +196,9 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16) vo
         // about to pop, before the actual (staggered) pop cascade begins.
         const elapsed = c.PRE_POP_TOTAL_FRAMES - pre_pop_timer;
         if (elapsed < c.PRE_POP_BLINK_FRAMES) {
-            if (@mod(elapsed, 2) == 0) drawNormalCell(x, y, color, 0);
+            if (@mod(elapsed, 2) == 0) drawNormalCell(x, y, color, 0, 0);
         } else {
-            drawNormalCell(x, y, color, 0);
+            drawNormalCell(x, y, color, 0, 0);
         }
         return;
     }
@@ -175,7 +206,7 @@ fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16) vo
     if (elapsed < 0) {
         // Still waiting its turn in the pop cascade (see POP_STAGGER_FRAMES)
         // -- render exactly like a settled block until then.
-        drawNormalCell(x, y, color, 0);
+        drawNormalCell(x, y, color, 0, 0);
         return;
     }
     var size: i32 = BLOCK_SIZE;
@@ -249,7 +280,7 @@ fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: rgarbage.Edge
         rgarbage.drawLinked(x, y, edges);
         return;
     }
-    drawNormalCell(x, y, color, 0);
+    drawNormalCell(x, y, color, 0, 0);
 }
 
 fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool, edges: rgarbage.Edges) void {
@@ -278,7 +309,7 @@ fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool, edge
 
 fn drawSwappingCell(x: i32, y: i32, color: u8, timer: i16, dir: i8) void {
     const offset: i32 = @as(i32, dir) * @divTrunc(c.TILE * @as(i32, timer), c.SWAP_FRAMES);
-    drawNormalCell(x + offset, y, color, 0);
+    drawNormalCell(x + offset, y, color, 0, 0);
 }
 
 // A column with any content within this many rows of the ceiling (see
@@ -310,6 +341,14 @@ fn isColumnStressed(b: *s.Board, col: u8) bool {
 fn stressBounceOffset() i32 {
     return BOUNCE_KEYFRAMES[s.frame_count % BOUNCE_KEYFRAMES.len];
 }
+
+// How many pixels shorter a settled real block renders while the board's
+// own lose timer (Board.danger_timer) is actually running -- see
+// drawBoard's `panicking` check. A constant squash rather than another
+// animated bounce: the point is a plain, unmistakably different look from
+// the ordinary ambient stress bounce, read at a glance rather than timed
+// against.
+const PANIC_SQUISH_AMOUNT: i32 = 2;
 
 // The board's own visible area ends here vertically -- VISIBLE_ROWS*TILE no
 // longer happens to equal SCREEN_SIZE now that the board isn't always
@@ -343,6 +382,13 @@ fn drawBoard(b: *s.Board) void {
     for (0..c.COLS) |ci| col_stressed[ci] = isColumnStressed(b, @intCast(ci));
     const bounce = stressBounceOffset();
     const wiped = closingWipedRows();
+    // The lose timer (see board.updateDangerTimer) is a strictly more
+    // urgent warning than the ordinary per-column stress bounce above --
+    // once it's actually running, every settled real block switches from
+    // wobbling its symbol to rendering panic-squished instead (see
+    // PANIC_SQUISH_AMOUNT), a clearer "the clock is now really running"
+    // affordance than the milder ambient bounce.
+    const panicking = b.danger_timer > 0;
 
     // Starts at SPAWN_ROWS, not 0 -- rows before that are the offscreen
     // garbage staging area (see constants.SPAWN_ROWS/Board.physRow), never
@@ -363,17 +409,21 @@ fn drawBoard(b: *s.Board) void {
                     // garbage (which has no symbol), stay put at base_y, so
                     // nothing keyed to a block's actual position (like the
                     // hidden row's dither overlay below) ever falls out of
-                    // sync with it.
+                    // sync with it. While panicking, the bounce is replaced
+                    // entirely by a squash (see drawNormalCell's squash) --
+                    // the two are mutually exclusive, never both nonzero.
                     if (cell.is_garbage) {
                         rgarbage.drawLinked(x, base_y, rgarbage.edgesAt(b, lr, col));
+                    } else if (panicking) {
+                        drawNormalCell(x, base_y, cell.color, 0, PANIC_SQUISH_AMOUNT);
                     } else {
                         const sym_bounce = if (col_stressed[col]) bounce else 0;
-                        drawNormalCell(x, base_y, cell.color, sym_bounce);
+                        drawNormalCell(x, base_y, cell.color, sym_bounce, 0);
                     }
                 },
                 .falling => {
                     const y = base_y - cell.fall_off;
-                    if (cell.is_garbage) rgarbage.drawLinked(x, y, rgarbage.edgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color, 0);
+                    if (cell.is_garbage) rgarbage.drawLinked(x, y, rgarbage.edgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color, 0, 0);
                 },
                 .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.pre_pop_timer),
                 .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, rgarbage.edgesAt(b, lr, col), cell.pre_pop_timer, cell.garbage_reveals),

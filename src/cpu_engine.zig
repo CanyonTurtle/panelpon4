@@ -56,6 +56,28 @@ const BASE_WEIGHT: i32 = 10;
 const GARBAGE_WEIGHT: i32 = 6;
 const COMBO_WEIGHT: i32 = 8;
 
+// The current CPU's own tuning knobs -- set by cpu_ai.zig (see configFor)
+// right before each decide call, read below by simulateCascade/raiseValue.
+// Global rather than threaded as an extra parameter through every function
+// in the search (bestMoveValue's own lookahead recurses into itself many
+// times per decision) purely to keep those signatures unchanged; the
+// defaults match the engine's original, undifferentiated full-strength
+// behavior, so nothing that doesn't care about difficulty (existing tests
+// included) needs to set either one.
+//
+// chain_weight scales only the chain-continuation *bonus* (see
+// simulateCascade) -- 100 reproduces the original fixed chain_depth^3
+// curve exactly; less makes a weaker CPU barely value a chain over an
+// equivalent flat match (so it doesn't waste moves chasing a setup it's
+// unlikely to capitalize on anyway), more makes a stronger one value one
+// even further beyond that.
+pub var chain_weight: i32 = 100;
+// raise_bias nudges raiseValue's own value up a little while there's
+// comfortably more headroom than usual (see raiseValue) -- a small
+// preference for a strong CPU to keep building up material for a bigger
+// combo instead of only ever raising out of material necessity.
+pub var raise_bias: i32 = 0;
+
 // Structural heuristic weights (see structuralScore) -- small relative to
 // BASE_WEIGHT so an actual pop this turn always beats a purely structural
 // improvement, but still enough to meaningfully rank moves that don't pop
@@ -195,15 +217,24 @@ fn findAndClearMatches(grid: *Grid) MatchResult {
 // mirroring the real cascade (a pop causes a fall, which may complete a new
 // match, and so on -- see sim.simulate/checkMatches) but resolved instantly
 // rather than frame-by-frame. Weighted so a deeper chain always scores above
-// an equally-sized single pop -- and by more than a merely-quadratic margin
-// (chain_depth is *cubed*, not squared): a plain combo only ever grows
-// linearly with how many blocks happen to be in one pass, so without a
-// steeper-than-quadratic chain curve, several small unconnected matches can
-// out-score a genuine 2-3 step chain of the same total size, and the engine
-// ends up greedily grabbing whatever's immediately available instead of
-// setting up the chain that's actually worth more. A combo (a single pass
-// popping more than the 3-block minimum) adds on top of that -- see the
-// module doc comment for the full rationale.
+// an equally-sized single pop -- and, at full strength (chain_weight ==
+// 100), by more than a merely-quadratic margin (the full curve is
+// chain_depth *cubed*, not squared): a plain combo only ever grows linearly
+// with how many blocks happen to be in one pass, so without a steeper-than-
+// quadratic chain curve, several small unconnected matches can out-score a
+// genuine 2-3 step chain of the same total size, and the engine ends up
+// greedily grabbing whatever's immediately available instead of setting up
+// the chain that's actually worth more. A combo (a single pass popping more
+// than the 3-block minimum) adds on top of that -- see the module doc
+// comment for the full rationale.
+//
+// Only the chain-continuation *bonus* above a flat match's own face value
+// scales with chain_weight (see the module var's own doc comment) -- a
+// first pass (chain_depth == 1, so chain_depth^3 == 1, no bonus at all) is
+// always worth its full, undiscounted per-block value regardless of
+// difficulty; a real block is worth what it's worth no matter who's
+// playing. What varies is only how much *extra* a deeper chain is credited
+// for setting up.
 //
 // Public (not just for cpu_ai's move search) so cpu_engine_garbage_test.zig
 // can also use it to resolve a static grid to its final rest state --
@@ -217,7 +248,9 @@ pub fn simulateCascade(grid: *Grid) i32 {
         const result = findAndClearMatches(grid);
         if (!result.any) break;
         chain_depth += 1;
-        var pass_score = @as(i32, @intCast(result.real_count)) * BASE_WEIGHT * chain_depth * chain_depth * chain_depth;
+        const chain_cubed = chain_depth * chain_depth * chain_depth;
+        const chain_bonus = @divTrunc((chain_cubed - 1) * chain_weight, 100);
+        var pass_score = @as(i32, @intCast(result.real_count)) * BASE_WEIGHT * (1 + chain_bonus);
         pass_score += @as(i32, @intCast(result.garbage_count)) * GARBAGE_WEIGHT;
         if (result.real_count > 3) pass_score += @as(i32, @intCast(result.real_count - 3)) * COMBO_WEIGHT;
         total += pass_score;
@@ -466,10 +499,24 @@ const LOW_MATERIAL_WEIGHT: i32 = 4; // per real cell short of the threshold
 // the top is exactly how naively chasing material gets the CPU killed.
 // heightDangerPenalty grows steeply enough once that pillar is genuinely
 // close to the top to overrule any amount of material shortage.
+//
+// A raise's post-raise height needs at least this many more rows of
+// headroom than heightDangerPenalty's own DANGER_MARGIN requires before
+// raise_bias (see the module var's own doc comment) applies at all -- a
+// noticeably stricter, safer gate than "not dangerous yet", so a CPU with a
+// nonzero raise_bias only ever gets nudged toward raising while it's
+// genuinely spacious, never anywhere near the point that penalty would
+// otherwise start pulling it back down. Nothing here can ever let
+// raise_bias itself push a raise into dangerous territory -- it simply
+// stops applying well before that.
+const PLENTY_OF_ROOM_MARGIN: i32 = DANGER_MARGIN + 2;
+
 pub fn raiseValue(grid: Grid) i32 {
     const shortfall = LOW_MATERIAL_THRESHOLD - realCellCount(&grid);
-    const value = shortfall * LOW_MATERIAL_WEIGHT;
-    return value - heightDangerPenalty(maxColumnHeight(&grid) + 1);
+    var value = shortfall * LOW_MATERIAL_WEIGHT;
+    const post_raise_height = maxColumnHeight(&grid) + 1;
+    if (post_raise_height <= ROWS - PLENTY_OF_ROOM_MARGIN) value += raise_bias;
+    return value - heightDangerPenalty(post_raise_height);
 }
 
 // How much the best available swap or raise must beat doing nothing by to

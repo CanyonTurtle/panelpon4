@@ -156,6 +156,59 @@ test "bestMove prefers a swap that sets off a chain over an equally-sized flat m
     try testing.expectEqual(@as(u8, 2), mv.col);
 }
 
+test "chain_weight scales only the chain-continuation bonus, not a flat match's own face value" {
+    defer engine.chain_weight = 100; // restore the default so no other test sees this
+
+    // A single-pass, non-chaining match: chain_depth never exceeds 1, so
+    // chain_cubed - 1 == 0 -- its score must come out identical regardless
+    // of chain_weight, since there's no chain bonus to scale in the first
+    // place.
+    var g_flat: engine.Grid = .{};
+    g_flat.cell[10][0] = 1;
+    g_flat.cell[10][1] = 1;
+    g_flat.cell[10][2] = 1;
+    engine.chain_weight = 10;
+    const flat_low = engine.simulateCascade(&g_flat);
+    var g_flat2: engine.Grid = .{};
+    g_flat2.cell[10][0] = 1;
+    g_flat2.cell[10][1] = 1;
+    g_flat2.cell[10][2] = 1;
+    engine.chain_weight = 130;
+    const flat_high = engine.simulateCascade(&g_flat2);
+    try testing.expectEqual(flat_low, flat_high);
+
+    // The exact post-swap board from the "prefers a swap that sets off a
+    // chain" test above (same fixture, with the winning swap -- row 10,
+    // cols 2/3 -- already applied), which genuinely cascades in two passes.
+    // A low chain_weight should score it much closer to (barely more than)
+    // its own flat per-block value; a high one should score it decisively
+    // higher, per the module's own chain_depth^3 curve.
+    var g_chain: engine.Grid = .{};
+    g_chain.cell[8][0] = 3;
+    g_chain.cell[9][0] = 3;
+    g_chain.cell[10][0] = 0;
+    g_chain.cell[10][1] = 0;
+    g_chain.cell[10][2] = 0; // post-swap: was 2 pre-swap
+    g_chain.cell[10][3] = 2; // post-swap: was 0 pre-swap
+    g_chain.cell[11][0] = 3;
+    g_chain.cell[11][1] = 4;
+    g_chain.cell[11][2] = 1;
+    g_chain.cell[11][3] = 4;
+    var g_chain_low = g_chain;
+    engine.chain_weight = 10;
+    const chain_low = engine.simulateCascade(&g_chain_low);
+    var g_chain_high = g_chain;
+    engine.chain_weight = 130;
+    const chain_high = engine.simulateCascade(&g_chain_high);
+    // Pass 1 (chain_depth 1, chain_cubed 1, so no bonus at any weight): 3
+    // real blocks * BASE_WEIGHT(10) * multiplier 1 = 30, always. Pass 2
+    // (chain_depth 2, chain_cubed 8): at weight 10, bonus = (8-1)*10/100 =
+    // 0 (truncated) -> multiplier 1 -> 30; at weight 130, bonus =
+    // (8-1)*130/100 = 9 -> multiplier 10 -> 300. Totals: 60 vs. 330.
+    try testing.expectEqual(@as(i32, 60), chain_low);
+    try testing.expectEqual(@as(i32, 330), chain_high);
+}
+
 test "bestAction raises on a completely empty board" {
     var b: s.Board = .{};
     const grid = engine.Grid.fromBoard(&b);
@@ -251,6 +304,38 @@ test "raiseValue penalizes a dangerously tall column enough to outweigh scarce m
     }
     const grid = engine.Grid.fromBoard(&b);
     try testing.expect(engine.raiseValue(grid) < 0);
+}
+
+test "raise_bias nudges raiseValue up only while there's comfortably more headroom than the danger check requires" {
+    // A column 6 rows tall (grid rows 6-11) -- post-raise height 7, right
+    // at the "plenty of room" gate's own boundary (PLENTY_OF_ROOM_MARGIN =
+    // DANGER_MARGIN + 2 = 5, so post-raise heights up to ROWS - 5 = 7 still
+    // qualify).
+    var b_room: s.Board = .{};
+    var lr: u8 = 6;
+    while (lr < 12) : (lr += 1) {
+        b_room.cellAt(lr + c.SPAWN_ROWS, 0).* = .{ .color = @intCast(lr % 2), .state = .normal };
+    }
+    const grid_room = engine.Grid.fromBoard(&b_room);
+    engine.raise_bias = 0;
+    const room_without_bias = engine.raiseValue(grid_room);
+    engine.raise_bias = 20;
+    try testing.expectEqual(room_without_bias + 20, engine.raiseValue(grid_room));
+
+    // One row taller (7, grid rows 5-11) -- post-raise height 8, just past
+    // the gate -- raise_bias no longer applies at all, even though this is
+    // still nowhere near heightDangerPenalty's own much steeper threshold.
+    var b_tight: s.Board = .{};
+    lr = 5;
+    while (lr < 12) : (lr += 1) {
+        b_tight.cellAt(lr + c.SPAWN_ROWS, 0).* = .{ .color = @intCast(lr % 2), .state = .normal };
+    }
+    const grid_tight = engine.Grid.fromBoard(&b_tight);
+    engine.raise_bias = 0;
+    const tight_without_bias = engine.raiseValue(grid_tight);
+    engine.raise_bias = 20;
+    defer engine.raise_bias = 0; // restore the default so no other test sees this
+    try testing.expectEqual(tight_without_bias, engine.raiseValue(grid_tight));
 }
 
 test "bestMove still finds the winning swap at deeper, beam-pruned search depths" {

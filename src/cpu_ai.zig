@@ -1,9 +1,12 @@
 // The CPU opponent's move picker, chosen per the difficulty set on the title
-// screen (see state.difficulty). Every level from 1-10 uses cpu_engine's
-// actual move search (see configFor) -- lower levels are simply worse at it
-// (a much higher chance to ignore the engine's pick and play a random legal
-// swap instead, a shallower search, and a slower reaction time), not a
-// different kind of AI. It picks at most one action per timer interval, but
+// screen (see state.difficulty). Every level from 1-10 always plays
+// cpu_engine's own actual best-scored move (see configFor) -- never a
+// random or deliberately mistaken one. Lower levels are weaker because
+// they see less and want less: a shallower search, a slower reaction time,
+// and a much lower preference for a chain over an equivalently-sized flat
+// match (so they play correctly, just myopically, grabbing whatever's
+// immediately in front of them). It picks at most one action per timer
+// interval, but
 // -- like a player, whose own input is never blocked by unrelated activity
 // elsewhere on the board (see input.updateSwap) -- no longer waits for the
 // *whole* board to go idle first: it reasons about (see cpu_grid.Grid.
@@ -39,41 +42,47 @@ var target: ?engine.Move = null;
 const DifficultyConfig = struct {
     move_interval: u32, // frames between cursor steps (deciding a new target counts as one step)
     depth: u8, // cpu_engine's search depth (see cpu_engine.evaluateMove)
-    mistake_pct: u8, // 0-100: chance to ignore the engine's pick and target a random legal swap instead
+    chain_weight: i32, // see cpu_engine.chain_weight -- how much a deeper chain is valued over an equivalent flat match
+    raise_bias: i32 = 0, // see cpu_engine.raise_bias -- a nudge toward raising while there's plenty of room
 };
 
-// All ten levels use the same engine (see cpu_engine.bestAction); they only
-// differ in how often they listen to it. mistake_pct falls off steeply from
-// level 1 to 10 so the low end still reads as genuinely weak (mostly
-// flailing, occasionally stumbling into something) rather than merely slow.
+// Every level uses the exact same engine (see cpu_engine.bestAction) and
+// always plays its actual best-scored move -- no randomness, no deliberate
+// mistakes. What varies between levels is the engine's own priorities and
+// how much of it a level can even see: reaction speed (move_interval), how
+// many moves ahead it searches (depth), and how much it specifically values
+// a chain over an equivalently-sized flat match (chain_weight) -- a weak
+// CPU still plays *correctly*, it just plays *myopically*, grabbing
+// whatever match is right in front of it rather than reasoning its way
+// toward a bigger chain, and reacts slower while doing it. The very top
+// levels also get a small preference for raising while there's plenty of
+// headroom (raise_bias -- see cpu_engine.raiseValue), building up more
+// material to set up bigger combos with, instead of only ever raising out
+// of material necessity.
 fn configFor(level: u8) DifficultyConfig {
     return switch (level) {
-        1 => .{ .move_interval = 40, .depth = 1, .mistake_pct = 70 },
-        2 => .{ .move_interval = 32, .depth = 1, .mistake_pct = 55 },
-        3 => .{ .move_interval = 26, .depth = 1, .mistake_pct = 40 },
-        4 => .{ .move_interval = 20, .depth = 1, .mistake_pct = 28 },
-        5 => .{ .move_interval = 17, .depth = 1, .mistake_pct = 18 },
-        6 => .{ .move_interval = 14, .depth = 1, .mistake_pct = 10 },
-        7 => .{ .move_interval = 12, .depth = 2, .mistake_pct = 6 },
-        8 => .{ .move_interval = 11, .depth = 3, .mistake_pct = 3 },
-        9 => .{ .move_interval = 9, .depth = 3, .mistake_pct = 1 },
-        10 => .{ .move_interval = 8, .depth = 3, .mistake_pct = 0 },
+        1 => .{ .move_interval = 40, .depth = 1, .chain_weight = 10 },
+        2 => .{ .move_interval = 34, .depth = 1, .chain_weight = 20 },
+        3 => .{ .move_interval = 28, .depth = 1, .chain_weight = 35 },
+        4 => .{ .move_interval = 24, .depth = 1, .chain_weight = 50 },
+        5 => .{ .move_interval = 20, .depth = 2, .chain_weight = 65 },
+        6 => .{ .move_interval = 17, .depth = 2, .chain_weight = 80 },
+        7 => .{ .move_interval = 14, .depth = 2, .chain_weight = 100 },
+        8 => .{ .move_interval = 12, .depth = 3, .chain_weight = 100, .raise_bias = 10 },
+        9 => .{ .move_interval = 10, .depth = 3, .chain_weight = 115, .raise_bias = 15 },
+        10 => .{ .move_interval = 8, .depth = 3, .chain_weight = 130, .raise_bias = 20 },
         // state.difficulty is always clamped to 1-10 (see main.zig's title
         // screen) -- this is just a defensive fallback, not a real level.
-        else => .{ .move_interval = 20, .depth = 1, .mistake_pct = 40 },
+        else => .{ .move_interval = 20, .depth = 1, .chain_weight = 50 },
     };
 }
 
-// Picks a fresh target: either a random legal-looking cell (the low-
-// difficulty "mistake" path -- doesn't need to actually be swappable right
-// now, same as a player fumbling for the wrong cell would), or the engine's
-// own best move. Raising happens immediately (it doesn't need the cursor to
-// go anywhere), and `.none` just leaves the cursor exactly where it is.
+// Picks a fresh target: the engine's own best move, always -- see
+// configFor. Raising happens immediately (it doesn't need the cursor to go
+// anywhere), and `.none` just leaves the cursor exactly where it is.
 fn pickTarget(self: *s.Board, cfg: DifficultyConfig) void {
-    if (self.randRange(100) < cfg.mistake_pct) {
-        target = .{ .row = @intCast(self.randRange(c.VISIBLE_ROWS)), .col = @intCast(self.randRange(c.COLS - 1)) };
-        return;
-    }
+    engine.chain_weight = cfg.chain_weight;
+    engine.raise_bias = cfg.raise_bias;
     const grid = engine.Grid.fromBoard(self);
     switch (engine.bestAction(grid, cfg.depth)) {
         .raise => board.tryManualRaise(self),
@@ -128,7 +137,7 @@ const testing = @import("std").testing;
 test "cpu AI stays put for the first move_interval-1 idle frames" {
     move_timer = 0;
     target = null;
-    s.difficulty = 6; // move_interval 14 -- see configFor
+    s.difficulty = 6; // move_interval 17 -- see configFor
     var b: s.Board = .{};
     const orig_row = b.cursor_row;
     const orig_col = b.cursor_col;
@@ -140,7 +149,7 @@ test "cpu AI stays put for the first move_interval-1 idle frames" {
 test "cpu AI walks its cursor one cell at a time toward the engine's target, never teleporting" {
     move_timer = 0;
     target = null;
-    s.difficulty = 10; // depth 3, mistake_pct 0 -- deterministic best play
+    s.difficulty = 10; // depth 3, chain_weight 130 -- always plays its actual best move
     var b: s.Board = .{};
     // Row 5, col 2 is the target (see the "finds and plays" test below) --
     // starting cursor col already matches (default cursor_col == 2), so
@@ -170,7 +179,7 @@ test "cpu AI walks its cursor one cell at a time toward the engine's target, nev
 test "at an engine level, the cpu finds and plays an obvious winning swap" {
     move_timer = 0;
     target = null;
-    s.difficulty = 10; // depth 3, mistake_pct 0 -- deterministic best play
+    s.difficulty = 10; // depth 3, chain_weight 130 -- always plays its actual best move
     var b: s.Board = .{};
     // Row 5: 1,1,2,1 -- only swapping columns 2/3 completes a match. Nothing
     // else is on the board, so cpu_engine's own gravity pass (part of
@@ -210,7 +219,7 @@ test "at an engine level, the cpu raises instead of swapping on an empty board" 
 test "cpu AI sits still (no spinning) when there's genuinely no good move" {
     move_timer = 0;
     target = null;
-    s.difficulty = 10; // depth 3, mistake_pct 0
+    s.difficulty = 10; // depth 3, chain_weight 130
     var b: s.Board = .{};
     // Same (row + 2*col) % 5 board used by cpu_engine_test's own "bestAction
     // does nothing ..." test -- no swap can ever improve on it or set off a

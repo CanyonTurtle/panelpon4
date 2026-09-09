@@ -102,7 +102,11 @@ the side panel. Both run the exact same rules and physics.
   running it out actually ends the match for that side (clearing the danger row, or the board going busy
   again, resets it) -- a real beat to recover from a close call rather than an instant loss the moment a
   rise happens to touch the top. Whoever's forgiveness timer runs out first loses (both on the same frame
-  is a draw).
+  is a draw). The instant that timer actually starts running, every settled block's own symbol switches from
+  the ordinary wobble above to rendering visibly squashed instead (the block itself stays completely
+  untouched, same as the wobble) -- a plain, unmistakably different look (not another animated bounce)
+  specifically for this more urgent warning, so it's obvious at a glance the clock is
+  genuinely running and the stack needs clearing now, not just that a column is getting tall.
 - **Z**: manually raise your own floor by one row right away (finishes in a third of a second instead of
   waiting for the automatic pace) -- useful for deliberately forcing a rise when you want fresh blocks, or
   to bail out of a bad board shape. On a cooldown (two thirds of a second) so it can't be spammed -- hold it
@@ -113,14 +117,20 @@ the side panel. Both run the exact same rules and physics.
   score carried over as pips, not reset.
 - Two screens lead into a series: a branded **title** screen (press X to continue), then a **setup** screen
   where **left/right** sets the CPU's difficulty, 1-10, shown as a filled-in bar rather than a bare number
-  (press X to begin). Every level runs the same move-search engine (see `src/cpu_engine.zig`) -- lower levels
-  are simply worse at listening to it (far more likely to ignore its pick and play a random legal swap
-  instead, a shallower search, and a slower reaction time), not a different kind of AI. The engine can also
-  choose to raise its own floor by a row instead of swapping (see the Z button above) when it's running low
-  on real blocks to work with -- weighed the same way as any swap, so it only does this when it's actually
-  short on material, not just because nothing else looks great -- and never when its own stack (or, after
-  the raise, what its own stack would become) is already dangerously close to the top, however short on
-  material it is. Difficulty and character are both fixed for the whole series, but revisitable in setup
+  (press X to begin). Every level runs the same move-search engine (see `src/cpu_engine.zig`) and always plays
+  its actual best-scored move -- never a random or deliberately mistaken one. Weaker levels play *correctly*,
+  just *myopically*: a shallower search, a slower reaction time, and a much lower preference for a chain over
+  an equivalently-sized flat match, so they settle for slowly grabbing whatever match is right in front of
+  them rather than reasoning their way toward a bigger chain; stronger levels see further ahead, react
+  quicker, and keep chasing chains decisively. The engine can also choose to raise its own floor by a row
+  instead of swapping (see the Z button above) when it's running low on real blocks to work with -- weighed
+  the same way as any swap, so it only does this when it's actually short on material, not just because
+  nothing else looks great -- and never when its own stack (or, after the raise, what its own stack would
+  become) is already dangerously close to the top, however short on material it is. The very top levels
+  additionally get a small extra preference for raising while there's comfortably more headroom than that
+  danger check requires, so they keep building up more material for a bigger combo instead of only ever
+  raising out of necessity -- gated well clear of the danger threshold, so it can never itself run a stack
+  into the ceiling. Difficulty and character are both fixed for the whole series, but revisitable in setup
   again once one concludes.
 - The setup screen also shows all 4 selectable characters at once (see `src/characters.zig`) -- a lizard, a
   mermaid, a bug, and a cloud puff, each a real pixel-art figure, not just a colored square. **Up/down**
@@ -233,13 +243,17 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   occupy is already taken, the whole piece is skipped rather than placed with a hole around whatever's in
   the way (a partial placement could snag on a free-standing block and deadlock both). `releaseIncomingGarbage`
   leaves a piece queued and retries it next frame if `spawnGarbage` reports it didn't fit yet.
-- `src/cpu_ai.zig` — the CPU opponent's move picker, branching on `state.difficulty` (see `configFor`):
-  every level from 1-10 runs `cpu_engine.zig`'s actual search, differing only in how often they listen to
-  it (a steep chance to ignore its pick and target a random legal-looking swap instead at the low end,
-  falling to zero by level 10), search depth, and reaction speed. Doesn't wait for the whole board to go
-  idle before thinking/acting -- like a player, whose own input is never blocked by unrelated activity
-  elsewhere (see `input.updateSwap`) -- it reasons about and can act on whatever's true right now, including
-  cells still falling/landing/mid-swap elsewhere (see `cpu_grid.Grid.fromBoard`). Crucially, the engine only
+- `src/cpu_ai.zig` — the CPU opponent's move picker, branching on `state.difficulty` (see `configFor`): every
+  level from 1-10 runs `cpu_engine.zig`'s actual search and always plays its actual best-scored move -- no
+  randomness, no deliberate mistakes. Levels differ in reaction speed (`move_interval`), search depth, and how
+  much they specifically value a chain over an equivalently-sized flat match (`chain_weight`, set on
+  `cpu_engine.chain_weight` right before each decide call -- see that module's own doc comment for why it's a
+  plain global instead of an extra parameter threaded through the whole recursive search); the very top levels
+  also get a small preference for raising while there's plenty of headroom (`raise_bias`, likewise set on
+  `cpu_engine.raise_bias`). Doesn't wait for the whole board to go idle before thinking/acting -- like a
+  player, whose own input is never blocked by unrelated activity elsewhere (see `input.updateSwap`) -- it
+  reasons about and can act on whatever's true right now, including cells still falling/landing/mid-swap
+  elsewhere (see `cpu_grid.Grid.fromBoard`). Crucially, the engine only
   ever *decides* a target cell -- the CPU cursor then walks toward it one cell at a time, at the same pace a
   player's own cursor moves, only actually swapping once it's genuinely arrived (giving up and re-deciding if
   the board changes underneath it while walking over, e.g. the target cell fell away or popped); it can never
@@ -258,26 +272,34 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   ranked sensibly --
   plus a discounted look at the best follow-up move (a shallow best-first search, compounding the same
   discount again each ply deeper) for the higher levels, rewarding a setup move that enables a strong reply
-  over a shallow immediate pop. Each cascade pass's real-block score scales with the *cube* of chain depth
-  (not just its square), so a genuine multi-link chain decisively outranks an equally-sized pile of
-  unconnected single matches rather than merely edging it out. The *lookahead* -- never the top-level
-  decision itself, which always weighs every legal candidate -- is beam-pruned (see `BEAM_WIDTH`): only the
-  most promising handful of a ply's candidates get a real recursive search of their own, the rest keep just
-  their immediate value, which is what keeps a beam-searched depth 3-4 roughly as cheap as an exhaustive
-  depth 2 used to be (memory was never the constraint -- `Grid` is 72 bytes with no heap allocation, and
-  recursion depth maps straight to a handful of small stack frames -- the branching factor is). Also weighs
-  raising the stack (see `raiseValue`) against the best available swap: worth more the fewer real blocks
-  are left on the board, worth less than any real match regardless, so it only wins when the board is
-  genuinely short on material and has nothing better to do -- and it's judged against the height a raise
-  would actually leave the tallest column at, not the current one, so a materially-poor but dangerously
-  tall, skinny stack doesn't get raised straight into topping out (the same steep height-danger penalty
-  also discourages any *swap* that would leave a column that close to the top, not just raising). `bestAction`
-  weighs both the best swap and raising against simply doing nothing (the board's own current structural
-  score, `NO_OP_EPSILON` apart): when neither meaningfully improves on the status quo, it returns `.none`
-  rather than shuffling blocks back and forth forever chasing a razor-thin, meaningless edge -- the fix for
-  a reported "spins in place endlessly" bug on boards with no genuinely good option. Deliberately its own
-  small simulator rather than reusing `sim.zig` directly -- see the module's own doc comment for why -- tests
-  in the companion `src/cpu_engine_test.zig`.
+  over a shallow immediate pop. Each cascade pass's real-block score scales with the *cube* of chain depth at
+  full strength (not just its square), so a genuine multi-link chain decisively outranks an equally-sized
+  pile of unconnected single matches rather than merely edging it out -- but only the chain-continuation
+  *bonus* above a flat match's own face value actually scales with `chain_weight` (set per difficulty by
+  `cpu_ai.configFor`, 100 reproducing the fixed cube curve exactly): a first, non-chaining pass is always
+  worth its full per-block value no matter the difficulty, so a low-`chain_weight` (weak) CPU still values
+  real matches correctly, it just stops specifically hunting for a chain setup it's unlikely to search deep
+  enough to capitalize on. The *lookahead* -- never the top-level decision itself, which always weighs every
+  legal candidate -- is beam-pruned (see `BEAM_WIDTH`): only the most promising handful of a ply's candidates
+  get a real recursive search of their own, the rest keep just their immediate value, which is what keeps a
+  beam-searched depth 3-4 roughly as cheap as an exhaustive depth 2 used to be (memory was never the
+  constraint -- `Grid` is 72 bytes with no heap allocation, and recursion depth maps straight to a handful of
+  small stack frames -- the branching factor is). Also weighs raising the stack (see `raiseValue`) against
+  the best available swap: worth more the fewer real blocks are left on the board, worth less than any real
+  match regardless, so it only wins when the board is genuinely short on material and has nothing better to
+  do -- and it's judged against the height a raise would actually leave the tallest column at, not the
+  current one, so a materially-poor but dangerously tall, skinny stack doesn't get raised straight into
+  topping out (the same steep height-danger penalty also discourages any *swap* that would leave a column
+  that close to the top, not just raising). `raise_bias` (also set per difficulty, only nonzero for the
+  strongest levels) nudges that raise value up a little further, but only while the post-raise height would
+  still sit comfortably clear of the danger check -- 2 rows more headroom than that check itself requires --
+  so it can only ever encourage building up more material while it's genuinely safe to, never push a raise
+  into dangerous territory itself. `bestAction` weighs both the best swap and raising against simply doing
+  nothing (the board's own current structural score, `NO_OP_EPSILON` apart): when neither meaningfully
+  improves on the status quo, it returns `.none` rather than shuffling blocks back and forth forever chasing
+  a razor-thin, meaningless edge -- the fix for a reported "spins in place endlessly" bug on boards with no
+  genuinely good option. Deliberately its own small simulator rather than reusing `sim.zig` directly -- see
+  the module's own doc comment for why -- tests in the companion `src/cpu_engine_test.zig`.
 - `src/cpu_grid.zig` — the engine's board snapshot (`Grid`), split out into its own file purely so
   `cpu_engine.zig` and `cpu_engine_garbage.zig` can each depend on it without depending on each other.
   `fromBoard` reads `.falling`/`.landing`/`.swapping` real cells as their true color (they already have
@@ -307,7 +329,14 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   hidden row's dither overlay) stays perfectly still. The bounce itself is an explicit per-frame timing chart
   (`BOUNCE_KEYFRAMES`), not a plain linear triangle wave -- it holds longest on the highest position and
   second-longest on the next-highest, spending comparatively little time in the quick transit between them,
-  standard slow-in/slow-out keyframe spacing for a bounce rather than constant-speed motion. The cursor
+  standard slow-in/slow-out keyframe spacing for a bounce rather than constant-speed motion. Once
+  `Board.danger_timer` is actually running (a strictly more urgent condition than the ordinary stress
+  warning), the bounce is replaced entirely: every settled real block's own symbol instead renders vertically
+  compressed by `PANIC_SQUISH_AMOUNT` pixels (`drawSymbolSquished`, simple nearest-row sampling re-centered in
+  the glyph's normal space, driven by `drawNormalCell`'s `squash` -- mutually exclusive with `sym_bounce`) --
+  the block itself (bevel, fill, position) is left completely untouched either way, only ever the symbol drawn
+  on top of it. A constant squash rather than another animated effect, since the point is a look that's
+  unmistakably *different* at a glance, not one that has to be watched to be read. The cursor
   itself is a classic Panel de Pon-style corner bracket at each of its two tiles (`drawCursorCorners`),
   centered on the block it targets and sitting just outside its edges, not a single box around both -- it
   alternates between two discrete sizes for its idle breathing (contracted right when the cursor moves, same
