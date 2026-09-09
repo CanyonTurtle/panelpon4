@@ -148,13 +148,20 @@ the side panel. Both run the exact same rules and physics.
   nothing shifts around between steps except the content itself.
 - Your chosen character themes your own main-frame border (its own color and a distinct border pattern --
   solid, checkered, dashed, or a thin double outline) and gives you an animated portrait next to your score,
-  reacting to what's actually happening: idle otherwise, excited on a combo or chain, wincing for a moment
-  right after taking a garbage attack, and celebrating on the game-over screen if you won (the losing side's
-  own character shows there too, wincing, rather than only the winner appearing) -- both characters stay
-  visible and animated straight through the countdown and closing-wipe transitions between matches, never
-  just popping in once gameplay resumes. Whichever character the CPU picked (see the reveal screen above)
-  themes its own mini board's border the same way and gets the identical portrait treatment next to its own
-  score.
+  sitting inside its own small themed frame (the same color/pattern treatment as the main board frame, just
+  scaled down) rather than floating bare next to the score text. It reacts to what's actually happening: idle
+  otherwise, excited on a combo or chain (a quick up/down bounce, not just a change of expression), wincing
+  and jittering side to side for a moment right after taking a garbage attack, and bouncing and celebrating on
+  the game-over screen if you won (the losing side's own character shows there too, wincing, rather than only
+  the winner appearing) -- both characters stay visible and animated straight through the countdown and
+  closing-wipe transitions between matches, never just popping in once gameplay resumes. Whichever character
+  the CPU picked (see the reveal screen above) themes its own mini board's border the same way and gets the
+  identical framed, animated portrait treatment next to its own score. A chain/combo also flies a small badge
+  from the match itself to whichever side's score it belongs to -- the CPU's own board now gets this too, not
+  just the player's -- so both scores get the same floating callout instead of the CPU's activity only ever
+  being readable from its board's own icons; the old static yellow "COMBO"/"x2" text under the player's score
+  is gone, since the badge (and the character's own bounce) already say the same thing without permanently
+  eating panel space.
 - Press **X** to (re)start a match -- both boards reset immediately, but simulation stays frozen behind a
   brief "3 2 1 START" countdown first (each number rises up a couple pixels then holds for about a second;
   "START" rises the same way but then blinks a few times) before the match actually begins. Losing plays out
@@ -245,6 +252,10 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   (`constants.ROWS - 1`) never seeds a match or gets pulled into one via propagation/late-join, even though
   gravity treats it like any other row -- it only becomes matchable once a rise promotes it into the lowest
   row the cursor can actually reach (see `render.drawBoard`'s dithered overlay for the matching visual cue).
+  A qualifying match's popup spawn point (`Board.spawnMatchPopup`) is computed in whichever board's own
+  coordinate system actually matched -- the player's full-scale one, or (checked by pointer identity against
+  the `s.cpu` singleton) the CPU's differently-scaled/positioned micro board (see `render_cpu.zig`) -- rather
+  than always the player's, now that `render_cpu.zig` actually draws the CPU's own popups too.
 - `src/sim_garbage.zig` — garbage's rigid-body group gravity (a connected clump falls and lands as one piece,
   computed by connectivity fresh every frame), its spawn placement, and the queueing lifecycle between the
   two (`queueChainGarbage`/`queueComboGarbage` record what a combo or a still-growing chain would send,
@@ -362,7 +373,15 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   as `drawSwappingCell`), rather than sitting still while the
   blocks trade places. `drawFrame`'s main-frame border is themed by whichever character the player picked on
   the setup screen
-  (`drawThemedBand`, see `characters.BorderStyle`) -- color and fill pattern both.
+  (`drawThemedBand`, see `characters.BorderStyle`) -- color and fill pattern both. `drawPanel` frames the
+  player's own portrait in that same theme at a small scale (`rchar.drawFrame`, see `render_character.zig`)
+  and positions the score text a fixed `rchar.FRAME_MARGIN` clear of the frame's own right edge
+  (`CHAR_TEXT_X`, also reused as the match-popup badge's fly-to target below) -- previously the score text's
+  x offset used the sprite's *height* instead of its width by mistake, so it started 1px inside the
+  portrait's own right edge; adding the frame forced fixing this properly rather than just nudging the old
+  number. The old static "COMBO"/"xN" text under the portrait is gone entirely, superseded by the match-popup
+  badge (now flown to `CHAR_TEXT_X` for both the player and, via `render_cpu.zig`, the CPU) plus the
+  character's own combo/win bounce.
 - `src/render_garbage.zig` — garbage's full-detail rendering (the muted checkerboard fill and the linked-
   clump bezel look), split out from render.zig to keep that file under the project's ~500-line guideline,
   mirroring the sim.zig/sim_garbage.zig split. `drawLinkedFlash` is a phase-inverted variant of the same
@@ -403,15 +422,36 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   own hue(s), then an animated face reacting to `stateFor` (a board's own `garbage_punish_timer`/
   `combo_display_timer`/`chain` decide punish/combo/normal; `win` is passed explicitly by the game-over
   screen) centered on its `face` anchor -- the same expression logic for every character, just recolored and
-  repositioned, rather than a fully separate hand-animated face per character. Used identically by
-  `render.zig` (the player) and `render_cpu.zig` (the CPU).
-- `src/render_cpu.zig` — the CPU's side of the panel: its character portrait/score and its board at a
-  simplified micro scale (dithered colors, tiny per-color icons, smooth rise scrolling, a cursor,
-  popping/recycling animation -- just abstracted down to fit: no bevels, linked-garbage slab, landing squash,
-  or popups). Its own mini board's border is themed the same way the player's main frame is (see
-  `render.zig`), just simplified to 1px thick.
+  repositioned, rather than a fully separate hand-animated face per character. `draw` also offsets the whole
+  sprite+face by `bounceOffset(state)` before drawing anything -- an explicit per-frame keyframe table per
+  state (`COMBO_BOUNCE`/`WIN_BOUNCE` an up/down hop, `PUNISH_JITTER` a side-to-side flinch; `normal` is always
+  `{0, 0}`), read straight off `s.frame_count` rather than the slower `currentFrame()` toggle so the motion
+  itself feels snappier than the face's own blink/mouth cadence -- kept within `FRAME_PAD` so the sprite never
+  visibly pokes through its own frame (below) while bouncing. `drawFrame(x, y, char_index)` frames the sprite
+  that will be drawn at that same `x, y` in the character's own themed border (`characters.BorderStyle`) at a
+  small in-game scale -- a self-contained analog of `render.zig`'s `drawThemedPanelBorder` (can't import that
+  directly: `render.zig` already imports this file), with `FRAME_MARGIN` (`FRAME_PAD` clearance plus
+  `FRAME_THICKNESS`) of space around the sprite. Used identically by `render.zig` (the player) and
+  `render_cpu.zig` (the CPU), both now framing the in-game portrait this way, not just the setup screens'
+  larger panels.
+- `src/render_cpu.zig` — the CPU's side of the panel: its character portrait (now framed the same way the
+  player's is, see `render_character.drawFrame`) /score and its board at a simplified micro scale (dithered
+  colors, tiny per-color icons, smooth rise scrolling, a cursor, popping/recycling animation -- just
+  abstracted down to fit: no bevels, linked-garbage slab, or landing squash). Its own mini board's border is
+  themed the same way the player's main frame is (see `render.zig`), just simplified to 1px thick. Also draws
+  the CPU's own chain/combo match-popup badge (`badge.drawMatchPopups(&s.cpu.match_popups, ...)`, flown to
+  `TEXT_X`/`LABEL_Y + 10` -- this board's own score, not the player's) -- previously skipped for lack of room,
+  but the badge is small enough at this scale to read fine; `sim_matches.checkMatches` computes its spawn
+  point in this file's own `CPU_MICRO_TILE`/`CPU_BOARD_Y` coordinate system (promoted to `constants.zig` so
+  sim code can use them without importing rendering code) whenever the match happened on `&s.cpu` specifically
+  (checked by pointer identity against that process-wide singleton), rather than always using the player's
+  much larger-scale board coordinates the way it used to (harmless back when the CPU's own popup was never
+  rendered at all).
 - `src/render_badge.zig` — the chain/combo popup badge, plus the shared checkerboard-blit dithering
-  primitive it's built on (reusable for any future dithered-highlight effect). Also home to
+  primitive it's built on (reusable for any future dithered-highlight effect). `drawMatchPopups` takes its
+  fly-to `target_x`/`target_y` as parameters rather than a fixed constant, since the player and CPU panels
+  put their score at different positions and scales (see `render.zig`'s `CHAR_TEXT_X` and `render_cpu.zig`'s
+  `TEXT_X` call sites). Also home to
   `drawGarbageQueueIcons`: small warm-dithered pips in the gutter beside each board, one per queued incoming
   garbage attack (`Board.incoming_garbage`), width scaled to the attack's own column width -- a lightweight
   heads-up that an attack is about to land the instant that board goes idle, visible without reading the

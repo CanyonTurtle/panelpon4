@@ -199,6 +199,49 @@ test "a match that is both a chain and a combo shows the chain label" {
     try testing.expectEqualStrings("x2", activePopupLabel(&b).?);
 }
 
+test "a CPU-side match spawns its popup in the micro board's own coordinate system, not the player's" {
+    // checkMatches picks the popup's spawn coordinates based on `self`
+    // pointer identity against the process-wide `s.cpu` singleton (see its
+    // own doc comment) -- unlike every other test in this file, this one
+    // has to actually use that global rather than a local `s.Board{}`, since
+    // a local board's address is never `&s.cpu` and would silently fall
+    // through to the player's own (much larger-scale) coordinate system.
+    s.cpu = s.Board{ .rng_state = s.CPU_RNG_SEED };
+    var opp: s.Board = .{};
+    // A real visible row (>= SPAWN_ROWS), not one of the offscreen staging
+    // rows other tests in this file use for convenience -- this test
+    // actually checks the popup's Y, which is meaningless (and can go
+    // negative relative to CPU_BOARD_Y) for a "match" that's really sitting
+    // in the never-rendered staging area above the ceiling.
+    const row = c.SPAWN_ROWS + 2;
+    s.cpu.cellAt(row, 0).* = .{ .color = 1, .state = .normal };
+    s.cpu.cellAt(row, 1).* = .{ .color = 1, .state = .normal };
+    s.cpu.cellAt(row, 2).* = .{ .color = 1, .state = .normal };
+    s.cpu.cellAt(row, 3).* = .{ .color = 1, .state = .normal };
+    _ = sim.checkMatches(&s.cpu, &opp, no_settled);
+
+    try testing.expectEqualStrings("4", activePopupLabel(&s.cpu).?);
+    var popup: s.MatchPopup = undefined;
+    for (s.cpu.match_popups) |p| {
+        if (p.active) {
+            popup = p;
+            break;
+        }
+    }
+    // The micro board (render_cpu.zig) sits in a completely different,
+    // much narrower horizontal band (constants.PANEL_X sized in
+    // CPU_MICRO_TILE units) than the full-scale player board (constants.
+    // BOARD_X sized in TILE units) -- if the is_cpu branch in checkMatches
+    // ever regresses back to always using the player's own coordinate
+    // system, this popup would land far to the left of where the CPU's
+    // micro board is actually drawn instead of inside it.
+    try testing.expect(popup.x >= c.PANEL_X);
+    try testing.expect(popup.x < c.PANEL_X + @as(i32, c.COLS) * c.CPU_MICRO_TILE);
+    try testing.expect(popup.y >= c.CPU_BOARD_Y);
+
+    s.cpu = s.Board{ .rng_state = s.CPU_RNG_SEED }; // leave the global clean for any test after this one
+}
+
 test "simulate marks the whole settled stack above a cleared pop as chainable" {
     var b: s.Board = .{};
     var opp: s.Board = .{};

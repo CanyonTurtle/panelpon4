@@ -650,39 +650,32 @@ fn drawCursor() void {
     drawCursorCorners(base_x + c.TILE + right_offset, base_y, out, CURSOR_DITHER_HUES);
 }
 
-// The player's own character portrait, animated per render_character.zig,
-// plus score/chain/combo/points squeezed in beside and below it -- the
-// label text ("SCORE") is dropped entirely and the rest shrunk down, since
-// the portrait and its reaction to what's actually happening is the more
-// important thing on screen now (see this project's own commit history for
-// why -- this used to be a "SCORE" label above the number, on its own line).
-fn drawPanel() void {
-    rchar.draw(c.PANEL_X, 0, s.player_character, rchar.stateFor(&s.player), rchar.currentFrame());
+// Where the player's own portrait sits -- shifted down from the screen's
+// very top edge by rchar.FRAME_MARGIN so its themed frame (rchar.drawFrame)
+// has room above it, rather than being pushed off-screen. CHAR_TEXT_X is
+// shared with render()'s own badge.drawMatchPopups call below, so the flying
+// match-popup badge and the score digits it lands on agree on where the
+// score actually is.
+const CHAR_PORTRAIT_Y: i32 = rchar.FRAME_MARGIN;
+const CHAR_TEXT_X: i32 = c.PANEL_X + rchar.W + rchar.FRAME_MARGIN + 2;
 
-    const text_x = c.PANEL_X + rchar.H + 2;
+// The player's own character portrait, framed in their chosen character's
+// own theme (see rchar.drawFrame) and animated per render_character.zig,
+// plus score/points squeezed in beside it. The old static yellow "COMBO"/
+// "xN" chain callout that used to sit below the portrait is gone -- the
+// flying match-popup badge (badge.drawMatchPopups, now landing right here
+// for both sides) already communicates the same thing, and the character's
+// own combo/win bounce (see rchar.bounceOffset) reinforces it further, so
+// keeping a second static text readout around just ate space for no benefit.
+fn drawPanel() void {
+    rchar.drawFrame(c.PANEL_X, CHAR_PORTRAIT_Y, s.player_character);
+    rchar.draw(c.PANEL_X, CHAR_PORTRAIT_Y, s.player_character, rchar.stateFor(&s.player), rchar.currentFrame());
+
     w4.DRAW_COLORS.* = 0x0002;
     var buf: [12]u8 = undefined;
     const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.player.score}) catch "0";
-    w4.Text(score_str, text_x, 2);
-    badge.drawPoints(text_x, 10, s.player_points);
-
-    // Chain and combo share this one spot rather than each getting their own
-    // line -- chain takes priority when both are true (same precedence as
-    // the floating badge's own label choice in sim_matches.checkMatches),
-    // since it's the rarer, more meaningful feat. A combo has no ongoing
-    // Board state the way chain does -- just a recent-event flag
-    // (Board.combo_display_timer, ticked down once per frame in
-    // sim.simulate) -- so on its own it reads as a lingering callout rather
-    // than something that stays up for as long as a condition holds.
-    if (s.player.chain > 1) {
-        var buf2: [12]u8 = undefined;
-        const chain_str = std.fmt.bufPrint(&buf2, "x{d}", .{s.player.chain}) catch "";
-        w4.DRAW_COLORS.* = 0x0004;
-        w4.Text(chain_str, c.PANEL_X, rchar.H + 2);
-    } else if (s.player.combo_display_timer > 0) {
-        w4.DRAW_COLORS.* = 0x0004;
-        w4.Text("COMBO", c.PANEL_X, rchar.H + 2);
-    }
+    w4.Text(score_str, CHAR_TEXT_X, 2);
+    badge.drawPoints(CHAR_TEXT_X, 10, s.player_points);
 }
 
 const MENU_PANEL_X: i32 = 20;
@@ -1051,7 +1044,7 @@ pub fn render() void {
     drawFrame();
     drawCursor();
     drawPanel();
-    badge.drawMatchPopups(&s.player.match_popups);
+    badge.drawMatchPopups(&s.player.match_popups, CHAR_TEXT_X, 10);
     drawParticles(&s.player.particles);
     // In the gutter between the player's own frame and the panel column.
     badge.drawGarbageQueueIcons(96, c.BOARD_Y + 4, &s.player);

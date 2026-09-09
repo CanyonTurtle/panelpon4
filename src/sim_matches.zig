@@ -485,8 +485,6 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
                     std.fmt.bufPrint(&label_buf, "x{d}", .{multiplier}) catch "x?"
                 else
                     std.fmt.bufPrint(&label_buf, "{d}", .{real_count}) catch "?";
-                const match_w = (@as(i32, max_col) - @as(i32, min_col) + 1) * c.TILE;
-                const cx = c.BOARD_X + @as(i32, min_col) * c.TILE + @divTrunc(match_w, 2);
                 // Spawn at the center of the match's topmost block (not the
                 // whole bounding box's center), so it reads as belonging to
                 // the match right where it's most visible. It then eases up
@@ -496,18 +494,34 @@ pub fn checkMatches(self: *s.Board, opponent: *s.Board, just_settled: [c.ROWS][c
                 // which point it flies off to the score -- see
                 // render.drawMatchPopups.
                 //
-                // Always computed at the player's own board position, even
-                // when `self` is the CPU -- the CPU's popups are never
-                // rendered (its board is drawn at a simplified micro scale
-                // with no room for a badge), so this is harmless dead data
-                // in that case rather than something worth threading a
-                // second coordinate system through checkMatches for.
+                // The CPU's own board renders at a different scale/position
+                // (render_cpu.zig's simplified micro board, see
+                // constants.CPU_MICRO_TILE/CPU_BOARD_Y) than the player's
+                // full-detail one (constants.BOARD_X/BOARD_Y/TILE), so which
+                // coordinate system to use depends on which board actually
+                // matched -- `self`/`&s.cpu` pointer identity is enough to
+                // tell (the two Boards are process-wide singletons, see
+                // state.player/state.cpu), no extra parameter needed.
                 // min_row is an absolute logical row -- SPAWN_ROWS of those
                 // are the offscreen garbage staging area above the ceiling
                 // (see constants.SPAWN_ROWS), not part of the visible board's
                 // own Y=0 origin, so it has to come out before converting to
                 // screen space (mirrors render.drawBoard's identical offset).
-                const cy = c.BOARD_Y + (@as(i32, min_row) - @as(i32, c.SPAWN_ROWS)) * c.TILE - @as(i32, @intCast(self.scroll_px)) + @divTrunc(c.TILE, 2);
+                const is_cpu = self == &s.cpu;
+                const tile: i32 = if (is_cpu) c.CPU_MICRO_TILE else c.TILE;
+                const origin_x: i32 = if (is_cpu) c.PANEL_X else c.BOARD_X;
+                const origin_y: i32 = if (is_cpu) c.CPU_BOARD_Y else c.BOARD_Y;
+                const match_w = (@as(i32, max_col) - @as(i32, min_col) + 1) * tile;
+                const cx = origin_x + @as(i32, min_col) * tile + @divTrunc(match_w, 2);
+                // scroll_px is always counted in the player's own full-scale
+                // TILE units (see Board.scroll_px), so it's rescaled to the
+                // micro board's own tile size for the CPU case -- mirrors
+                // render_cpu.drawMicroBoard's identical `micro_scroll` rescale.
+                const scroll = if (is_cpu)
+                    @divTrunc(@as(i32, @intCast(self.scroll_px)) * c.CPU_MICRO_TILE, c.TILE)
+                else
+                    @as(i32, @intCast(self.scroll_px));
+                const cy = origin_y + (@as(i32, min_row) - @as(i32, c.SPAWN_ROWS)) * tile - scroll + @divTrunc(tile, 2);
                 const edge_y = cy - s.MATCH_POPUP_RISE_PX;
                 self.spawnMatchPopup(label, cx, cy, edge_y, group_end);
 

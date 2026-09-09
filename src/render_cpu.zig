@@ -5,11 +5,11 @@
 // The micro board mirrors the player's full-detail rendering (see
 // render.drawBoard) in substance -- dithered colors 3-4, tiny per-color
 // icons, smooth per-pixel rise scrolling, falling/swapping slide, a cursor,
-// and popping/recycling animation -- just abstracted down to fit the space:
-// no bevels, no linked-garbage bezel slab (each garbage cell renders
-// individually), no landing squash, no column-stress bounce, no match
-// popups (there's no room for a badge this small). Identical physics
-// doesn't require pixel-identical rendering -- this is a secondary,
+// popping/recycling animation, and (like the player's own board) a flying
+// chain/combo match-popup badge -- just abstracted down to fit the space: no
+// bevels, no linked-garbage bezel slab (each garbage cell renders
+// individually), no landing squash, no column-stress bounce. Identical
+// physics doesn't require pixel-identical rendering -- this is a secondary,
 // at-a-glance view of the opponent's board, not a second full board.
 
 const std = @import("std");
@@ -34,14 +34,18 @@ fn ditherHues(color: u8) ?[2]u8 {
     return DITHER_HUES[color - 3];
 }
 
-const MICRO_TILE: i32 = 7;
+const MICRO_TILE: i32 = c.CPU_MICRO_TILE;
 const MICRO_GAP: i32 = 1;
 const MICRO_CELL: i32 = MICRO_TILE - MICRO_GAP;
 const MICRO_SYMBOL_SIZE: i32 = sym.MICRO_SYMBOL_SIZE;
 
 // Where the CPU's portrait/scoreboard/board sit in the panel column.
 const LABEL_Y: i32 = 44;
-const BOARD_Y: i32 = 66;
+const BOARD_Y: i32 = c.CPU_BOARD_Y;
+// Shared with the badge.drawMatchPopups call below, so the flying badge
+// agrees with the score text it lands on -- same idea as render.zig's own
+// CHAR_TEXT_X.
+const TEXT_X: i32 = c.PANEL_X + rchar.W + rchar.FRAME_MARGIN + 2;
 const BOARD_H: i32 = @as(i32, c.VISIBLE_ROWS) * MICRO_TILE;
 
 // Fills a w x h rect at (x, y) as a checkerboard of two DRAW_COLORS values
@@ -295,18 +299,24 @@ fn plotDithered(x: i32, y: i32) void {
 }
 
 pub fn draw() void {
-    // The CPU's own character portrait, animated per render_character.zig,
-    // replaces the old plain "CPU" text label -- score/points squeezed in
-    // beside it instead of on their own lines below (mirrors the player's
-    // own panel layout in render.drawPanel).
+    // The CPU's own character portrait, framed in its character's own theme
+    // (see rchar.drawFrame) and animated per render_character.zig, replaces
+    // the old plain "CPU" text label -- score/points squeezed in beside it
+    // instead of on their own lines below (mirrors the player's own panel
+    // layout in render.drawPanel).
+    rchar.drawFrame(c.PANEL_X, LABEL_Y, s.cpu_character);
     rchar.draw(c.PANEL_X, LABEL_Y, s.cpu_character, rchar.stateFor(&s.cpu), rchar.currentFrame());
 
-    const text_x = c.PANEL_X + rchar.W + 2;
     w4.DRAW_COLORS.* = 0x0002;
     var buf: [12]u8 = undefined;
     const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.cpu.score}) catch "0";
-    w4.Text(score_str, text_x, LABEL_Y + 2);
-    badge.drawPoints(text_x, LABEL_Y + 10, s.cpu_points);
+    w4.Text(score_str, TEXT_X, LABEL_Y + 2);
+    badge.drawPoints(TEXT_X, LABEL_Y + 10, s.cpu_points);
+    // The CPU's own chain/combo popups now fly here too (see
+    // sim_matches.checkMatches, which computes their spawn point in this
+    // same micro-board coordinate system whenever `self` is the CPU) --
+    // landing on the CPU's own score instead of the player's.
+    badge.drawMatchPopups(&s.cpu.match_popups, TEXT_X, LABEL_Y + 10);
 
     drawMicroBoard(&s.cpu, c.PANEL_X, BOARD_Y);
     drawMicroCursor(&s.cpu, c.PANEL_X, BOARD_Y);

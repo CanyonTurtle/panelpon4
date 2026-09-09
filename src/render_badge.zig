@@ -61,11 +61,6 @@ pub fn drawDitheredRectBlit(x: i32, y: i32, w: i32, h: i32, hues: [2]u8) void {
     w4.BlitSub(&checker_board, x, y, @intCast(w), @intCast(h), src_x, src_y, @intCast(CHECKER_W), w4.BLIT_1BPP);
 }
 
-// Roughly where the score digits sit (see render.drawPanel) -- popups fly
-// here.
-const MATCH_POPUP_TARGET_X: i32 = c.PANEL_X + 14;
-const MATCH_POPUP_TARGET_Y: i32 = 10;
-
 // Sized snugly around the label (WASM4's font is a fixed 8x8 per glyph) with
 // a couple pixels of padding -- a small, subtle badge rather than something
 // covering the whole match. Extra padding on top keeps the glyph clear of
@@ -134,7 +129,11 @@ pub fn drawPoints(x: i32, y: i32, points: u8) void {
     }
 }
 
-pub fn drawMatchPopups(match_popups: []const s.MatchPopup) void {
+// `target_x`/`target_y` is roughly where the caller's own score digits sit
+// (see render.drawPanel/render_cpu.draw) -- popups fly there. A parameter
+// rather than a fixed constant since the player and CPU panels put their
+// score at different positions/scales.
+pub fn drawMatchPopups(match_popups: []const s.MatchPopup, target_x: i32, target_y: i32) void {
     for (match_popups) |p| {
         if (!p.active) continue;
 
@@ -162,8 +161,8 @@ pub fn drawMatchPopups(match_popups: []const s.MatchPopup) void {
             const fly_total: i32 = s.MATCH_POPUP_FLY;
             const num = fly_elapsed * fly_elapsed;
             const den = fly_total * fly_total;
-            cur_x = p.x + @divTrunc((MATCH_POPUP_TARGET_X - p.x) * num, den);
-            cur_y = p.edge_y + @divTrunc((MATCH_POPUP_TARGET_Y - p.edge_y) * num, den);
+            cur_x = p.x + @divTrunc((target_x - p.x) * num, den);
+            cur_y = p.edge_y + @divTrunc((target_y - p.edge_y) * num, den);
         }
 
         const label = p.label[0..p.label_len];

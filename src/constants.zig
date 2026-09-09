@@ -24,6 +24,14 @@ pub const BOARD_X: i32 = 18;
 pub const BOARD_Y: i32 = 0;
 pub const PANEL_X: i32 = 108;
 
+// The CPU's micro board's own scale/position (see render_cpu.zig's
+// drawMicroBoard) -- promoted here from a render_cpu-local constant so
+// sim_matches.checkMatches can compute a match popup's spawn point in the
+// right coordinate system for whichever board actually matched, without
+// sim_matches needing to import rendering code at all.
+pub const CPU_MICRO_TILE: i32 = 7;
+pub const CPU_BOARD_Y: i32 = 66;
+
 pub const POP_FRAMES: i16 = 34; // per-block pop duration; longer gives big combos/chains more time to read
 pub const POP_FLASH_FRAMES: i16 = 10;
 pub const POP_STAGGER_FRAMES: i16 = 4; // delay between each matched block's pop, so they go one at a time
