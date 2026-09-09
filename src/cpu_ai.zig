@@ -67,9 +67,9 @@ fn configFor(level: u8) DifficultyConfig {
         4 => .{ .move_interval = 24, .depth = 1, .chain_weight = 50 },
         5 => .{ .move_interval = 20, .depth = 2, .chain_weight = 65 },
         6 => .{ .move_interval = 17, .depth = 2, .chain_weight = 80 },
-        7 => .{ .move_interval = 14, .depth = 2, .chain_weight = 100 },
-        8 => .{ .move_interval = 12, .depth = 3, .chain_weight = 100, .raise_bias = 10 },
-        9 => .{ .move_interval = 10, .depth = 3, .chain_weight = 115, .raise_bias = 15 },
+        7 => .{ .move_interval = 12, .depth = 2, .chain_weight = 100 },
+        8 => .{ .move_interval = 11, .depth = 3, .chain_weight = 100, .raise_bias = 10 },
+        9 => .{ .move_interval = 9, .depth = 3, .chain_weight = 115, .raise_bias = 15 },
         10 => .{ .move_interval = 8, .depth = 3, .chain_weight = 130, .raise_bias = 20 },
         // state.difficulty is always clamped to 1-10 (see main.zig's title
         // screen) -- this is just a defensive fallback, not a real level.
