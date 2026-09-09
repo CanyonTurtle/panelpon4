@@ -475,6 +475,11 @@ pub var story_stage: u8 = 0;
 // retry, since "beat hard with no game overs" means the whole run, start to
 // finish, not just its final stage.
 pub var story_game_overs: u32 = 0;
+// Counts down while main.zig is still deciding whether a fresh left-press on
+// the Hard tier is an ordinary tap toward Medium or the start of the secret
+// "hold left, then press Z" combo into X Hard -- see constants.
+// STORY_SECRET_GRACE_FRAMES. 0 outside that brief decision window.
+pub var story_left_grace_timer: u16 = 0;
 
 // Counts down while the character screen's confirm flash (see
 // render.drawSetupCharacterScreen) plays, right after pressing X there --

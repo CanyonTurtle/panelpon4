@@ -194,25 +194,49 @@ export fn update() void {
                 render.drawStoryTierScreen();
                 // "By tradition", X Hard is never reachable by plain
                 // left/right cycling (see state.StoryTier's own doc
-                // comment) -- only by holding left and pressing the swap
-                // button while already sitting on Hard, checked before the
-                // ordinary cycling below so that combo doesn't *also* register
-                // as a plain left-press. Left from X Hard steps back out of
-                // it to Hard, same as arriving there.
-                if (s.story_tier == .hard and gp & w4.BUTTON_LEFT != 0 and input.justPressed(gp, w4.BUTTON_2)) {
-                    s.story_tier = .xhard;
+                // comment) -- only by holding left and then pressing the
+                // swap button while sitting on Hard. A fresh left-press on
+                // Hard can't yet tell "just an ordinary tap toward Medium"
+                // apart from "the start of that secret combo" -- committing
+                // to Medium immediately (the first version of this did) means
+                // the very press that was *supposed* to lead into the combo
+                // already consumed itself into Medium before Z ever has a
+                // chance to join, so the combo could never actually fire.
+                // Instead this waits up to STORY_SECRET_GRACE_FRAMES for Z to
+                // join (see state.story_left_grace_timer), committing early
+                // the instant left is released without Z ever joining (so an
+                // ordinary quick tap still feels instant) or once the grace
+                // window itself runs out. Left from X Hard steps back out of
+                // it to Hard immediately, same as arriving there -- no such
+                // ambiguity going that direction.
+                if (s.story_tier == .xhard) {
+                    if (input.justPressed(gp, w4.BUTTON_LEFT)) s.story_tier = .hard;
+                } else if (s.story_tier == .hard) {
+                    if (input.justPressed(gp, w4.BUTTON_LEFT)) s.story_left_grace_timer = c.STORY_SECRET_GRACE_FRAMES;
+                    if (s.story_left_grace_timer > 0) {
+                        if (gp & w4.BUTTON_LEFT == 0) {
+                            // Released before Z ever joined -- an ordinary tap.
+                            s.story_tier = .medium;
+                            s.story_left_grace_timer = 0;
+                        } else if (input.justPressed(gp, w4.BUTTON_2)) {
+                            s.story_tier = .xhard;
+                            s.story_left_grace_timer = 0;
+                        } else {
+                            s.story_left_grace_timer -= 1;
+                            if (s.story_left_grace_timer == 0) s.story_tier = .medium; // grace ran out, no Z -- ordinary tap
+                        }
+                    }
                 } else if (input.justPressed(gp, w4.BUTTON_LEFT)) {
                     s.story_tier = switch (s.story_tier) {
                         .easy => .easy,
                         .medium => .easy,
-                        .hard => .medium,
-                        .xhard => .hard,
+                        .hard, .xhard => unreachable, // handled above
                     };
                 } else if (input.justPressed(gp, w4.BUTTON_RIGHT)) {
                     s.story_tier = switch (s.story_tier) {
                         .easy => .medium,
                         .medium => .hard,
-                        .hard, .xhard => s.story_tier, // never cycles *into* xhard this way
+                        .hard, .xhard => unreachable, // handled above
                     };
                 }
                 if (input.justPressed(gp, w4.BUTTON_1)) {

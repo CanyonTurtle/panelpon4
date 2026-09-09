@@ -70,6 +70,15 @@ pub const POINTS_TO_WIN: u8 = 2; // best of 3 -- first to 2 match wins takes the
 pub const GARBAGE_PUNISH_DISPLAY_FRAMES: u16 = 90; // 1.5s -- how long a character's "punish" reaction lingers
 pub const CHARACTER_ANIM_FRAME_TICKS: u32 = 20; // frames each of a character's 2 animation frames holds
 
+// The story tier screen's secret X Hard combo (see state.story_left_grace_
+// timer/main.zig's story_tier_select handling): a fresh left-press while
+// sitting on Hard can't yet tell an ordinary tap toward Medium apart from
+// the start of "hold left, then press Z" -- it waits up to this many frames
+// for Z to join before committing to the ordinary Medium cycle (sooner, the
+// instant left is released without Z ever joining, so a quick tap still
+// feels instant).
+pub const STORY_SECRET_GRACE_FRAMES: u16 = 20;
+
 // The character screen's confirm flash (see state.setup_flash_timer) --
 // blinks the selection outline on/off every TOGGLE frames for the whole
 // span, 3 full on/off cycles.
