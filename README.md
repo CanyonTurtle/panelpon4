@@ -174,7 +174,15 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   per-cell timer handling at the exact frame `render.drawPoppingCell`'s own elapsed time crosses from its
   initial flash wobble into the shrink-to-nothing phase -- the same instant its pop-tick sound plays -- not
   once for the whole match at once, and not once each block has already finished shrinking and vanished
-  either, so each block's own burst plays out *alongside* it visibly shrinking, not before or after);
+  either, so each block's own burst plays out *alongside* it visibly shrinking, not before or after. A
+  garbage cell bursts too, on its own different timing: right as its own staggered turn actually begins
+  (`render.drawRecyclingCell`'s own elapsed == 0, the instant a converting cell hard-cuts to looking like a
+  plain block and a non-converting one starts its own oscillating flash), rather than at the real-block
+  threshold above, which would land partway through a garbage cell's already-started reveal instead of at
+  the start of it. A non-converting cell (see `Cell.garbage_reveals`) never gets a real color assigned, so
+  its burst uses garbage's own muted teal instead of a block color -- this is what makes even the members of
+  a taller clump that don't personally convert still visibly react at their own turn, instead of just sitting
+  there through the whole event while only the bottom row visibly does anything);
   `s.player`'s own pool is drawn by `render.drawParticles`; purely cosmetic, exactly like `MatchPopup`) plus
   its small methods (ring-buffer indexing, RNG, board-busy query), and the two live
   instances of it, `player`/`cpu`. Every other module takes an explicit `*Board` rather than reaching into
@@ -367,6 +375,11 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   tested directly). This is what lets two different pieces resting against each other, rendered as one
   seamless slab with no visible seam (see `render_garbage.drawLinked`/`isAttached`, which merge on pure
   spatial adjacency, not piece identity), still read as visually distinct blocks instead of one bigger one.
+  Takes the same `wiped` row count as `drawBoard`'s own closing-wipe skip (0 during ordinary play) and treats
+  a cell in a wiped row as though it isn't there at all, so a piece's mark shrinks/recenters in sync as the
+  wipe eats into it and disappears entirely once the whole piece -- or, once a match concludes, the whole
+  board -- has been wiped, rather than a mark computed from the board's real underlying data hanging in the
+  air over a wipe that's already visually cleared the piece it belonged to.
 - `src/characters.zig` — the 4 selectable characters: a real pixel-art sprite each (same text-art bitmap
   convention as `symbols.zig`) -- a lizard, a mermaid, a bug, and a cloud puff -- plus a hue/dither pair, a
   main-frame border style, and a `face` anchor (where `render_character.zig`'s shared expression logic

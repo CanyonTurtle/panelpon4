@@ -56,8 +56,16 @@ pub const PieceCenters = struct {
 //
 // Only scans the visible window (SPAWN_ROWS..ROWS), matching drawBoard's own
 // range -- nothing in the offscreen spawn buffer is ever drawn, so it needs
-// no mark either.
-pub fn pieceCenters(b: *s.Board) PieceCenters {
+// no mark either. `wiped` is drawBoard's own closingWipedRows() count (rows
+// already "popped" by the closing wipe, from the ceiling down, once a match
+// concludes -- 0 during ordinary play): a cell in a wiped row is treated
+// exactly like it isn't there at all, the same as drawBoard's own per-row
+// skip, so a piece's mark shrinks/recenters in sync with the wipe as it
+// eats into it, and vanishes outright once the whole piece (or the whole
+// board, once the match is fully over) has been wiped -- rather than a
+// mark computed from the board's *real* underlying data hanging in the air
+// over a wipe that's already visually cleared the piece it belonged to.
+pub fn pieceCenters(b: *s.Board, wiped: u8) PieceCenters {
     var result: PieceCenters = .{};
     var visited: [c.ROWS][c.COLS]bool = std.mem.zeroes([c.ROWS][c.COLS]bool);
     var stack: [c.ROWS * c.COLS][2]u8 = undefined;
@@ -67,6 +75,10 @@ pub fn pieceCenters(b: *s.Board) PieceCenters {
         for (0..c.COLS) |c0i| {
             const col0: u8 = @intCast(c0i);
             if (visited[lr0][col0]) continue;
+            if (lr0 - c.SPAWN_ROWS < wiped) {
+                visited[lr0][col0] = true;
+                continue;
+            }
             const first = b.cellAt(lr0, col0);
             if (!first.is_garbage or first.state != .normal) {
                 visited[lr0][col0] = true;
@@ -91,7 +103,7 @@ pub fn pieceCenters(b: *s.Board) PieceCenters {
                 const r = pos[0];
                 const cl = pos[1];
 
-                if (r > c.SPAWN_ROWS and !visited[r - 1][cl]) {
+                if (r > c.SPAWN_ROWS and r - 1 - c.SPAWN_ROWS >= wiped and !visited[r - 1][cl]) {
                     const n = b.cellAt(r - 1, cl);
                     visited[r - 1][cl] = true;
                     if (n.is_garbage and n.state == .normal and n.garbage_group == group) {
@@ -148,7 +160,7 @@ test "a single solid garbage piece's centroid lands on its true middle cell" {
     for (0..3) |i| {
         b.cellAt(15, @intCast(i)).* = .{ .state = .normal, .is_garbage = true };
     }
-    const result = pieceCenters(&b);
+    const result = pieceCenters(&b, 0);
     try testing.expectEqual(@as(usize, 1), result.count);
     try testing.expectEqual(c.BOARD_X + 1 * c.TILE + @divTrunc(c.TILE, 2), result.items[0].x);
     try testing.expectEqual(c.BOARD_Y + 5 * c.TILE + @divTrunc(c.TILE, 2), result.items[0].y);
@@ -160,7 +172,7 @@ test "an even-width piece's centroid lands exactly between its two middle cells,
     // between the two cells, not inside either one.
     b.cellAt(15, 0).* = .{ .state = .normal, .is_garbage = true };
     b.cellAt(15, 1).* = .{ .state = .normal, .is_garbage = true };
-    const result = pieceCenters(&b);
+    const result = pieceCenters(&b, 0);
     try testing.expectEqual(@as(usize, 1), result.count);
     // The seam between col 0 and col 1 is exactly one tile from BOARD_X.
     try testing.expectEqual(c.BOARD_X + 1 * c.TILE, result.items[0].x);
@@ -183,7 +195,7 @@ test "two different pieces resting against each other each get their own centroi
             b.cellAt(@intCast(16 + dr), @intCast(col)).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 1 };
         }
     }
-    const result = pieceCenters(&b);
+    const result = pieceCenters(&b, 0);
     try testing.expectEqual(@as(usize, 2), result.count);
     try testing.expect(result.items[0].y != result.items[1].y);
 }
@@ -196,7 +208,7 @@ test "an L-shaped piece's centroid is the true mean of its cells, not its boundi
     b.cellAt(15, 0).* = .{ .state = .normal, .is_garbage = true };
     b.cellAt(15, 1).* = .{ .state = .normal, .is_garbage = true };
     b.cellAt(16, 0).* = .{ .state = .normal, .is_garbage = true };
-    const result = pieceCenters(&b);
+    const result = pieceCenters(&b, 0);
     try testing.expectEqual(@as(usize, 1), result.count);
     // Mean col = (0+1+0)/3 = 1/3 of a tile right of col 0's own center --
     // left of the bounding box's midpoint (which would fall a full half
@@ -210,7 +222,32 @@ test "a piece touching a real (non-garbage) block doesn't merge with it" {
     var b: s.Board = .{};
     b.cellAt(15, 0).* = .{ .state = .normal, .is_garbage = true };
     b.cellAt(15, 1).* = .{ .color = 1, .state = .normal }; // real block, not garbage
-    const result = pieceCenters(&b);
+    const result = pieceCenters(&b, 0);
     try testing.expectEqual(@as(usize, 1), result.count);
     try testing.expectEqual(c.BOARD_X + @divTrunc(c.TILE, 2), result.items[0].x);
+}
+
+test "a piece's mark shrinks with the closing wipe and vanishes once the whole piece is wiped" {
+    var b: s.Board = .{};
+    // A 3-tall column, col 0, visible rows 0-2 (logical rows 10-12).
+    b.cellAt(10, 0).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(11, 0).* = .{ .state = .normal, .is_garbage = true };
+    b.cellAt(12, 0).* = .{ .state = .normal, .is_garbage = true };
+
+    // No wipe: centroid at the true middle (visible row 1).
+    const full = pieceCenters(&b, 0);
+    try testing.expectEqual(@as(usize, 1), full.count);
+    try testing.expectEqual(c.BOARD_Y + 1 * c.TILE + @divTrunc(c.TILE, 2), full.items[0].y);
+
+    // Wipe row 0 (the ceiling-most) -- only rows 1-2 remain, so the
+    // centroid shifts down to the seam between them, same reasoning as the
+    // even-width test above.
+    const partial = pieceCenters(&b, 1);
+    try testing.expectEqual(@as(usize, 1), partial.count);
+    try testing.expectEqual(c.BOARD_Y + 2 * c.TILE, partial.items[0].y);
+
+    // Wipe the whole piece -- no mark left at all, not one computed from
+    // the board's real (but no-longer-visible) data.
+    const gone = pieceCenters(&b, 3);
+    try testing.expectEqual(@as(usize, 0), gone.count);
 }

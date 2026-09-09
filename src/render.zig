@@ -457,8 +457,11 @@ fn drawBoard(b: *s.Board) void {
     // cells rather than belonging to any single one of them. Lets two
     // different pieces resting against each other, rendered as one seamless
     // slab with no visible seam (see rgarbage.drawLinked), still read as
-    // visually distinct blocks instead of one bigger one.
-    const centers = rgarbage.pieceCenters(b);
+    // visually distinct blocks instead of one bigger one. Passed the same
+    // `wiped` count as the main loop above, so a piece's mark shrinks in
+    // sync with the closing wipe and disappears entirely once the match is
+    // over, rather than lingering over a board the wipe has already cleared.
+    const centers = rgarbage.pieceCenters(b, wiped);
     for (centers.items[0..centers.count]) |pc| rgarbage.drawMark(pc.x, pc.y);
 }
 

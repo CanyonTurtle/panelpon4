@@ -128,12 +128,39 @@ pub fn simulate(self: *s.Board, opponent: *s.Board) void {
                             // transforming and popping in turn. Garbage
                             // cracks open in place instead of shrinking away
                             // (see the pop_group_end branch below), so it
-                            // gets no burst of its own here.
+                            // gets no burst of its own here -- see below
+                            // instead, on its own different timing.
                             if (!cell.is_garbage) {
                                 const px = c.BOARD_X + @as(i32, @intCast(col)) * c.TILE + @divTrunc(c.TILE, 2);
                                 const py = c.BOARD_Y + (@as(i32, @intCast(lr)) - @as(i32, c.SPAWN_ROWS)) * c.TILE - @as(i32, @intCast(self.scroll_px)) + @divTrunc(c.TILE, 2);
                                 self.spawnPopParticles(px, py, cell.color);
                             }
+                        }
+                        // A garbage cell's own "turn" reads completely
+                        // differently from a real block's (see
+                        // render.drawRecyclingCell): a converting cell hard-
+                        // cuts straight to looking like a plain normal
+                        // block the instant elapsed == 0 (timer ==
+                        // POP_FRAMES), no flash-then-shrink first, and a
+                        // non-converting cell starts its own oscillating
+                        // flash at that exact same instant instead -- so
+                        // that's the moment a burst belongs, for both,
+                        // since it's what actually reads as "this piece's
+                        // turn has come" even for a cell that stays garbage
+                        // afterward.
+                        if (cell.is_garbage and cell.timer == c.POP_FRAMES) {
+                            const px = c.BOARD_X + @as(i32, @intCast(col)) * c.TILE + @divTrunc(c.TILE, 2);
+                            const py = c.BOARD_Y + (@as(i32, @intCast(lr)) - @as(i32, c.SPAWN_ROWS)) * c.TILE - @as(i32, @intCast(self.scroll_px)) + @divTrunc(c.TILE, 2);
+                            // A converting cell (Cell.garbage_reveals) bursts
+                            // in the color it's about to become (already
+                            // picked -- see sim_matches.checkMatches -- by
+                            // the time this fires); a flash-only cell never
+                            // gets a real color assigned at all, so it
+                            // bursts in garbage's own muted teal instead
+                            // (color value 1 -- see
+                            // render_garbage.GARBAGE_HUE).
+                            const particle_color: u8 = if (cell.garbage_reveals) cell.color else 1;
+                            self.spawnPopParticles(px, py, particle_color);
                         }
                     }
                     cell.pop_group_end -= 1;
