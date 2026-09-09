@@ -61,6 +61,7 @@ pub fn trySwap(self: *s.Board) void {
 pub fn simulate(self: *s.Board, opponent: *s.Board) void {
     self.tickMatchPopups();
     if (self.combo_display_timer > 0) self.combo_display_timer -= 1;
+    if (self.garbage_punish_timer > 0) self.garbage_punish_timer -= 1;
 
     var settled = false;
     // Cells that completed a .swapping/.landing -> .normal transition this

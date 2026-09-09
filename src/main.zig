@@ -9,6 +9,7 @@ const cpu_ai = @import("cpu_ai.zig");
 const render = @import("render.zig");
 const audio = @import("audio.zig");
 const debug = @import("debug.zig");
+const characters = @import("characters.zig");
 
 // Debug-only WASM exports (see debug.zig) for tools/wasm4-harness.js to
 // drive: only compiled into Debug builds, so `zig build --release=small`
@@ -78,6 +79,17 @@ export fn update() void {
                 // around, but fixed for the whole series in between.
                 if (input.justPressed(gp, w4.BUTTON_LEFT) and s.difficulty > 1) s.difficulty -= 1;
                 if (input.justPressed(gp, w4.BUTTON_RIGHT) and s.difficulty < 10) s.difficulty += 1;
+                // Up/down cycles the player's own character; the CPU's pick
+                // is always recomputed to differ from it (see
+                // characters.cpuPickFor), never chosen directly.
+                if (input.justPressed(gp, w4.BUTTON_UP)) {
+                    s.player_character = (s.player_character + characters.COUNT - 1) % characters.COUNT;
+                    s.cpu_character = characters.cpuPickFor(s.player_character);
+                }
+                if (input.justPressed(gp, w4.BUTTON_DOWN)) {
+                    s.player_character = (s.player_character + 1) % characters.COUNT;
+                    s.cpu_character = characters.cpuPickFor(s.player_character);
+                }
                 if (input.justPressed(gp, w4.BUTTON_1)) board.beginCountdown();
             },
         }

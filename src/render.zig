@@ -17,11 +17,12 @@ const badge = @import("render_badge.zig");
 const render_cpu = @import("render_cpu.zig");
 const rgarbage = @import("render_garbage.zig");
 const bg = @import("render_bg.zig");
+const characters = @import("characters.zig");
+const rchar = @import("render_character.zig");
 
 // nibble values for DRAW_COLORS color1, one per palette slot (index+1)
 const DC_BG: u16 = 1;
 const HUE_DRAWCOLOR = [3]u16{ 2, 3, 4 };
-const DC_FRAME: u16 = 2; // frame/UI accent, reuses hue A
 
 // Blocks have no border color of their own anymore: just a 1px background
 // corner-bevel (see BEVEL_RADIUS) and a 1px background gap between tiles
@@ -386,6 +387,36 @@ fn maskBelowBoard() void {
     w4.Rect(0, BOARD_BOTTOM, @intCast(c.PANEL_X), @intCast(screen - BOARD_BOTTOM));
 }
 
+// Fills one edge band of the frame (a w x h strip, `horizontal` true for
+// the top/bottom bands where the pattern repeats along x, false for
+// left/right where it repeats along y) according to the current player's
+// chosen character's own border style (see characters.BorderStyle) --
+// "their own style of menu border for the main frame". A two-hue character
+// dithers between its pair everywhere the style would otherwise show a
+// single solid hue.
+fn drawThemedBand(x: i32, y: i32, w: i32, h: i32, hues: [2]u8, style: characters.BorderStyle, horizontal: bool) void {
+    const len = if (horizontal) w else h;
+    const thick = if (horizontal) h else w;
+    var i: i32 = 0;
+    while (i < len) : (i += 1) {
+        var j: i32 = 0;
+        while (j < thick) : (j += 1) {
+            const on = switch (style) {
+                .solid => true,
+                .checkered => @mod(i + j, 2) == 0,
+                .dashed => @mod(i, 7) < 4,
+                .double => j == 0 or j == thick - 1,
+            };
+            if (!on) continue;
+            const hue_idx: usize = if (hues[0] == hues[1]) 0 else @intCast(@mod(i + j, 2));
+            w4.DRAW_COLORS.* = HUE_DRAWCOLOR[hues[hue_idx]];
+            const px = if (horizontal) x + i else x + j;
+            const py = if (horizontal) y + j else y + i;
+            w4.Rect(px, py, 1, 1);
+        }
+    }
+}
+
 // Frame around the playable area with a 2px-radius chamfer at each corner
 // (WASM-4's rect() has no rounded-corner support, so the corners are faked
 // by punching a small diagonal notch out of the frame in the background
@@ -412,11 +443,11 @@ fn drawFrame() void {
     const t = FRAME_THICKNESS;
     const radius = FRAME_RADIUS;
 
-    w4.DRAW_COLORS.* = DC_FRAME;
-    w4.Rect(x, y, @intCast(w), @intCast(t)); // top
-    w4.Rect(x, y + h - t, @intCast(w), @intCast(t)); // bottom
-    w4.Rect(x, y, @intCast(t), @intCast(h)); // left
-    w4.Rect(x + w - t, y, @intCast(t), @intCast(h)); // right
+    const char = characters.ALL[s.player_character];
+    drawThemedBand(x, y, w, t, char.hues, char.border_style, true); // top
+    drawThemedBand(x, y + h - t, w, t, char.hues, char.border_style, true); // bottom
+    drawThemedBand(x, y, t, h, char.hues, char.border_style, false); // left
+    drawThemedBand(x + w - t, y, t, h, char.hues, char.border_style, false); // right
 
     w4.DRAW_COLORS.* = DC_BG;
     var dy: i32 = 0;
@@ -483,12 +514,21 @@ fn drawCursor() void {
     }
 }
 
+// The player's own character portrait, animated per render_character.zig,
+// plus score/chain/combo/points squeezed in beside and below it -- the
+// label text ("SCORE") is dropped entirely and the rest shrunk down, since
+// the portrait and its reaction to what's actually happening is the more
+// important thing on screen now (see this project's own commit history for
+// why -- this used to be a "SCORE" label above the number, on its own line).
 fn drawPanel() void {
+    rchar.draw(c.PANEL_X, 0, s.player_character, rchar.stateFor(&s.player), rchar.currentFrame());
+
+    const text_x = c.PANEL_X + rchar.SIZE + 2;
     w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("SCORE", c.PANEL_X, 4);
     var buf: [12]u8 = undefined;
     const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.player.score}) catch "0";
-    w4.Text(score_str, c.PANEL_X, 14);
+    w4.Text(score_str, text_x, 2);
+    badge.drawPoints(text_x, 10, s.player_points);
 
     // Chain and combo share this one spot rather than each getting their own
     // line -- chain takes priority when both are true (same precedence as
@@ -502,15 +542,11 @@ fn drawPanel() void {
         var buf2: [12]u8 = undefined;
         const chain_str = std.fmt.bufPrint(&buf2, "x{d}", .{s.player.chain}) catch "";
         w4.DRAW_COLORS.* = 0x0004;
-        w4.Text(chain_str, c.PANEL_X, 28);
+        w4.Text(chain_str, c.PANEL_X, rchar.SIZE + 2);
     } else if (s.player.combo_display_timer > 0) {
         w4.DRAW_COLORS.* = 0x0004;
-        w4.Text("COMBO", c.PANEL_X, 28);
+        w4.Text("COMBO", c.PANEL_X, rchar.SIZE + 2);
     }
-
-    // Best-of-N series score (see constants.POINTS_TO_WIN) -- the CPU's own
-    // pips are drawn next to its score in render_cpu.draw instead.
-    badge.drawPoints(c.PANEL_X, 38, s.player_points);
 }
 
 // A slow sine-wave offset -- gives the menu panel below a gentle, alive
@@ -527,28 +563,29 @@ fn menuSinOffset(period_frames: i32, amplitude_px: i32) i32 {
 
 const MENU_PANEL_X: i32 = 20;
 const MENU_PANEL_W: i32 = 120;
-const MENU_PANEL_H: i32 = 100;
 const MENU_SIN_PERIOD: i32 = 180; // 3s
 const MENU_SIN_AMOUNT: i32 = 4;
 
-fn menuPanelY() i32 {
-    return 30 + menuSinOffset(MENU_SIN_PERIOD, MENU_SIN_AMOUNT);
+fn menuPanelY(base_y: i32) i32 {
+    return base_y + menuSinOffset(MENU_SIN_PERIOD, MENU_SIN_AMOUNT);
 }
 
 // Common backdrop for both pre-game screens: the parallaxing background
 // (see render_bg.zig) plus the bezeled panel itself, gently bobbing (see
 // menuPanelY) -- callers just draw their own content into the returned Y.
-fn drawMenuPanel() i32 {
+// `base_y`/`h` differ between the two screens (setup has more to fit), so
+// both are the caller's own choice rather than shared constants.
+fn drawMenuPanel(base_y: i32, h: i32) i32 {
     bg.draw();
-    const y = menuPanelY();
+    const y = menuPanelY(base_y);
     w4.DRAW_COLORS.* = 0x0001;
-    w4.Rect(MENU_PANEL_X, y, MENU_PANEL_W, MENU_PANEL_H);
-    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, MENU_PANEL_H);
+    w4.Rect(MENU_PANEL_X, y, MENU_PANEL_W, @intCast(h));
+    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, h);
     return y;
 }
 
 pub fn drawTitleScreen() void {
-    const y = drawMenuPanel();
+    const y = drawMenuPanel(30, 100);
     w4.DRAW_COLORS.* = 0x0003;
     w4.Text("PANELPON4", 40, y + 24);
     w4.DRAW_COLORS.* = 0x0002;
@@ -576,19 +613,39 @@ fn drawDifficultyBar(x: i32, y: i32) void {
 }
 
 pub fn drawSetupScreen() void {
-    const y = drawMenuPanel();
+    const y = drawMenuPanel(14, 140);
     w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("SETUP", 58, y + 12);
+    w4.Text("SETUP", 58, y + 6);
+
+    // Character picker: the player's own pick on the left (cycled with
+    // up/down -- see main.zig), the CPU's own auto-pick (always a
+    // different one -- see characters.cpuPickFor) shown alongside on the
+    // right, never selectable itself.
     w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("DIFFICULTY", 40, y + 32);
-    drawDifficultyBar(40, y + 44);
+    w4.Text("CHARACTER", 40, y + 20);
+    const p_char = characters.ALL[s.player_character];
+    const cpu_char = characters.ALL[s.cpu_character];
+    const frame = rchar.currentFrame();
+    rchar.draw(30, y + 32, s.player_character, .normal, frame);
+    rchar.draw(116, y + 32, s.cpu_character, .normal, frame);
+    w4.DRAW_COLORS.* = 0x0004;
+    w4.Text("VS", 74, y + 36);
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text(p_char.name, 22, y + 50);
+    w4.Text(cpu_char.name, 108, y + 50);
+    w4.Text("^", 34, y + 62);
+    w4.Text("v", 34, y + 70);
+
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text("DIFFICULTY", 40, y + 84);
+    drawDifficultyBar(40, y + 96);
     var buf: [24]u8 = undefined;
     // Every level runs cpu_engine's actual move search -- see
     // cpu_ai.configFor -- lower levels just listen to it far less reliably.
     const label = std.fmt.bufPrint(&buf, "LEVEL {d}", .{s.difficulty}) catch "LEVEL ?";
-    w4.Text(label, 58, y + 56);
-    w4.Text("<-      ->", 40, y + 68);
-    w4.Text("PRESS X", 52, y + 82);
+    w4.Text(label, 58, y + 108);
+    w4.Text("<-      ->", 40, y + 120);
+    w4.Text("PRESS X", 52, y + 132);
 }
 
 // Bezeled orange border for a full-screen overlay panel (the countdown and
@@ -632,6 +689,15 @@ pub fn drawGameOver() void {
     w4.DRAW_COLORS.* = 0x0001;
     w4.Rect(x, y, w, h);
     drawPanelBorder(x, y, w, h);
+
+    // The winning side's own character, celebrating -- not shown for a
+    // draw, since neither side actually won.
+    switch (s.winner) {
+        .player => rchar.draw(x + w - rchar.SIZE - 4, y + 4, s.player_character, .win, rchar.currentFrame()),
+        .cpu => rchar.draw(x + w - rchar.SIZE - 4, y + 4, s.cpu_character, .win, rchar.currentFrame()),
+        .draw, .none => {},
+    }
+
     w4.DRAW_COLORS.* = 0x0004;
     w4.Text("MATCH OVER", 40, 58);
     w4.Text(text, 32, 74);

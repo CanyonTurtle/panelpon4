@@ -199,6 +199,12 @@ pub const Board = struct {
     // Meaningless once combo_display_timer reaches 0.
     combo_display: u8 = 0,
     combo_display_timer: u16 = 0,
+    // Set (see sim_garbage.releaseIncomingGarbage) the instant a queued
+    // attack actually lands on this board -- drives the character portrait's
+    // "punish" reaction (see render_character.zig) for a little while
+    // afterward, ticked down once per frame in sim.simulate exactly like
+    // combo_display_timer above.
+    garbage_punish_timer: u16 = 0,
     game_over: bool = false,
     // Counts consecutive idle frames spent with a block at or above the
     // ceiling -- see board.updateDangerTimer, which is what actually sets
@@ -402,6 +408,14 @@ pub var closing_timer: i32 = 0;
 // flipper at increasing speed; 5-10 hand off to cpu_engine's actual move
 // search instead, at increasing strength -- see cpu_ai.configFor.
 pub var difficulty: u8 = 1;
+
+// Which of characters.ALL each side is playing as -- set on the setup
+// screen (see main.zig); the CPU's is always recomputed to differ from the
+// player's own pick whenever that changes (see characters.cpuPickFor).
+// Drives both sides' main-frame theming and in-game portrait (see
+// render.drawFrame/render_character.zig).
+pub var player_character: u8 = 0;
+pub var cpu_character: u8 = 1;
 
 pub var frame_count: u32 = 0;
 pub var prev_gamepad: u8 = 0;

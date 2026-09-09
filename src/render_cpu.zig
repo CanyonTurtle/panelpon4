@@ -18,11 +18,12 @@ const s = @import("state.zig");
 const w4 = @import("wasm4.zig");
 const sym = @import("symbols.zig");
 const badge = @import("render_badge.zig");
+const characters = @import("characters.zig");
+const rchar = @import("render_character.zig");
 
-// Mirrors render.zig's own DC_BG/DC_FRAME/HUE_DRAWCOLOR/GARBAGE_HUE/
-// dither-hue mapping, and render_badge.zig's warm cursor/badge dither pair.
+// Mirrors render.zig's own DC_BG/HUE_DRAWCOLOR mapping, and
+// render_badge.zig's warm cursor/badge dither pair.
 const DC_BG: u16 = 1;
-const DC_FRAME: u16 = 2;
 const HUE_DRAWCOLOR = [3]u16{ 2, 3, 4 };
 const GARBAGE_HUE: u8 = 1;
 const DITHER_HUES = [2][2]u8{ .{ 0, 1 }, .{ 1, 2 } };
@@ -38,9 +39,8 @@ const MICRO_GAP: i32 = 1;
 const MICRO_CELL: i32 = MICRO_TILE - MICRO_GAP;
 const MICRO_SYMBOL_SIZE: i32 = sym.MICRO_SYMBOL_SIZE;
 
-// Where the CPU's mini scoreboard/board sit in the panel column.
+// Where the CPU's portrait/scoreboard/board sit in the panel column.
 const LABEL_Y: i32 = 44;
-const SCORE_Y: i32 = 54;
 const BOARD_Y: i32 = 66;
 const BOARD_H: i32 = @as(i32, c.VISIBLE_ROWS) * MICRO_TILE;
 
@@ -185,6 +185,26 @@ fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16,
     drawMicroIcon(x, y, color, clip_top, clip_bottom);
 }
 
+// A simplified, 1px-thick analog of render.drawThemedBand (this border is
+// only ever 1px, so "double" degrades to solid -- there's no room for an
+// inner/outer pair of lines) -- see characters.BorderStyle.
+fn drawThemedEdge(x: i32, y: i32, len: i32, hues: [2]u8, style: characters.BorderStyle, horizontal: bool) void {
+    var i: i32 = 0;
+    while (i < len) : (i += 1) {
+        const on = switch (style) {
+            .solid, .double => true,
+            .checkered => @mod(i, 2) == 0,
+            .dashed => @mod(i, 7) < 4,
+        };
+        if (!on) continue;
+        const hue_idx: usize = if (hues[0] == hues[1]) 0 else @intCast(@mod(i, 2));
+        w4.DRAW_COLORS.* = HUE_DRAWCOLOR[hues[hue_idx]];
+        const px = if (horizontal) x + i else x;
+        const py = if (horizontal) y else y + i;
+        w4.Rect(px, py, 1, 1);
+    }
+}
+
 // Mirrors render.closingWipedRows exactly (can't import it directly --
 // render.zig already imports this file, and Zig doesn't allow the reverse).
 // See that copy's own doc comment for why this is 0 outside the closing
@@ -236,12 +256,12 @@ fn drawMicroBoard(b: *s.Board, origin_x: i32, origin_y: i32) void {
         }
     }
 
-    w4.DRAW_COLORS.* = DC_FRAME;
+    const char = characters.ALL[s.cpu_character];
     const w = @as(i32, c.COLS) * MICRO_TILE;
-    w4.Rect(origin_x - 1, origin_y - 1, @intCast(w + 2), 1);
-    w4.Rect(origin_x - 1, origin_y + BOARD_H, @intCast(w + 2), 1);
-    w4.Rect(origin_x - 1, origin_y - 1, 1, @intCast(BOARD_H + 2));
-    w4.Rect(origin_x + w, origin_y - 1, 1, @intCast(BOARD_H + 2));
+    drawThemedEdge(origin_x - 1, origin_y - 1, w + 2, char.hues, char.border_style, true);
+    drawThemedEdge(origin_x - 1, origin_y + BOARD_H, w + 2, char.hues, char.border_style, true);
+    drawThemedEdge(origin_x - 1, origin_y - 1, BOARD_H + 2, char.hues, char.border_style, false);
+    drawThemedEdge(origin_x + w, origin_y - 1, BOARD_H + 2, char.hues, char.border_style, false);
 }
 
 // A tiny 1px dithered outline over the CPU's own (AI-driven, see cpu_ai.zig)
@@ -275,15 +295,18 @@ fn plotDithered(x: i32, y: i32) void {
 }
 
 pub fn draw() void {
+    // The CPU's own character portrait, animated per render_character.zig,
+    // replaces the old plain "CPU" text label -- score/points squeezed in
+    // beside it instead of on their own lines below (mirrors the player's
+    // own panel layout in render.drawPanel).
+    rchar.draw(c.PANEL_X, LABEL_Y, s.cpu_character, rchar.stateFor(&s.cpu), rchar.currentFrame());
+
+    const text_x = c.PANEL_X + rchar.SIZE + 2;
     w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("CPU", c.PANEL_X, LABEL_Y);
-    // Best-of-N series score (see constants.POINTS_TO_WIN) -- next to the
-    // "CPU" label, in the label row's own leftover width (mirrors the
-    // player's own pips next to their score in render.drawPanel).
-    badge.drawPoints(c.PANEL_X + 3 * 8 + 4, LABEL_Y, s.cpu_points);
     var buf: [12]u8 = undefined;
     const score_str = std.fmt.bufPrint(&buf, "{d}", .{s.cpu.score}) catch "0";
-    w4.Text(score_str, c.PANEL_X, SCORE_Y);
+    w4.Text(score_str, text_x, LABEL_Y + 2);
+    badge.drawPoints(text_x, LABEL_Y + 10, s.cpu_points);
 
     drawMicroBoard(&s.cpu, c.PANEL_X, BOARD_Y);
     drawMicroCursor(&s.cpu, c.PANEL_X, BOARD_Y);

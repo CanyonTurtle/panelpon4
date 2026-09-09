@@ -41,6 +41,8 @@ pub const PRE_POP_TOTAL_FRAMES: i16 = PRE_POP_BLINK_FRAMES + PRE_POP_PAUSE_FRAME
 pub const LAND_FRAMES: i16 = 8;
 pub const COMBO_DISPLAY_FRAMES: u16 = 90; // 1.5s -- how long the panel's "COMBO" label lingers
 pub const POINTS_TO_WIN: u8 = 2; // best of 3 -- first to 2 match wins takes the series
+pub const GARBAGE_PUNISH_DISPLAY_FRAMES: u16 = 90; // 1.5s -- how long a character's "punish" reaction lingers
+pub const CHARACTER_ANIM_FRAME_TICKS: u32 = 20; // frames each of a character's 2 animation frames holds
 
 // The "3 2 1 START" countdown overlay at match start (see
 // board.beginCountdown/state.countdown_timer/render.drawCountdown): "3",

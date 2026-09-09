@@ -125,7 +125,12 @@ pub fn releaseIncomingGarbage(self: *s.Board) void {
             // Stays queued (retried next frame) if the spawn buffer doesn't
             // have room for the whole piece yet -- see spawnGarbage's
             // all-or-nothing placement.
-            if (spawnGarbage(self, p.rows, p.width, p.anchor_col)) slot.* = null;
+            if (spawnGarbage(self, p.rows, p.width, p.anchor_col)) {
+                slot.* = null;
+                // Drives the character portrait's "punish" reaction (see
+                // state.Board.garbage_punish_timer/render_character.zig).
+                self.garbage_punish_timer = c.GARBAGE_PUNISH_DISPLAY_FRAMES;
+            }
         }
     }
 }

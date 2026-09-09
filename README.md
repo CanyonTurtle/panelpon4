@@ -97,17 +97,24 @@ the side panel. Both run the exact same rules and physics.
   the series, just that one match -- press X to move straight into the next one, same difficulty, running
   score carried over as pips, not reset.
 - Two screens lead into a series: a branded **title** screen (press X to continue), then a **setup** screen
-  where **left/right** sets the CPU's difficulty, 1-10, shown as a filled-in bar rather than a bare number
-  (press X to begin). Every level runs the same move-search engine (see `src/cpu_engine.zig`) -- lower levels
-  are simply worse at listening to it (far more likely to ignore its pick and play a random legal swap
-  instead, a shallower search, and a slower reaction time), not a different kind of AI. The engine can also
-  choose to raise its own floor by a row instead of swapping (see the Z button above) when it's running low
-  on real blocks to work with -- weighed the same way as any swap, so it only does this when it's actually
-  short on material, not just because nothing else looks great -- and never when its own stack (or, after
-  the raise, what its own stack would become) is already dangerously close to the top, however short on
-  material it is. Difficulty is fixed for the whole series, but revisitable in setup again once one
-  concludes. Both screens share the same bezeled menu panel, gently bobbing over a slow diagonal-scrolling
-  background of faint drifting blocks.
+  where **up/down** picks one of 4 characters (see `src/characters.zig`) and **left/right** sets the CPU's
+  difficulty, 1-10, shown as a filled-in bar rather than a bare number (press X to begin). Every level runs
+  the same move-search engine (see `src/cpu_engine.zig`) -- lower levels are simply worse at listening to it
+  (far more likely to ignore its pick and play a random legal swap instead, a shallower search, and a slower
+  reaction time), not a different kind of AI. The engine can also choose to raise its own floor by a row
+  instead of swapping (see the Z button above) when it's running low on real blocks to work with -- weighed
+  the same way as any swap, so it only does this when it's actually short on material, not just because
+  nothing else looks great -- and never when its own stack (or, after the raise, what its own stack would
+  become) is already dangerously close to the top, however short on material it is. Difficulty and character
+  are both fixed for the whole series, but revisitable in setup again once one concludes. Both screens share
+  the same bezeled menu panel, gently bobbing over a slow diagonal-scrolling background of faint drifting
+  blocks.
+- Your chosen character themes your own main-frame border (its own color and a distinct border pattern --
+  solid, checkered, dashed, or a thin double outline) and gives you an animated portrait next to your score,
+  reacting to what's actually happening: idle otherwise, excited on a combo or chain, wincing for a moment
+  right after taking a garbage attack, and celebrating on the game-over screen if you won. The CPU picks its
+  own character the same way, always a different one than yours (see `characters.cpuPickFor`), theming its
+  own mini board's border and getting the identical portrait treatment next to its own score.
 - Press **X** to (re)start a match -- both boards reset immediately, but simulation stays frozen behind a
   brief "3 2 1 START" countdown first (each number rises up a couple pixels then holds for about a second;
   "START" rises the same way but then blinks a few times) before the match actually begins. Losing plays out
@@ -224,18 +231,32 @@ plus 2 dithered blends. This is a deliberate adaptation to the console's real co
   input buffering so a fast continuous drag chains swaps at max speed) -- always drives `state.player`; the
   CPU has no real input (see `cpu_ai.zig`).
 - `src/render.zig` — most drawing: the player's board (in full detail) at normal size, the cursor, panel,
-  and title/game-over screens. A column bounces in place as a stress warning (`isColumnStressed`) once it
-  has any content within `STRESS_WARNING_ROWS` rows of the ceiling (logical row `constants.SPAWN_ROWS`), not
-  only once it's already touching the top -- matching other Panel de Pon clients' more generous warning zone.
+  and title/setup/game-over screens. A column bounces in place as a stress warning (`isColumnStressed`) once
+  it has any content within `STRESS_WARNING_ROWS` rows of the ceiling (logical row `constants.SPAWN_ROWS`),
+  not only once it's already touching the top -- matching other Panel de Pon clients' more generous warning
+  zone. `drawFrame`'s main-frame border is themed by whichever character the player picked on the setup
+  screen (`drawThemedBand`, see `characters.BorderStyle`) -- color and fill pattern both.
 - `src/render_garbage.zig` — garbage's full-detail rendering (the muted checkerboard fill and the linked-
   clump bezel look), split out from render.zig to keep that file under the project's ~500-line guideline,
   mirroring the sim.zig/sim_garbage.zig split. `drawLinkedFlash` is a phase-inverted variant of the same
   checkerboard, used by `render.drawRecyclingCell` to give a garbage row that's caught up in a pop event but
   won't actually convert (see `Cell.garbage_reveals`) a purely cosmetic "still being processed" flash instead
   of sitting there looking untouched while the rest of the clump pops.
-- `src/render_cpu.zig` — the CPU's side of the panel: its score/label and its board at a simplified micro
-  scale (dithered colors, tiny per-color icons, smooth rise scrolling, a cursor, popping/recycling
-  animation -- just abstracted down to fit: no bevels, linked-garbage slab, landing squash, or popups).
+- `src/characters.zig` — the 4 selectable characters (name, hue/dither pair, main-frame border style,
+  emblem) -- see `render_character.zig` for how these actually get drawn. `cpuPickFor` always returns a
+  different character than whichever one is passed in, so the CPU's own pick (set in `main.zig` whenever the
+  player changes theirs on the setup screen) never matches the player's.
+- `src/render_character.zig` — shared character-portrait rendering: a small animated square (the character's
+  own hue(s), a corner bevel, its emblem) reacting to `stateFor` (a board's own `garbage_punish_timer`/
+  `combo_display_timer`/`chain` decide punish/combo/normal; `win` is passed explicitly by the game-over
+  screen) -- the same expression logic for every character, just recolored/re-emblemed, rather than a fully
+  separate hand-drawn portrait per character. Used identically by `render.zig` (the player) and
+  `render_cpu.zig` (the CPU).
+- `src/render_cpu.zig` — the CPU's side of the panel: its character portrait/score and its board at a
+  simplified micro scale (dithered colors, tiny per-color icons, smooth rise scrolling, a cursor,
+  popping/recycling animation -- just abstracted down to fit: no bevels, linked-garbage slab, landing squash,
+  or popups). Its own mini board's border is themed the same way the player's main frame is (see
+  `render.zig`), just simplified to 1px thick.
 - `src/render_badge.zig` — the chain/combo popup badge, plus the shared checkerboard-blit dithering
   primitive it's built on (reusable for any future dithered-highlight effect). Also home to
   `drawGarbageQueueIcons`: small warm-dithered pips in the gutter beside each board, one per queued incoming
