@@ -113,10 +113,15 @@ pub fn prevUnlocked(party: [characters.COUNT]bool, current: u8) u8 {
     }
 }
 
-// Persisted via WASM-4's disk API: whether the X Hard hint has been shown
-// (the input itself always works regardless). Byte 0 is a version tag.
-const SAVE_VERSION: u8 = 1;
+// Persisted via WASM-4's disk API. Byte 0 is a version tag; byte 1 packs the
+// X Hard hint (top bit) and the character-unlock bitmask (bit i = ALL[i]) together.
+const SAVE_VERSION: u8 = 2;
+const XHARD_BIT: u8 = 0x80;
 pub var xhard_revealed: bool = false;
+
+// Mermaid alone by default.
+const DEFAULT_UNLOCKED_MASK: u8 = 1 << characters.MERMAID_INDEX;
+pub var unlocked_characters: u8 = DEFAULT_UNLOCKED_MASK;
 
 // Guarded on builtin.is_test -- see audio.zig's identical Diskr/Diskw reasoning.
 pub fn loadSave() void {
@@ -124,14 +129,56 @@ pub fn loadSave() void {
     var buf: [2]u8 = .{ 0, 0 };
     const n = w4.Diskr(&buf, buf.len);
     if (n >= 2 and buf[0] == SAVE_VERSION) {
-        xhard_revealed = buf[1] != 0;
+        xhard_revealed = (buf[1] & XHARD_BIT) != 0;
+        unlocked_characters = (buf[1] & ~XHARD_BIT) | DEFAULT_UNLOCKED_MASK;
     }
 }
 
 fn saveGame() void {
     if (builtin.is_test) return;
-    const buf = [2]u8{ SAVE_VERSION, if (xhard_revealed) 1 else 0 };
+    const packed_byte = unlocked_characters | (if (xhard_revealed) XHARD_BIT else 0);
+    const buf = [2]u8{ SAVE_VERSION, packed_byte };
     _ = w4.Diskw(&buf, buf.len);
+}
+
+pub fn charUnlocked(idx: u8) bool {
+    return (unlocked_characters & (@as(u8, 1) << @intCast(idx))) != 0;
+}
+
+fn unlockChar(idx: u8) void {
+    const bit = @as(u8, 1) << @intCast(idx);
+    if (unlocked_characters & bit != 0) return; // already unlocked -- skip the disk write
+    unlocked_characters |= bit;
+    saveGame();
+}
+
+const ALL_UNLOCKED_MASK: u8 = (1 << characters.COUNT) - 1;
+
+// The secret "unlock everyone" combo (main.zig's setup_character input) --
+// no idempotency guard needed since it's already gated on justPressed there.
+pub fn unlockAllChars() void {
+    unlocked_characters = ALL_UNLOCKED_MASK;
+    saveGame();
+}
+
+// Clearing story mode is the "beat the game in a certain mode" unlock --
+// one character per tier, easy through X Hard.
+pub fn maybeUnlockForStoryClear(tier: StoryTier) void {
+    unlockChar(switch (tier) {
+        .easy => characters.LIZARD_INDEX,
+        .medium => characters.CLOUD_INDEX,
+        .hard => characters.CROW_INDEX,
+        .xhard => characters.ROBOT_INDEX,
+    });
+}
+
+// A single match popping this many real blocks at once is the "big combo"
+// skill unlock (state.Board.combo_display) -- unlocks Bug and Slime together.
+const BIG_COMBO_THRESHOLD: u8 = 6;
+pub fn maybeUnlockForCombo(combo_size: u8) void {
+    if (combo_size < BIG_COMBO_THRESHOLD) return;
+    unlockChar(characters.BUG_INDEX);
+    unlockChar(characters.SLIME_INDEX);
 }
 
 // Split out from maybeRevealXhard so this decision is unit-testable without
@@ -227,4 +274,48 @@ test "maybeRevealXhard is idempotent and only reveals on a clean hard clear" {
     maybeRevealXhard(.hard, 0);
     try testing.expect(xhard_revealed);
     xhard_revealed = false; // restore so no other test sees a leftover reveal
+}
+
+test "charUnlocked/unlockChar: Mermaid starts unlocked, everyone else doesn't" {
+    unlocked_characters = DEFAULT_UNLOCKED_MASK;
+    try testing.expect(charUnlocked(characters.MERMAID_INDEX));
+    try testing.expect(!charUnlocked(characters.LIZARD_INDEX));
+    unlockChar(characters.LIZARD_INDEX);
+    try testing.expect(charUnlocked(characters.LIZARD_INDEX));
+    try testing.expect(!charUnlocked(characters.BUG_INDEX));
+    unlocked_characters = DEFAULT_UNLOCKED_MASK; // restore
+}
+
+test "unlockAllChars sets every bit" {
+    unlocked_characters = DEFAULT_UNLOCKED_MASK;
+    unlockAllChars();
+    for (0..characters.COUNT) |i| {
+        try testing.expect(charUnlocked(@intCast(i)));
+    }
+    unlocked_characters = DEFAULT_UNLOCKED_MASK; // restore
+}
+
+test "maybeUnlockForStoryClear maps each tier to its own character" {
+    unlocked_characters = DEFAULT_UNLOCKED_MASK;
+    maybeUnlockForStoryClear(.easy);
+    try testing.expect(charUnlocked(characters.LIZARD_INDEX));
+    try testing.expect(!charUnlocked(characters.CLOUD_INDEX));
+    maybeUnlockForStoryClear(.medium);
+    try testing.expect(charUnlocked(characters.CLOUD_INDEX));
+    maybeUnlockForStoryClear(.hard);
+    try testing.expect(charUnlocked(characters.CROW_INDEX));
+    maybeUnlockForStoryClear(.xhard);
+    try testing.expect(charUnlocked(characters.ROBOT_INDEX));
+    unlocked_characters = DEFAULT_UNLOCKED_MASK; // restore
+}
+
+test "maybeUnlockForCombo unlocks both Bug and Slime at the threshold" {
+    unlocked_characters = DEFAULT_UNLOCKED_MASK;
+    maybeUnlockForCombo(BIG_COMBO_THRESHOLD - 1);
+    try testing.expect(!charUnlocked(characters.BUG_INDEX));
+    try testing.expect(!charUnlocked(characters.SLIME_INDEX));
+    maybeUnlockForCombo(BIG_COMBO_THRESHOLD);
+    try testing.expect(charUnlocked(characters.BUG_INDEX));
+    try testing.expect(charUnlocked(characters.SLIME_INDEX));
+    unlocked_characters = DEFAULT_UNLOCKED_MASK; // restore
 }

@@ -132,9 +132,17 @@ pub const Character = struct {
 
 pub const COUNT = 7;
 
+// Named indices into ALL, matching declaration order below -- lets
+// game_modes.zig's unlock conditions reference characters by name.
+pub const LIZARD_INDEX: u8 = 0;
 // Story mode locks the player to her (state.player_character) and excludes
 // her from the opponent cycle (game_modes.storyOpponentFor) -- she frees everyone else, not cursed herself.
 pub const MERMAID_INDEX: u8 = 1;
+pub const BUG_INDEX: u8 = 2;
+pub const CLOUD_INDEX: u8 = 3;
+pub const SLIME_INDEX: u8 = 4;
+pub const CROW_INDEX: u8 = 5;
+pub const ROBOT_INDEX: u8 = 6;
 
 // Only 3 hues exist, so robot deliberately reuses mermaid's solid teal
 // (the garbage block's own accent color) and border_style cycles a second time.
@@ -255,4 +263,15 @@ test "every character's base_hue is in [0, 360) and all 7 are distinct" {
         try testing.expect(!seen[idx]);
         seen[idx] = true;
     }
+}
+
+test "the named *_INDEX constants actually match ALL's declaration order" {
+    const testing = @import("std").testing;
+    try testing.expectEqualStrings("LIZARD", ALL[LIZARD_INDEX].name);
+    try testing.expectEqualStrings("MERMAID", ALL[MERMAID_INDEX].name);
+    try testing.expectEqualStrings("BUG", ALL[BUG_INDEX].name);
+    try testing.expectEqualStrings("CLOUD", ALL[CLOUD_INDEX].name);
+    try testing.expectEqualStrings("SLIME", ALL[SLIME_INDEX].name);
+    try testing.expectEqualStrings("CROW", ALL[CROW_INDEX].name);
+    try testing.expectEqualStrings("ROBOT", ALL[ROBOT_INDEX].name);
 }

@@ -248,7 +248,14 @@ export fn update() void {
                     if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_RIGHT)) {
                         s.player_character = (s.player_character + 1) % characters.COUNT;
                     }
-                    if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) s.setup_flash_timer = c.SETUP_FLASH_TOTAL_FRAMES;
+                    // Locked characters can be looked at but not confirmed.
+                    if (game_modes.charUnlocked(s.player_character) and input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
+                        s.setup_flash_timer = c.SETUP_FLASH_TOTAL_FRAMES;
+                    }
+                    // Secret combo: hold Z, tap UP -- unlocks every character.
+                    if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_UP) and gp & w4.BUTTON_2 != 0) {
+                        game_modes.unlockAllChars();
+                    }
                 }
             },
             .setup_cpu_reveal => {
@@ -365,6 +372,8 @@ export fn update() void {
         if (s.winner != .none and !was_over) {
             audio.playGameOverSound();
             board.beginClosing();
+            // Quick match's "big combo" unlock (GAMEPAD1 always drives s.player).
+            game_modes.maybeUnlockForCombo(s.player.combo_display);
             // Story mode plays single-game stages, not a best-of-N series;
             // awarding a point here would spuriously trip set_winner.
             if (s.game_mode != .story) board.awardMatchPoint(s.winner);
@@ -383,9 +392,10 @@ export fn update() void {
                         s.story_party[s.cpu_character] = true;
                         s.story_stage += 1;
                         if (s.story_stage >= game_modes.STORY_STAGES) {
-                            // Whole run cleared: reveal the X Hard hint if
-                            // earned, then back to mode select.
+                            // Whole run cleared: reveal the X Hard hint,
+                            // unlock this tier's quick match character, then back to mode select.
                             game_modes.maybeRevealXhard(s.story_tier, s.story_game_overs);
+                            game_modes.maybeUnlockForStoryClear(s.story_tier);
                             setMenuPhase(.mode_select);
                             s.started = false;
                         } else {

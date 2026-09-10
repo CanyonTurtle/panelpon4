@@ -204,10 +204,15 @@ pub fn drawSetupCharacterScreen() void {
     const flash_on = !flashing or blinkOn(c.SETUP_FLASH_TOTAL_FRAMES - s.setup_flash_timer, c.SETUP_FLASH_TOGGLE_FRAMES);
     var last_row: u8 = 0;
     for (0..characters.COUNT) |i| {
-        const pos = charSlotPos(@intCast(i), characters.COUNT);
+        const idx: u8 = @intCast(i);
+        const pos = charSlotPos(idx, characters.COUNT);
         const cy = grid_y + pos.y;
         last_row = pos.row;
-        rchar.draw(pos.x, cy, @intCast(i), .normal, frame);
+        if (!game_modes.charUnlocked(idx)) {
+            cells.drawDitheredRectOutline(pos.x, cy, rchar.W, rchar.H, badge.WARM_DITHER_HUES);
+        } else {
+            rchar.draw(pos.x, cy, idx, .normal, frame);
+        }
         if (i == s.player_character and flash_on) {
             cells.drawDitheredRectOutline(pos.x - 2, cy - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
         }
