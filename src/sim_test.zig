@@ -201,19 +201,12 @@ test "a match that is both a chain and a combo shows the chain label" {
 }
 
 test "a CPU-side match spawns its popup in the micro board's own coordinate system, not the player's" {
-    // checkMatches picks the popup's spawn coordinates based on `self`
-    // pointer identity against the process-wide `s.cpu` singleton (see its
-    // own doc comment) -- unlike every other test in this file, this one
-    // has to actually use that global rather than a local `s.Board{}`, since
-    // a local board's address is never `&s.cpu` and would silently fall
-    // through to the player's own (much larger-scale) coordinate system.
+    // checkMatches picks coordinates by pointer identity against the
+    // process-wide `s.cpu` singleton, so this test must use that global directly.
     s.cpu = s.Board{ .rng_state = s.CPU_RNG_SEED };
     var opp: s.Board = .{};
-    // A real visible row (>= SPAWN_ROWS), not one of the offscreen staging
-    // rows other tests in this file use for convenience -- this test
-    // actually checks the popup's Y, which is meaningless (and can go
-    // negative relative to CPU_BOARD_Y) for a "match" that's really sitting
-    // in the never-rendered staging area above the ceiling.
+    // A real visible row -- the popup's Y is meaningless for a "match" in
+    // the never-rendered staging area above the ceiling.
     const row = c.SPAWN_ROWS + 2;
     s.cpu.cellAt(row, 0).* = .{ .color = 1, .state = .normal };
     s.cpu.cellAt(row, 1).* = .{ .color = 1, .state = .normal };
@@ -229,13 +222,8 @@ test "a CPU-side match spawns its popup in the micro board's own coordinate syst
             break;
         }
     }
-    // The micro board (render_cpu.zig) sits in a completely different,
-    // much narrower horizontal band (constants.PANEL_X sized in
-    // CPU_MICRO_TILE units) than the full-scale player board (constants.
-    // BOARD_X sized in TILE units) -- if the is_cpu branch in checkMatches
-    // ever regresses back to always using the player's own coordinate
-    // system, this popup would land far to the left of where the CPU's
-    // micro board is actually drawn instead of inside it.
+    // A regression back to the player's own coordinate system would land
+    // this popup far outside the micro board's narrower band.
     try testing.expect(popup.x >= c.PANEL_X);
     try testing.expect(popup.x < c.PANEL_X + @as(i32, c.COLS) * c.CPU_MICRO_TILE);
     try testing.expect(popup.y >= c.CPU_BOARD_Y);
@@ -254,21 +242,15 @@ test "simulate marks the whole settled stack above a cleared pop as chainable" {
     b.cellAt(7, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(8, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(9, 0).* = .{ .color = 1, .state = .normal };
-    // Anchored all the way to row 12 (the true bottom of the ring buffer)
-    // or gravity would treat row 10 itself as unsupported and let it fall
-    // away (the project's standing test-fixture pitfall).
+    // Anchored to row 12 (the true ring-buffer bottom) or gravity would
+    // treat row 10 as unsupported and drop it.
     b.cellAt(10, 0).* = .{ .color = 3, .state = .normal };
     b.cellAt(11, 0).* = .{ .color = 4, .state = .normal };
     b.cellAt(12, 0).* = .{ .color = 2, .state = .normal };
 
     _ = sim.checkMatches(&b, &opp, no_settled); // starts the pop at rows 7-9
-    // Run enough frames for the whole staggered pop cascade to finish
-    // clearing (group_end = PRE_POP_TOTAL_FRAMES + POP_FRAMES +
-    // (3-1)*POP_STAGGER_FRAMES). The very same frame the pop clears also
-    // runs this frame's gravity step, which cascades the stack above down by
-    // exactly one row (each cell marked chainable rides along with its own
-    // data via a plain struct copy), so the three originally-chainable cells
-    // now sit one row lower than where they started (rows 5-7, not 4-6).
+    // Run enough frames for the staggered pop to finish clearing; that same
+    // frame's gravity cascades the stack above down by one row (5-7, not 4-6).
     const group_end = c.PRE_POP_TOTAL_FRAMES + c.POP_FRAMES + 2 * c.POP_STAGGER_FRAMES;
     for (0..@intCast(group_end)) |_| sim.simulate(&b, &opp);
 
@@ -280,8 +262,7 @@ test "simulate marks the whole settled stack above a cleared pop as chainable" {
 test "a gap stops chainable marking from reaching blocks above it" {
     var b: s.Board = .{};
     var opp: s.Board = .{};
-    // Anchored all the way to row 12 (the true bottom) -- see the previous
-    // test's comment on why.
+    // Anchored to row 12 (the true bottom) -- see the previous test.
     b.cellAt(7, 1).* = .{ .color = 1, .state = .normal };
     b.cellAt(8, 1).* = .{ .color = 1, .state = .normal };
     b.cellAt(9, 1).* = .{ .color = 1, .state = .normal };
@@ -311,9 +292,7 @@ test "a big combo drops garbage on the opponent's board, never the triggering bo
     b.cellAt(5, 3).* = .{ .color = 1, .state = .normal };
     _ = sim.checkMatches(&b, &opp, no_settled);
 
-    // Queued on the opponent, not yet spawned -- see sim_garbage.zig's
-    // queueing lifecycle (garbage no longer lands the instant a combo is
-    // detected; it waits for the receiving board to go idle).
+    // Queued on the opponent, not yet spawned -- waits for it to go idle.
     for (0..c.COLS) |col| try testing.expectEqual(s.CellState.empty, opp.cellAt(0, @intCast(col)).state);
     garbage.releaseIncomingGarbage(&opp); // opp is idle by default -- releases immediately
     for (0..3) |col| try testing.expect(opp.cellAt(0, @intCast(col)).is_garbage);
@@ -323,14 +302,36 @@ test "a big combo drops garbage on the opponent's board, never the triggering bo
 test "the hidden ring-buffer row never seeds a match on its own" {
     var b: s.Board = .{};
     var opp: s.Board = .{};
-    // A vertical run of 3, with the bottom cell sitting in the one hidden
-    // row (c.ROWS-1, rising in from below -- see board.doRise) -- not yet
-    // promoted into the lowest *accessible* row, so this must not match.
+    // Bottom cell sits in the hidden row (c.ROWS-1), not yet promoted into
+    // the lowest accessible row, so this must not match.
     b.cellAt(c.ROWS - 3, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(c.ROWS - 2, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(c.ROWS - 1, 0).* = .{ .color = 1, .state = .normal };
     try testing.expect(!sim.checkMatches(&b, &opp, no_settled));
     try testing.expectEqual(s.CellState.normal, b.cellAt(c.ROWS - 1, 0).state);
+}
+
+test "checkMatches clears chainable on a just-settled cell that doesn't match" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    b.cellAt(10, 0).* = .{ .color = 1, .state = .normal, .chainable = true };
+    var just_settled = no_settled;
+    just_settled[10][0] = true;
+    try testing.expect(!sim.checkMatches(&b, &opp, just_settled));
+    try testing.expect(!b.cellAt(10, 0).chainable);
+}
+
+test "checkMatches clears chainable on a just-settled cell when a different match occurs" {
+    var b: s.Board = .{};
+    var opp: s.Board = .{};
+    b.cellAt(10, 0).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 1).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 2).* = .{ .color = 1, .state = .normal };
+    b.cellAt(10, 5).* = .{ .color = 2, .state = .normal, .chainable = true };
+    var just_settled = no_settled;
+    just_settled[10][5] = true;
+    try testing.expect(sim.checkMatches(&b, &opp, just_settled));
+    try testing.expect(!b.cellAt(10, 5).chainable);
 }
 
 test "the same run one row higher, fully within accessible rows, does match" {

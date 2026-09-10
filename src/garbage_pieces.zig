@@ -1,10 +1,5 @@
-// Groups settled garbage cells into their individual pieces (see
-// Cell.garbage_group) and computes each piece's own true pixel-space
-// centroid -- split out from render_garbage.zig, which only wants to draw a
-// mark there, specifically so this pure grouping logic can be unit tested
-// without pulling in render_garbage.zig's own w4 draw-call dependency (see
-// tests.zig's own doc comment on why render.zig/render_garbage.zig can't be
-// tested directly).
+// Groups settled garbage cells into pieces (Cell.garbage_group) and computes
+// each piece's pixel centroid -- split out from render_garbage.zig so this pure grouping logic stays unit-testable without its w4 draw-call dependency.
 
 const std = @import("std");
 const c = @import("constants.zig");
@@ -12,11 +7,8 @@ const s = @import("state.zig");
 
 pub const PieceCenter = struct { x: i32 = 0, y: i32 = 0 };
 
-// A generous cap -- board cells are the hard upper bound on how many
-// distinct pieces could conceivably coexist, but that's never remotely
-// approached in practice. Extra pieces beyond this are silently dropped
-// (same reasoning as Board.spawnMatchPopup's identical pool-full case):
-// missing one mark is harmless.
+// A generous cap, never remotely approached in practice; extras beyond it
+// are silently dropped (same reasoning as Board.spawnMatchPopup's pool-full case) -- missing one mark is harmless.
 const MAX_PIECES = 32;
 
 pub const PieceCenters = struct {
@@ -24,47 +16,8 @@ pub const PieceCenters = struct {
     count: usize = 0,
 };
 
-// Finds the true pixel-space centroid (the mean position of every one of
-// its own cells, not just its bounding box's midpoint -- see below) of each
-// currently-settled garbage piece -- one per piece, even when several
-// different pieces happen to be resting against each other and rendering as
-// one seamless slab (see render_garbage.drawLinked/isAttached, which merge
-// on pure spatial adjacency, not piece identity) with no visible seam
-// between them. Two pieces merged into one slab would otherwise be
-// indistinguishable from a single, larger piece -- this is what lets
-// render_garbage.zig still mark them as separate blocks.
-//
-// A "piece" here is a maximal 4-connected run of settled (`.normal`) garbage
-// cells sharing the same Cell.garbage_group -- deliberately narrower than
-// isAttached's own notion of "attached" (which also counts falling/landing/
-// early-recycling cells): those are already visually in motion or mid-event
-// and don't need a center mark of their own. Garbage_group wraps (see its
-// own doc comment on Cell), so a piece spawned 256+ events ago could in
-// theory collide with a same-numbered piece elsewhere -- an accepted,
-// extremely rare approximation already relied on elsewhere (see
-// sim_matches.checkMatches' own "below_same_piece" checks), not something
-// this needs to solve any more robustly than the rest of the codebase
-// already does.
-//
-// The centroid is the *mean* of every member cell's own pixel center, not
-// its bounding box's midpoint -- identical for a solid rectangle (the
-// common case: spawnGarbage always places one), but meaningfully different
-// for a piece that's been eaten into an irregular shape. For an even-sized
-// piece this deliberately lands between two cells rather than snapping to
-// whichever one happens to be closest, so the mark sits at the piece's
-// actual center regardless of its shape or size.
-//
-// Only scans the visible window (SPAWN_ROWS..ROWS), matching drawBoard's own
-// range -- nothing in the offscreen spawn buffer is ever drawn, so it needs
-// no mark either. `wiped` is drawBoard's own closingWipedRows() count (rows
-// already "popped" by the closing wipe, from the ceiling down, once a match
-// concludes -- 0 during ordinary play): a cell in a wiped row is treated
-// exactly like it isn't there at all, the same as drawBoard's own per-row
-// skip, so a piece's mark shrinks/recenters in sync with the wipe as it
-// eats into it, and vanishes outright once the whole piece (or the whole
-// board, once the match is fully over) has been wiped -- rather than a
-// mark computed from the board's *real* underlying data hanging in the air
-// over a wipe that's already visually cleared the piece it belonged to.
+// Finds each settled garbage piece's true pixel centroid (mean of its cells,
+// not bounding-box midpoint), one per Cell.garbage_group so touching-but-distinct pieces rendered as one slab still get separate marks. Scans only the visible window; `wiped` (drawBoard's closingWipedRows()) treats wiped cells as absent.
 pub fn pieceCenters(b: *s.Board, wiped: u8) PieceCenters {
     var result: PieceCenters = .{};
     var visited: [c.ROWS][c.COLS]bool = std.mem.zeroes([c.ROWS][c.COLS]bool);
@@ -186,10 +139,8 @@ test "two different pieces resting against each other each get their own centroi
             b.cellAt(@intCast(14 + dr), @intCast(col)).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 0 };
         }
     }
-    // Piece B: rows 16-17, cols 0-2, directly below and touching piece A --
-    // a DIFFERENT group, so spatially it's one seamless slab (see
-    // render_garbage.drawLinked/isAttached, which don't care about group at
-    // all) but logically two distinct pieces.
+    // Piece B: rows 16-17, cols 0-2, touching piece A but a DIFFERENT group --
+    // one seamless slab spatially, but logically two distinct pieces.
     for (0..2) |dr| {
         for (0..3) |col| {
             b.cellAt(@intCast(16 + dr), @intCast(col)).* = .{ .state = .normal, .is_garbage = true, .garbage_group = 1 };
@@ -202,17 +153,15 @@ test "two different pieces resting against each other each get their own centroi
 
 test "an L-shaped piece's centroid is the true mean of its cells, not its bounding box's midpoint" {
     var b: s.Board = .{};
-    // An L: (15,0), (15,1), (16,0) -- bounding box is 2x2 (cols 0-1, rows
-    // 15-16), whose midpoint would be the (empty) cell (16,1), but the true
-    // mean of the 3 actual member cells sits closer to (15,0)/(16,0).
+    // An L: (15,0), (15,1), (16,0) -- bbox midpoint is the empty cell (16,1),
+    // but the true mean of the 3 member cells sits closer to (15,0)/(16,0).
     b.cellAt(15, 0).* = .{ .state = .normal, .is_garbage = true };
     b.cellAt(15, 1).* = .{ .state = .normal, .is_garbage = true };
     b.cellAt(16, 0).* = .{ .state = .normal, .is_garbage = true };
     const result = pieceCenters(&b, 0);
     try testing.expectEqual(@as(usize, 1), result.count);
-    // Mean col = (0+1+0)/3 = 1/3 of a tile right of col 0's own center --
-    // left of the bounding box's midpoint (which would fall a full half
-    // tile further right, between cols 0 and 1).
+    // Mean col = (0+1+0)/3 = 1/3 tile right of col 0's center -- left of the
+    // bbox midpoint (a full half tile further right, between cols 0 and 1).
     const bbox_midpoint_x = c.BOARD_X + c.TILE; // between cols 0 and 1
     try testing.expect(result.items[0].x < bbox_midpoint_x);
     try testing.expectEqual(c.BOARD_X + @divTrunc(c.TILE, 2) + @divTrunc(c.TILE, 3), result.items[0].x);
@@ -239,9 +188,8 @@ test "a piece's mark shrinks with the closing wipe and vanishes once the whole p
     try testing.expectEqual(@as(usize, 1), full.count);
     try testing.expectEqual(c.BOARD_Y + 1 * c.TILE + @divTrunc(c.TILE, 2), full.items[0].y);
 
-    // Wipe row 0 (the ceiling-most) -- only rows 1-2 remain, so the
-    // centroid shifts down to the seam between them, same reasoning as the
-    // even-width test above.
+    // Wipe row 0 -- only rows 1-2 remain, so the centroid shifts down to the
+    // seam between them, same reasoning as the even-width test above.
     const partial = pieceCenters(&b, 1);
     try testing.expectEqual(@as(usize, 1), partial.count);
     try testing.expectEqual(c.BOARD_Y + 2 * c.TILE, partial.items[0].y);
@@ -250,4 +198,20 @@ test "a piece's mark shrinks with the closing wipe and vanishes once the whole p
     // the board's real (but no-longer-visible) data.
     const gone = pieceCenters(&b, 3);
     try testing.expectEqual(@as(usize, 0), gone.count);
+}
+
+test "pieces beyond MAX_PIECES are silently dropped rather than overflowing the result" {
+    var b: s.Board = .{};
+    // Fill the whole visible window with one single-cell piece per cell
+    // (distinct garbage_group each, so none merge) -- well over MAX_PIECES.
+    var group: u8 = 0;
+    var r: u8 = c.SPAWN_ROWS;
+    while (r < c.ROWS) : (r += 1) {
+        for (0..c.COLS) |col| {
+            b.cellAt(r, @intCast(col)).* = .{ .state = .normal, .is_garbage = true, .garbage_group = group };
+            group +%= 1;
+        }
+    }
+    const result = pieceCenters(&b, 0);
+    try testing.expectEqual(@as(usize, MAX_PIECES), result.count);
 }

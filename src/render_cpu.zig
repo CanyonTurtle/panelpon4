@@ -1,16 +1,5 @@
-// The CPU side of the panel: its score/label and its board at a simplified
-// micro scale -- split out from render.zig to keep that file under the
-// project's ~500-line-per-file guideline.
-//
-// The micro board mirrors the player's full-detail rendering (see
-// render.drawBoard) in substance -- dithered colors 3-4, tiny per-color
-// icons, smooth per-pixel rise scrolling, falling/swapping slide, a cursor,
-// popping/recycling animation, and (like the player's own board) a flying
-// chain/combo match-popup badge -- just abstracted down to fit the space: no
-// bevels, no linked-garbage bezel slab (each garbage cell renders
-// individually), no landing squash, no column-stress bounce. Identical
-// physics doesn't require pixel-identical rendering -- this is a secondary,
-// at-a-glance view of the opponent's board, not a second full board.
+// The CPU side of the panel: score/label and a micro-scale board, split out
+// of render.zig. Mirrors render.drawBoard's substance, abstracted down.
 
 const std = @import("std");
 const c = @import("constants.zig");
@@ -42,17 +31,13 @@ const MICRO_SYMBOL_SIZE: i32 = sym.MICRO_SYMBOL_SIZE;
 // Where the CPU's portrait/scoreboard/board sit in the panel column.
 const LABEL_Y: i32 = 44;
 const BOARD_Y: i32 = c.CPU_BOARD_Y;
-// Shared with the badge.drawMatchPopups call below, so the flying badge
-// agrees with the score text it lands on -- same idea as render.zig's own
-// CHAR_TEXT_X.
+// Shared with badge.drawMatchPopups below so the flying badge lands on the
+// right score text -- same idea as render.zig's own CHAR_TEXT_X.
 const TEXT_X: i32 = c.PANEL_X + rchar.W + rchar.FRAME_MARGIN + 2;
 const BOARD_H: i32 = @as(i32, c.VISIBLE_ROWS) * MICRO_TILE;
 
-// Fills a w x h rect at (x, y) as a checkerboard of two DRAW_COLORS values
-// (pass the same value twice for a solid fill), clipped vertically to
-// [clip_top, clip_bottom) a pixel at a time -- needed since the board
-// smoothly scrolls (see drawMicroBoard) and a row can be only partially
-// inside the board's frame at any given moment.
+// Fills a w x h rect as a checkerboard (or solid, if dc_a==dc_b), clipped
+// vertically since the board scrolls smoothly, not row by row.
 fn fillChecker(x: i32, y: i32, w: i32, h: i32, dc_a: u16, dc_b: u16, clip_top: i32, clip_bottom: i32) void {
     if (w <= 0 or h <= 0) return;
     var dy: i32 = 0;
@@ -67,10 +52,8 @@ fn fillChecker(x: i32, y: i32, w: i32, h: i32, dc_a: u16, dc_b: u16, clip_top: i
     }
 }
 
-// A real block color: a solid hue, or (colors 3-4) a checkerboard dither of
-// two adjacent hues -- same rule as render_cells.zig's own drawColorRect.
-// Garbage is a muted background+teal checkerboard, same as
-// render.drawGarbageRect.
+// A solid hue, or (colors 3-4) a 2-hue dither -- same rule as render_cells'
+// drawColorRect. Garbage is a bg+teal checkerboard, as render.drawGarbageRect.
 fn fillCell(x: i32, y: i32, w: i32, h: i32, color: u8, is_garbage: bool, clip_top: i32, clip_bottom: i32) void {
     if (is_garbage) {
         fillChecker(x, y, w, h, DC_BG, HUE_DRAWCOLOR[GARBAGE_HUE], clip_top, clip_bottom);
@@ -83,10 +66,8 @@ fn fillCell(x: i32, y: i32, w: i32, h: i32, color: u8, is_garbage: bool, clip_to
     }
 }
 
-// A tiny 3x3 icon (see symbols.MICRO_SYMBOLS) in the background color, same
-// technique as render.drawSymbolFor -- only drawn when the whole cell is
-// inside the clip range, since a 3px icon straddling a partially-scrolled
-// row's clip edge wouldn't read as anything recognizable anyway.
+// A tiny 3x3 icon (symbols.MICRO_SYMBOLS), only drawn when the whole cell
+// is inside the clip range -- a clipped 3px icon wouldn't read as anything.
 fn drawMicroIcon(x: i32, y: i32, color: u8, clip_top: i32, clip_bottom: i32) void {
     if (y < clip_top or y + MICRO_CELL > clip_bottom) return;
     w4.DRAW_COLORS.* = DC_BG;
@@ -106,12 +87,8 @@ fn fillCellFull(x: i32, y: i32, cell: s.Cell, clip_top: i32, clip_bottom: i32) v
     if (!cell.is_garbage) drawMicroIcon(x, y, cell.color, clip_top, clip_bottom);
 }
 
-// A real match popping -- mirrors render.drawPoppingCell's two phases
-// (a brief flash pulse, then a shrink to nothing) scaled down: the flash
-// amplitude is a subtle 1px wobble rather than main's 4px (proportionate to
-// the much smaller cell), and the shrink uses the exact same fraction/timing
-// math as the full-scale version. No icon -- it wouldn't fit as the cell
-// shrinks, same as the full-scale version.
+// Mirrors render.drawPoppingCell's two phases scaled down (1px wobble, not
+// 4px); same fraction/timing math. No icon -- wouldn't fit as it shrinks.
 fn drawMicroPopping(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16, clip_top: i32, clip_bottom: i32) void {
     if (pre_pop_timer > 0) {
         // Mirrors render.drawPoppingCell's own pre-pop blink+pause preamble,
@@ -146,14 +123,8 @@ fn drawMicroPopping(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16, c
     fillCell(x + off, y + off, size, size, color, false, clip_top, clip_bottom);
 }
 
-// A garbage cell being recycled -- mirrors render.drawRecyclingCell: a
-// converting cell (see Cell.garbage_reveals) still looks like inert garbage
-// until its own staggered turn (same timer/formula as the full-scale
-// version), then hard-cuts to a plain revealed block (with its icon) and
-// stays that way -- no animation of its own; a non-converting one (the rest
-// of a clump taller than one row -- only its bottom row per event ever
-// converts) just keeps looking like inert garbage, having only played the
-// shared flash/pause preamble as a heads-up.
+// Mirrors render.drawRecyclingCell: a converting cell hard-cuts to a plain
+// revealed block at its staggered turn; a non-converting one stays garbage.
 fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16, garbage_reveals: bool, clip_top: i32, clip_bottom: i32) void {
     if (pre_pop_timer > 0) {
         // Mirrors render.drawRecyclingCell's own pre-pop blink+pause
@@ -167,10 +138,8 @@ fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16,
         return;
     }
     if (!garbage_reveals) {
-        // Mirrors render.drawRecyclingCell's own !garbage_reveals flash --
-        // purely cosmetic, this row never actually converts or clears, but
-        // still visibly reads as being processed via a phase-inverted
-        // checkerboard flash for the same span a genuine reveal would take.
+        // Mirrors render.drawRecyclingCell's flash: this row never actually
+        // converts, but still reads as processed via an inverted checkerboard.
         const elapsed = c.POP_FRAMES - timer;
         if (elapsed < 0 or elapsed >= c.POP_FRAMES) {
             fillCell(x, y, MICRO_CELL, MICRO_CELL, 0, true, clip_top, clip_bottom);
@@ -190,9 +159,8 @@ fn drawMicroRecycling(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16,
     drawMicroIcon(x, y, color, clip_top, clip_bottom);
 }
 
-// A simplified, 1px-thick analog of render.drawThemedBand (this border is
-// only ever 1px, so "double" degrades to solid -- there's no room for an
-// inner/outer pair of lines) -- see characters.BorderStyle.
+// 1px-thick analog of render.drawThemedBand -- "double" degrades to solid
+// since there's no room for an inner/outer pair of lines.
 fn drawThemedEdge(x: i32, y: i32, len: i32, hues: [2]u8, style: characters.BorderStyle, horizontal: bool) void {
     var i: i32 = 0;
     while (i < len) : (i += 1) {
@@ -210,10 +178,8 @@ fn drawThemedEdge(x: i32, y: i32, len: i32, hues: [2]u8, style: characters.Borde
     }
 }
 
-// Mirrors render.closingWipedRows exactly (can't import it directly --
-// render.zig already imports this file, and Zig doesn't allow the reverse).
-// See that copy's own doc comment for why this is 0 outside the closing
-// wipe.
+// Duplicates render.closingWipedRows exactly (can't import it -- render.zig
+// already imports this file); keep the two in sync by hand if either changes.
 fn closingWipedRows() u8 {
     if (s.winner == .none) return 0;
     const elapsed = c.CLOSING_TOTAL_FRAMES - s.closing_timer;
@@ -225,9 +191,8 @@ fn closingWipedRows() u8 {
 fn drawMicroBoard(b: *s.Board, character: u8, origin_x: i32, origin_y: i32) void {
     const clip_top = origin_y;
     const clip_bottom = origin_y + BOARD_H;
-    // Proportional scroll: scroll_px is counted in the main board's TILE
-    // units, so it's rescaled here to MICRO_TILE units -- the rise reads at
-    // the same relative pace, just smaller, rather than snapping row by row.
+    // Proportional scroll: rescaled from the main board's TILE units to
+    // MICRO_TILE units so the rise reads at the same relative pace.
     const micro_scroll = @divTrunc(@as(i32, @intCast(b.scroll_px)) * MICRO_TILE, c.TILE);
     const wiped = closingWipedRows();
 
@@ -269,10 +234,8 @@ fn drawMicroBoard(b: *s.Board, character: u8, origin_x: i32, origin_y: i32) void
     drawThemedEdge(origin_x + w, origin_y - 1, BOARD_H + 2, char.hues, char.border_style, false);
 }
 
-// A tiny 1px dithered outline over the CPU's own (AI-driven, see cpu_ai.zig)
-// two-tile cursor position -- same warm red/yellow dither rule as the
-// player's own cursor (render.drawCursor), just without the pulse/contract
-// animation (not worth the extra complexity at this scale).
+// Same warm dither as the player's cursor (render.drawCursor), just without
+// the pulse/contract animation (not worth it at this scale).
 fn drawMicroCursor(b: *s.Board, origin_x: i32, origin_y: i32) void {
     if (s.winner != .none) return;
     const micro_scroll = @divTrunc(@as(i32, @intCast(b.scroll_px)) * MICRO_TILE, c.TILE);
@@ -299,18 +262,11 @@ fn plotDithered(x: i32, y: i32) void {
     w4.Rect(x, y, 1, 1);
 }
 
-// `board`/`character`/`points` is ordinarily always `s.cpu`/s.cpu_character/
-// s.cpu_points (every mode but versus), but a versus peer whose own real
-// input is GAMEPAD2 sees `s.player`/s.player_character/s.player_points here
-// instead (see state.versus_render_swapped/render.miniBoard) -- this file
-// itself never reaches into those globals directly any more, so it doesn't
-// need to know or care which peer's perspective it's drawing.
+// Ordinarily s.cpu's own fields, but a versus peer on GAMEPAD2 passes
+// s.player's instead (state.versus_render_swapped) -- this file doesn't care.
 pub fn draw(board: *s.Board, character: u8, points: u8) void {
-    // This side's own character portrait, framed in its character's own
-    // theme (see rchar.drawFrame) and animated per render_character.zig,
-    // replaces the old plain "CPU" text label -- score/points squeezed in
-    // beside it instead of on their own lines below (mirrors the main
-    // board's own panel layout in render.drawPanel).
+    // Framed portrait with score/points squeezed beside it, mirroring the
+    // main board's own panel layout (render.drawPanel).
     rchar.drawFrame(c.PANEL_X, LABEL_Y, character);
     rchar.draw(c.PANEL_X, LABEL_Y, character, rchar.stateFor(board), rchar.currentFrame());
 
@@ -318,26 +274,15 @@ pub fn draw(board: *s.Board, character: u8, points: u8) void {
     var buf: [12]u8 = undefined;
     const score_str = std.fmt.bufPrint(&buf, "{d}", .{board.score}) catch "0";
     w4.Text(score_str, TEXT_X, LABEL_Y + 2);
-    // Story mode plays single-game stages, not a best-of-N series (see
-    // render.drawPanel's identical guard) -- these points are meaningless
-    // there, so this slot is just left blank instead.
+    // Story mode has no best-of-N series (render.drawPanel's identical
+    // guard) -- points are meaningless there, so left blank.
     if (s.game_mode != .story) badge.drawPoints(TEXT_X, LABEL_Y + 10, points);
-    // This side's own chain/combo popups fly here too (see sim_matches.
-    // checkMatches, which computes their spawn point in this same
-    // micro-board coordinate system whenever the match happened on `&s.cpu`
-    // specifically, checked by that same pointer identity) -- landing on
-    // its own score instead of the main side's. Only actually drawn when
-    // `board` really is `&s.cpu`: a versus peer whose own real input is
-    // GAMEPAD2 sees `s.player` rendered here instead (see state.
-    // versus_render_swapped), but that board's own popups were spawned in
-    // the *other* (full-scale) coordinate system, which would land them
-    // somewhere nonsensical at this micro scale -- silently skipping the
-    // flourish there is better than drawing it in the wrong place.
+    // Only when `board` is really `&s.cpu`: a swapped peer's popups were
+    // spawned in the full-scale coordinate system, so skip them here.
     if (board == &s.cpu) badge.drawMatchPopups(&board.match_popups, TEXT_X, LABEL_Y + 10);
 
     drawMicroBoard(board, character, c.PANEL_X, BOARD_Y);
     drawMicroCursor(board, c.PANEL_X, BOARD_Y);
-    // In the narrow gutter to the right of the mini board, within the panel
-    // column's own leftover width.
+    // In the narrow gutter right of the mini board.
     badge.drawGarbageQueueIcons(c.PANEL_X + @as(i32, c.COLS) * MICRO_TILE + 2, BOARD_Y + 2, board);
 }

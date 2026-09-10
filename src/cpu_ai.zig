@@ -1,29 +1,5 @@
-// The CPU opponent's move picker, chosen per the difficulty set on the title
-// screen (see state.difficulty). Every level from 1-10 always plays
-// cpu_engine's own actual best-scored move (see configFor) -- never a
-// random or deliberately mistaken one. Lower levels are weaker because
-// they see less and want less: a shallower search, a slower reaction time,
-// and a much lower preference for a chain over an equivalently-sized flat
-// match (so they play correctly, just myopically, grabbing whatever's
-// immediately in front of them). It picks at most one action per timer
-// interval, but
-// -- like a player, whose own input is never blocked by unrelated activity
-// elsewhere on the board (see input.updateSwap) -- no longer waits for the
-// *whole* board to go idle first: it reasons about (see cpu_grid.Grid.
-// fromBoard) and can act on whatever's true right now, including cells
-// that are still falling/landing/mid-swap elsewhere.
-//
-// Crucially, the engine only ever *decides* a target cell -- it never
-// teleports the cursor there. `target` is that decision, and every
-// subsequent tick just steps the cursor one cell closer to it (exactly the
-// single-cell-at-a-time movement input.moveCursor gives the player), only
-// actually swapping once the cursor has genuinely arrived. This is what
-// keeps the CPU bound to the same movement restriction a player has, rather
-// than being able to act on any two cells anywhere on the board at will.
-// sim.trySwap's own per-cell check is still what actually decides whether a
-// given swap succeeds, exactly as it does for the player, so none of this
-// ever lets the CPU do anything a player couldn't also do from the same
-// position.
+// The CPU opponent's move picker (see state.difficulty). Every level always
+// plays cpu_engine's real best move; only depth/speed/chain bias vary.
 
 const c = @import("constants.zig");
 const s = @import("state.zig");
@@ -33,10 +9,8 @@ const engine = @import("cpu_engine.zig");
 
 var move_timer: u32 = 0;
 
-// The move the cursor is currently walking toward -- null means "no target
-// yet, decide one next tick" (see update). Cleared once the swap at the
-// target actually goes through, or once there's nothing meaningful left to
-// swap there any more (the board changed while walking over).
+// Cursor's walk destination; null means "decide next tick" (see update).
+// Cleared once swapped, or once nothing's left to swap there.
 var target: ?engine.Move = null;
 
 const DifficultyConfig = struct {
@@ -46,19 +20,8 @@ const DifficultyConfig = struct {
     raise_bias: i32 = 0, // see cpu_engine.raise_bias -- a nudge toward raising while there's plenty of room
 };
 
-// Every level uses the exact same engine (see cpu_engine.bestAction) and
-// always plays its actual best-scored move -- no randomness, no deliberate
-// mistakes. What varies between levels is the engine's own priorities and
-// how much of it a level can even see: reaction speed (move_interval), how
-// many moves ahead it searches (depth), and how much it specifically values
-// a chain over an equivalently-sized flat match (chain_weight) -- a weak
-// CPU still plays *correctly*, it just plays *myopically*, grabbing
-// whatever match is right in front of it rather than reasoning its way
-// toward a bigger chain, and reacts slower while doing it. The very top
-// levels also get a small preference for raising while there's plenty of
-// headroom (raise_bias -- see cpu_engine.raiseValue), building up more
-// material to set up bigger combos with, instead of only ever raising out
-// of material necessity.
+// Every level plays the engine's real best move; only reaction speed, depth,
+// and chain_weight/raise_bias vary, so a weak CPU plays correctly, just myopically.
 fn configFor(level: u8) DifficultyConfig {
     return switch (level) {
         1 => .{ .move_interval = 40, .depth = 1, .chain_weight = 10 },
@@ -77,9 +40,8 @@ fn configFor(level: u8) DifficultyConfig {
     };
 }
 
-// Picks a fresh target: the engine's own best move, always -- see
-// configFor. Raising happens immediately (it doesn't need the cursor to go
-// anywhere), and `.none` just leaves the cursor exactly where it is.
+// Picks a fresh target: always the engine's best move (see configFor).
+// Raising happens immediately; `.none` leaves the cursor where it is.
 fn pickTarget(self: *s.Board, cfg: DifficultyConfig) void {
     engine.chain_weight = cfg.chain_weight;
     engine.raise_bias = cfg.raise_bias;
@@ -102,9 +64,8 @@ pub fn update(self: *s.Board) void {
         return;
     };
 
-    // Walk one cell closer, on whichever axis still disagrees -- row first,
-    // then column, exactly one step per tick (see moveCursor/stepDas's own
-    // single-step-per-eligible-frame shape for the player).
+    // Walk one cell closer, row first then column, one step per tick --
+    // same single-step shape as the player's own moveCursor/stepDas.
     if (self.cursor_row != mv.row) {
         self.cursor_row = if (mv.row > self.cursor_row) self.cursor_row + 1 else self.cursor_row - 1;
         return;
@@ -114,13 +75,8 @@ pub fn update(self: *s.Board) void {
         return;
     }
 
-    // Arrived. The board may have changed since this target was picked
-    // (something might still be settling, or may have popped away
-    // entirely by now) -- give up on it without swapping if there's
-    // genuinely nothing left to swap (garbage, or both cells now empty,
-    // mirror sim.trySwap's own permanent rejection reasons), otherwise keep
-    // retrying each tick until the cells actually become swappable, same as
-    // the player's own buffered-swap retry (see input.canSwapAt).
+    // Arrived. Abandon the target if it's now permanently unswappable
+    // (garbage or both empty), else keep retrying until swappable.
     const abs_row = mv.row + c.SPAWN_ROWS;
     const a = self.cellAt(abs_row, mv.col);
     const b = self.cellAt(abs_row, mv.col + 1);
@@ -151,8 +107,7 @@ test "cpu AI walks its cursor one cell at a time toward the engine's target, nev
     target = null;
     s.difficulty = 10; // depth 3, chain_weight 100 -- always plays its actual best move
     var b: s.Board = .{};
-    // Row 5, col 2 is the target (see the "finds and plays" test below) --
-    // starting cursor col already matches (default cursor_col == 2), so
+    // Row 5, col 2 is the target; cursor_col already defaults to 2, so
     // only the row needs to move, from its default down to 5.
     b.cellAt(5 + c.SPAWN_ROWS, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(5 + c.SPAWN_ROWS, 1).* = .{ .color = 1, .state = .normal };
@@ -161,10 +116,8 @@ test "cpu AI walks its cursor one cell at a time toward the engine's target, nev
     const cfg = configFor(s.difficulty);
     const start_row = b.cursor_row;
 
-    // Each action -- deciding a target, or moving one cell toward it -- only
-    // ever happens once every move_interval ticks (see update's own timer
-    // gate), so the first full interval only ever decides the target; the
-    // cursor itself hasn't moved yet.
+    // Each action (deciding a target, or moving one cell) only happens once
+    // per move_interval ticks, so the first interval only decides the target.
     for (0..cfg.move_interval) |_| update(&b);
     try testing.expectEqual(start_row, b.cursor_row);
 
@@ -181,23 +134,15 @@ test "at an engine level, the cpu finds and plays an obvious winning swap" {
     target = null;
     s.difficulty = 10; // depth 3, chain_weight 100 -- always plays its actual best move
     var b: s.Board = .{};
-    // Row 5: 1,1,2,1 -- only swapping columns 2/3 completes a match. Nothing
-    // else is on the board, so cpu_engine's own gravity pass (part of
-    // scoring each candidate swap) shifts all four columns down by the same
-    // amount, leaving them aligned exactly as here -- see
-    // cpu_engine_test.zig's own "finds the swap that completes an immediate
-    // match" test for the same setup and why it doesn't need a floor.
+    // Row 5: 1,1,2,1 -- only swapping cols 2/3 completes a match. No floor
+    // needed: gravity shifts all 4 columns down equally, keeping them aligned.
     b.cellAt(5 + c.SPAWN_ROWS, 0).* = .{ .color = 1, .state = .normal };
     b.cellAt(5 + c.SPAWN_ROWS, 1).* = .{ .color = 1, .state = .normal };
     b.cellAt(5 + c.SPAWN_ROWS, 2).* = .{ .color = 2, .state = .normal };
     b.cellAt(5 + c.SPAWN_ROWS, 3).* = .{ .color = 1, .state = .normal };
 
-    // Exactly enough intervals to: decide the target (1), walk the row down
-    // from its default (9) to the target (5, 4 steps), then execute the
-    // swap on arrival (1) -- 6 intervals total. Deliberately not a much
-    // larger budget: once the swap lands the board changes and the CPU will
-    // immediately go decide its *next* target elsewhere, which would move
-    // the cursor away again and make a looser bound flaky.
+    // 6 intervals: decide (1) + walk 4 rows (4) + swap (1). Deliberately tight
+    // -- once it swaps the CPU picks a new target, which would move the cursor again.
     for (0..6 * configFor(s.difficulty).move_interval) |_| update(&b);
 
     try testing.expectEqual(@as(u8, 5), b.cursor_row);
@@ -221,14 +166,6 @@ test "cpu AI sits still (no spinning) when there's genuinely no good move" {
     target = null;
     s.difficulty = 10; // depth 3, chain_weight 100
     var b: s.Board = .{};
-    // Same (row + 2*col) % 5 board used by cpu_engine_test's own "bestAction
-    // does nothing ..." test -- no swap can ever improve on it or set off a
-    // match, and there's plenty of material with no dangerous height, so
-    // bestAction should return .none every single decide tick. This is the
-    // direct regression test for the reported "spins forever" bug: without
-    // the epsilon check, the engine would always find *some* swap whose
-    // structural score differs from the current one by a hair and chase it
-    // forever, even though nothing is actually being accomplished.
     var lr: u8 = 0;
     while (lr < c.VISIBLE_ROWS) : (lr += 1) {
         for (0..c.COLS) |col_usize| {
@@ -241,4 +178,44 @@ test "cpu AI sits still (no spinning) when there's genuinely no good move" {
     for (0..40 * configFor(s.difficulty).move_interval) |_| update(&b);
     try testing.expectEqual(start_row, b.cursor_row);
     try testing.expectEqual(start_col, b.cursor_col);
+}
+
+test "cpu AI on arrival abandons a stale target when unswappable, else retries" {
+    s.difficulty = 10; // depth 3, chain_weight 100 -- always plays its actual best move
+    const cfg = configFor(s.difficulty);
+    var b: s.Board = .{};
+    b.cursor_row = 5;
+    b.cursor_col = 2;
+
+    // Garbage at the target: abandon without swapping.
+    move_timer = 0;
+    target = .{ .row = 5, .col = 2 };
+    b.cellAt(5 + c.SPAWN_ROWS, 2).* = .{ .color = 1, .state = .normal, .is_garbage = true };
+    b.cellAt(5 + c.SPAWN_ROWS, 3).* = .{ .color = 1, .state = .normal };
+    for (0..cfg.move_interval) |_| update(&b);
+    try testing.expectEqual(@as(?engine.Move, null), target);
+    try testing.expectEqual(s.CellState.normal, b.cellAt(5 + c.SPAWN_ROWS, 2).state);
+
+    // Both cells empty: abandon without swapping.
+    move_timer = 0;
+    target = .{ .row = 5, .col = 2 };
+    b.cellAt(5 + c.SPAWN_ROWS, 2).* = .{ .state = .empty };
+    b.cellAt(5 + c.SPAWN_ROWS, 3).* = .{ .state = .empty };
+    for (0..cfg.move_interval) |_| update(&b);
+    try testing.expectEqual(@as(?engine.Move, null), target);
+
+    // Not yet swappable (still falling): keep retrying each tick instead of
+    // abandoning, then swap once it becomes swappable.
+    move_timer = 0;
+    target = .{ .row = 5, .col = 2 };
+    b.cellAt(5 + c.SPAWN_ROWS, 2).* = .{ .color = 1, .state = .falling };
+    b.cellAt(5 + c.SPAWN_ROWS, 3).* = .{ .color = 2, .state = .normal };
+    for (0..cfg.move_interval) |_| update(&b);
+    try testing.expect(target != null);
+    try testing.expectEqual(s.CellState.falling, b.cellAt(5 + c.SPAWN_ROWS, 2).state);
+
+    b.cellAt(5 + c.SPAWN_ROWS, 2).* = .{ .color = 1, .state = .normal };
+    for (0..cfg.move_interval) |_| update(&b);
+    try testing.expectEqual(@as(?engine.Move, null), target);
+    try testing.expectEqual(s.CellState.swapping, b.cellAt(5 + c.SPAWN_ROWS, 2).state);
 }

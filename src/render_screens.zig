@@ -1,12 +1,5 @@
-// The pre-game/menu screens (title, mode select, versus confirm, the 3-step
-// setup flow, story's own difficulty screen) and the match-over overlays
-// (drawGameOver/drawStoryGameOver, plus the shared drawPanelBorder/
-// drawCountdown overlay chrome). Split out of render.zig to keep that file
-// under the project's ~500-line-per-file guideline -- render.zig re-exports
-// every `pub fn` here (`render.drawTitleScreen`, etc.) so main.zig's call
-// sites are unaffected by the split, and this file imports render.zig back
-// for drawThemedBand (shared with render.drawFrame) and render_cells.zig for
-// drawDitheredRectOutline.
+// Pre-game/menu screens plus the match-over overlay chrome, split out of
+// render.zig, which re-exports every `pub fn` here so call sites don't change.
 
 const std = @import("std");
 const c = @import("constants.zig");
@@ -23,12 +16,8 @@ const render = @import("render.zig");
 const MENU_PANEL_X: i32 = 20;
 const MENU_PANEL_W: i32 = 120;
 
-// Common backdrop for every pre-game screen: the parallaxing background
-// (see render_bg.zig) plus the panel's own fill, held perfectly still --
-// callers draw their own border (the title screen's neutral bezel vs. the
-// setup screens' character-themed one) and content into the returned Y.
-// `base_y`/`h` differ per screen (some have more to fit than others), so
-// both are the caller's own choice rather than shared constants.
+// Common backdrop for every pre-game screen; callers draw their own border
+// and content into the returned Y. `base_y`/`h` are each caller's own choice.
 fn drawMenuPanelFill(base_y: i32, h: i32) i32 {
     bg.draw();
     w4.DRAW_COLORS.* = 0x0001;
@@ -36,10 +25,8 @@ fn drawMenuPanelFill(base_y: i32, h: i32) i32 {
     return base_y;
 }
 
-// A plain (unchamfered) themed border around an arbitrary panel -- used by
-// the setup screens to retheme themselves to whichever character is
-// currently selected, the same color+pattern treatment render.drawFrame
-// gives the real game board.
+// A plain (unchamfered) themed border, same treatment render.drawFrame
+// gives the real board -- used by setup screens to retheme to the pick.
 fn drawThemedPanelBorder(x: i32, y: i32, w: i32, h: i32, char: characters.Character) void {
     const t = render.FRAME_THICKNESS;
     render.drawThemedBand(x, y, w, t, char.hues, char.border_style, true);
@@ -57,11 +44,8 @@ pub fn drawTitleScreen() void {
     w4.Text("PRESS X", 52, y + 64);
 }
 
-// Right after the title, before any character/difficulty picking -- neither
-// of which applies yet, so this uses the same plain (non-themed) bezel the
-// title screen does, not a character-themed one. `state.GameMode`'s own
-// left/right cycling order (see main.zig's prevMode/nextMode) matches this
-// list's own order top to bottom.
+// Uses the title screen's plain bezel, not a character-themed one. Order
+// must match state.GameMode's left/right cycling order (main.zig).
 const GAME_MODE_LABELS = [3][]const u8{ "1P STORY", "1P QUICK MATCH", "2P VERSUS" };
 fn gameModeIndex(m: s.GameMode) u8 {
     return switch (m) {
@@ -88,11 +72,8 @@ pub fn drawModeSelectScreen() void {
     w4.Text("PRESS X", 52, y + 92);
 }
 
-// A manual gate between picking versus mode and actually starting a
-// countdown (see state.MenuPhase's own doc comment on why this exists) --
-// makes sure the second player has actually joined via netplay (or is ready
-// on a second local controller) before `main.zig` ever reads `wasm4.NETPLAY`
-// or resets the boards, since joining mid-match would desync the two peers.
+// A manual gate ensuring the second player has actually joined before
+// main.zig reads wasm4.NETPLAY -- joining mid-match would desync the peers.
 pub fn drawVersusConfirmScreen() void {
     const y = drawMenuPanelFill(30, 100);
     drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100);
@@ -107,9 +88,7 @@ pub fn drawVersusConfirmScreen() void {
     w4.Text("THEN PRESS X", 28, y + 90);
 }
 
-// One filled-in segment per difficulty level (1-10), replacing the old
-// plain "LEVEL {d}" text with something that reads at a glance without
-// needing to parse a number.
+// One filled-in segment per difficulty level (1-10).
 fn drawDifficultyBar(x: i32, y: i32) void {
     var i: u8 = 1;
     while (i <= 10) : (i += 1) {
@@ -127,12 +106,8 @@ fn drawDifficultyBar(x: i32, y: i32) void {
     }
 }
 
-// Position of each portrait in the setup screen's character grid -- wraps
-// into rows of CHARS_PER_ROW rather than one long line (7 characters, at
-// this sprite size plus gap, are too wide for the panel to fit in a single
-// row), each row independently centered in the panel's own width so a
-// shorter final row (3, not 4) still sits centered under the one above it
-// rather than left-aligned.
+// Wraps into rows of CHARS_PER_ROW (7 characters are too wide for one row);
+// each row is independently centered, so a shorter final row stays centered.
 const CHARS_PER_ROW: u8 = 4;
 const CHAR_SLOT_GAP: i32 = 8;
 const CHAR_ROW_GAP: i32 = 8;
@@ -152,9 +127,7 @@ fn charSlotPos(index: u8) struct { x: i32, y: i32, row: u8 } {
     return .{ .x = x, .y = y, .row = row };
 }
 
-// The setup flow's own screen position -- held fixed across all 3 steps
-// (character, CPU reveal, difficulty) so the panel doesn't jump around
-// between them, just its height/content changes.
+// Held fixed across all 3 setup steps so the panel doesn't jump around.
 const SETUP_BASE_Y: i32 = 24;
 
 pub fn drawSetupCharacterScreen() void {
@@ -168,11 +141,8 @@ pub fn drawSetupCharacterScreen() void {
     w4.DRAW_COLORS.* = 0x0002;
     w4.Text("CHARACTER", 40, y + 18);
 
-    // Every character is shown at once (not just the current pick) --
-    // left/right cycles the player's own selection (see main.zig),
-    // highlighted with a dithered outline -- solid normally, blinking on/off
-    // for a moment right after confirming (see state.setup_flash_timer)
-    // before moving on to watch the CPU pick its own.
+    // Every character shown at once; the current pick gets a dithered
+    // outline, blinking briefly right after confirming (setup_flash_timer).
     const frame = rchar.currentFrame();
     const grid_y = y + 34;
     const flashing = s.setup_flash_timer > 0;
@@ -230,10 +200,8 @@ pub fn drawSetupCpuRevealScreen() void {
     rchar.draw(you_x, row_y, s.player_character, .normal, frame);
     cells.drawDitheredRectOutline(you_x - 2, row_y - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
 
-    // Spins through every character once per tick, holding each a little
-    // longer than the last (see state.cpu_reveal_tick/constants.
-    // CPU_REVEAL_HOLD_*), landing for good on the real pick at the final
-    // tick -- a slot machine slowing to a stop rather than an instant reveal.
+    // Spins through every character, holding each tick a little longer
+    // (a slot machine slowing to a stop), landing on the real pick last.
     const done = s.cpu_reveal_tick >= c.CPU_REVEAL_STEPS - 1;
     const spin_index: u8 = if (done) s.cpu_character else @intCast(s.cpu_reveal_tick % characters.COUNT);
     rchar.draw(cpu_x, row_y, spin_index, .normal, frame);
@@ -282,15 +250,8 @@ pub fn drawSetupDifficultyScreen() void {
 
 const STORY_TIER_LABELS = [4][]const u8{ "EASY", "MEDIUM", "HARD", "X HARD" };
 
-// Story mode's own difficulty screen -- no CPU portrait/name here (unlike
-// drawSetupDifficultyScreen above), since the opponent sequence is
-// predetermined by the run itself (see game_modes.storyOpponentFor), not
-// picked or rolled. Left/right only ever cycles EASY/MEDIUM/HARD (see
-// main.zig's own cycling logic) -- X Hard is "by tradition" only reachable
-// by holding left and pressing Z while sitting on HARD, so it never appears
-// in the ordinary cycling order, and this screen only ever hints that it
-// exists (never spells out the actual input) once game_modes.xhard_revealed
-// says the player has actually earned that hint.
+// No CPU portrait: the opponent sequence is predetermined. X Hard is reached
+// by hold-left+Z on HARD, hinted only once xhard_revealed says it's earned.
 pub fn drawStoryTierScreen() void {
     const y = drawMenuPanelFill(SETUP_BASE_Y, 110);
     drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 110, characters.ALL[s.player_character]);
@@ -316,13 +277,8 @@ pub fn drawStoryTierScreen() void {
     }
 }
 
-// Bezeled orange border for a full-screen overlay panel (the countdown and
-// match-over screens): two concentric dithered outlines for a raised bezel
-// look (the same technique render.drawCursor uses), plus a 1px black
-// (background) outline just outside that so the bezel itself reads clearly
-// against whatever's behind the panel -- the board, mid-scroll or otherwise
-// -- rather than risking blending into it the way a single flat-colored edge
-// might.
+// Two concentric dithered outlines for a raised bezel, plus a 1px background
+// outline outside that so it reads clearly against whatever's behind it.
 pub fn drawPanelBorder(x: i32, y: i32, w: i32, h: i32) void {
     w4.DRAW_COLORS.* = cells.DC_BG;
     w4.Rect(x - 1, y - 1, @intCast(w + 2), 1);

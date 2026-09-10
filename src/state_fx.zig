@@ -1,28 +1,10 @@
-// Purely cosmetic per-frame effects layered on top of a Board: the small
-// floating chain/combo match-popup badges, and the burst of particles a
-// popped real block spawns. Split out of state.zig to keep that file under
-// the project's ~500-line-per-file guideline. Nothing here affects gameplay
-// -- these are free functions taking `self: *Board` as their first
-// parameter (rather than Board methods, since Zig methods must live in the
-// type's own file), cleared along with everything else on reset.
+// Purely cosmetic per-frame effects on a Board: match-popup badges and pop
+// particles. Free functions (not Board methods) since split out of state.zig.
 
 const s = @import("state.zig");
 
-// A small floating text badge (an orange-dithered block with black text)
-// that appears at a chain-or-combo match's location, then flies to the score
-// display. Purely cosmetic -- spawned by sim.checkMatches (text like "x2" or
-// "5", pre-rendered into `label` there so this module and render.zig stay
-// agnostic of what the text actually says), advanced once per frame by
-// tickMatchPopups (called from sim.simulate), and drawn by
-// render.drawMatchPopups.
-//
-// Three phases: it eases up just a couple pixels from the center of the
-// match's topmost block (`x`/`y` below) to that block's own top edge
-// (`edge_y`) -- a small hop meant to catch the eye right at the match, not
-// travel anywhere -- then waits there until the match's own pop animation
-// actually finishes (`pop_end`, in the same elapsed-frame timeline as this
-// popup), then flies from there into the score display. See
-// render.drawMatchPopups for the actual interpolation.
+// A floating "x2"/"5" badge: eases to the block's edge, waits for the pop
+// to finish (`pop_end`), then flies to the score (render.drawMatchPopups).
 pub const MATCH_POPUP_RISE: i16 = 6; // frames easing up to the block's own top edge
 pub const MATCH_POPUP_RISE_PX: i32 = 3; // how far up that is -- a couple pixels, not half a tile
 pub const MATCH_POPUP_FLY: i16 = 28; // frames easing from that edge into the score
@@ -40,15 +22,8 @@ pub const MatchPopup = struct {
     elapsed: i16 = 0,
 };
 
-// A short burst of small particles flying diagonally outward from a real
-// block's own center the instant it's actually removed (see sim.simulate's
-// just_cleared handling) -- a bit of impact feedback for a satisfying-
-// feeling pop. Purely cosmetic, exactly like MatchPopup above: nothing here
-// affects gameplay, and it's cleared along with everything else on reset.
-// `x`/`y` (the spawn origin, in pixel space) and `color` never change after
-// spawn -- only `elapsed` advances (see tickParticles) -- render.zig derives
-// each particle's actual on-screen position and size from that and its own
-// fixed diagonal direction.
+// A burst from a popped block's center. `x`/`y`/`color` are fixed at spawn;
+// only `elapsed` advances -- render.zig derives position/size from that.
 pub const Particle = struct {
     active: bool = false,
     x: i32 = 0,
@@ -76,9 +51,7 @@ pub fn spawnMatchPopup(self: *s.Board, label: []const u8, x: i32, y: i32, edge_y
             return;
         }
     }
-    // Pool full -- would need 4+ simultaneous chain/combo groups landing in
-    // the same frame. Silently drop rather than crash; missing one flourish
-    // is harmless.
+    // Pool full (4+ simultaneous chain/combo groups) -- drop silently.
 }
 
 pub fn tickMatchPopups(self: *s.Board) void {
@@ -93,11 +66,8 @@ pub fn clearMatchPopups(self: *s.Board) void {
     for (&self.match_popups) |*p| p.* = .{};
 }
 
-// One small burst of 4 particles, one per diagonal direction, flying
-// outward from (x, y) -- a popped real block's own center, in pixel
-// space. Silently drops whichever particles don't fit if the pool's
-// already full (see spawnMatchPopup's identical reasoning) -- missing a
-// few sparks during an enormous simultaneous multi-pop is harmless.
+// 4 particles, one per diagonal, from a popped block's center. Drops
+// silently (like spawnMatchPopup) if the pool's already full.
 pub fn spawnPopParticles(self: *s.Board, x: i32, y: i32, color: u8) void {
     const dirs = [4][2]i8{ .{ -1, -1 }, .{ 1, -1 }, .{ -1, 1 }, .{ 1, 1 } };
     for (dirs) |d| {
@@ -121,4 +91,20 @@ pub fn tickParticles(self: *s.Board) void {
         p.elapsed += 1;
         if (p.elapsed >= PARTICLE_LIFE) p.active = false;
     }
+}
+
+const testing = @import("std").testing;
+
+test "spawnMatchPopup drops silently once the pool is full" {
+    var b: s.Board = .{};
+    for (0..MAX_MATCH_POPUPS) |_| spawnMatchPopup(&b, "x2", 0, 0, 0, 0);
+    spawnMatchPopup(&b, "x3", 1, 1, 1, 1); // pool full -- dropped, not crashed
+    for (&b.match_popups) |*p| try testing.expect(p.active);
+}
+
+test "spawnPopParticles drops silently once the pool is full" {
+    var b: s.Board = .{};
+    for (0..MAX_PARTICLES / 4) |_| spawnPopParticles(&b, 0, 0, 0);
+    spawnPopParticles(&b, 1, 1, 1); // pool full -- dropped, not crashed
+    for (&b.particles) |*p| try testing.expect(p.active);
 }

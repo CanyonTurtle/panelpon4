@@ -1,14 +1,5 @@
-// The 3 top-level game modes (see state.game_mode, chosen on the mode-select
-// screen right after the title): 1P story, 1P quick match, and 2P versus
-// (local same-console 2-controller play, or remote via WASM-4's own netplay
-// -- see main.zig, which is the only thing that differs between the two:
-// this module and everything downstream of it doesn't know or care which).
-//
-// Also home to the difficulty-profile system that lets story mode retune
-// "stack rise speed, pop delay, and top loss timer" per tier (see Profile/
-// applyProfile) -- quick match and versus always run the untouched baseline
-// (`.default`), so their feel is completely unchanged from before this
-// module existed.
+// The 3 top-level game modes, plus story's difficulty-profile retuning
+// system (Profile/applyProfile) -- quick match/versus run the baseline.
 
 const builtin = @import("builtin");
 const c = @import("constants.zig");
@@ -16,20 +7,14 @@ const w4 = @import("wasm4.zig");
 const characters = @import("characters.zig");
 const s = @import("state.zig");
 
-// GameMode/StoryTier themselves live in state.zig (see s.GameMode/s.StoryTier)
-// -- state.zig is the game's plain-data model layer, and every OTHER piece
-// of per-match mode state (s.game_mode, s.story_tier, s.story_stage, s.
-// story_game_overs) already lives there, so the enums those fields are typed
-// as belong there too rather than splitting "the data" and "its own type"
-// across two modules.
+// GameMode/StoryTier live in state.zig alongside the rest of per-match mode
+// state, rather than splitting a field from its own type across modules.
 pub const StoryTier = s.StoryTier;
 
 pub const STORY_STAGES: u8 = characters.COUNT;
 
-// Story mode's own difficulty-profile knobs, applied to the shared runtime
-// constants (see constants.zig's own doc comment on why POP_FRAMES etc. are
-// `var`s) -- `rise_scale_pct` feeds constants.RISE_SPEED_SCALE_PCT directly;
-// the rest are copied straight into their matching constants field.
+// Story mode's difficulty-profile knobs, applied onto the mutable runtime
+// constants in constants.zig (see its own doc comment).
 const Profile = struct {
     rise_scale_pct: u32,
     pop_frames: i16,
@@ -38,9 +23,8 @@ const Profile = struct {
     danger_forgiveness: u32,
 };
 
-// Exactly today's baseline values (see constants.zig's own defaults) --
-// quick match and versus mode both run this, so neither one's feel changes
-// even slightly just because this system exists.
+// Today's baseline (see constants.zig's defaults) -- quick match/versus
+// run this, so neither one's feel changes just because this system exists.
 const DEFAULT_PROFILE = Profile{
     .rise_scale_pct = 100,
     .pop_frames = 34,
@@ -49,11 +33,8 @@ const DEFAULT_PROFILE = Profile{
     .danger_forgiveness = 60,
 };
 
-// Easier tiers get a slower rise, a longer pop/pre-pop delay (more time to
-// actually read what just happened before it clears), and a longer top-loss
-// forgiveness window; harder tiers compress all three. `xhard` pushes every
-// knob well past `hard` rather than just repeating it -- it's meant to be a
-// genuine step up, not a re-skin.
+// Easier tiers slow the rise/pop/forgiveness knobs, harder ones compress
+// them; `xhard` pushes well past `hard` -- a genuine step up, not a re-skin.
 fn profileFor(tier: StoryTier) Profile {
     return switch (tier) {
         .easy => .{ .rise_scale_pct = 140, .pop_frames = 44, .pre_pop_blink = 30, .pre_pop_pause = 18, .danger_forgiveness = 90 },
@@ -72,10 +53,8 @@ fn applyProfile(p: Profile) void {
     c.DANGER_FORGIVENESS_FRAMES = p.danger_forgiveness;
 }
 
-// Quick match (on confirming a difficulty) and versus (on confirming from
-// the mode-select screen) both call this to guarantee a clean baseline --
-// otherwise a story run earlier in the same session would leave its own
-// tier's profile still active.
+// Called by quick match/versus on confirm, so an earlier story run's tier
+// profile can never leak into a different mode.
 pub fn applyDefaultProfile() void {
     applyProfile(DEFAULT_PROFILE);
 }
@@ -84,11 +63,8 @@ pub fn applyStoryProfile(tier: StoryTier) void {
     applyProfile(profileFor(tier));
 }
 
-// Linear ramp from a tier's own (lo, hi) CPU difficulty (see cpu_ai.configFor,
-// 1-10) across the STORY_STAGES opponents, stage 0 landing on `lo` and the
-// last stage on `hi`. `xhard` is deliberately flat at the very top instead of
-// ramping -- it's supposed to be brutal from the first opponent on, not eased
-// into.
+// Linear ramp from a tier's (lo, hi) CPU difficulty across the STORY_STAGES
+// opponents. `xhard` stays flat at 10 -- brutal from the first fight, not eased in.
 pub fn storyDifficultyFor(tier: StoryTier, stage: u8) u8 {
     const lo: u8, const hi: u8 = switch (tier) {
         .easy => .{ 1, 3 },
@@ -101,28 +77,18 @@ pub fn storyDifficultyFor(tier: StoryTier, stage: u8) u8 {
     return @intCast(lo + step);
 }
 
-// The opponent roster order for story mode: every character, in a fixed
-// sequence -- including a "mirror match" against whichever look the player
-// themselves picked, if it comes up, same as any other stage. Simpler and
-// more predictable than filtering the player's own pick out (which would
-// leave story mode one stage short, or need a stand-in opponent for it).
+// Every character in fixed order, mirror matches included -- simpler than
+// filtering the player's own pick out of the roster.
 pub fn storyOpponentFor(stage: u8) u8 {
     return stage % characters.COUNT;
 }
 
-// Persisted across sessions via WASM-4's disk API (a single fixed-format
-// blob, well under its 1024-byte cap) -- just whether the secret X Hard
-// input has ever been revealed to this player (see StoryTier's own doc
-// comment: the input itself always works regardless of this, this only
-// gates the on-screen *hint* that it exists). Byte 0 is a version tag so a
-// future save format change can tell an old save apart rather than
-// misreading it.
+// Persisted via WASM-4's disk API: whether the X Hard hint has been shown
+// (the input itself always works regardless). Byte 0 is a version tag.
 const SAVE_VERSION: u8 = 1;
 pub var xhard_revealed: bool = false;
 
-// Guarded on builtin.is_test -- see audio.zig's identical reasoning: these
-// are WASM4 `extern "env"` host functions with nothing to link against when
-// `zig build test` runs natively.
+// Guarded on builtin.is_test -- see audio.zig's identical Diskr/Diskw reasoning.
 pub fn loadSave() void {
     if (builtin.is_test) return;
     var buf: [2]u8 = .{ 0, 0 };
@@ -138,21 +104,13 @@ fn saveGame() void {
     _ = w4.Diskw(&buf, buf.len);
 }
 
-// Whether finishing a story run under these conditions earns the reveal --
-// split out from maybeRevealXhard below purely so this decision can be unit
-// tested without also exercising the real disk write (see this file's own
-// tests: nothing in this module's test suite may call an actual w4.Diskw/
-// Diskr host function, since the native `zig build test` binary has no real
-// WASM4 host to satisfy those `extern "env"` calls -- see debug.zig/input.
-// zig/render.zig's own identical reasoning for why they carry no tests).
+// Split out from maybeRevealXhard so this decision is unit-testable without
+// exercising the real disk write (w4.Diskw has no native host to link against).
 fn earnsXhardReveal(tier: StoryTier, game_overs: u32) bool {
     return tier == .hard and game_overs == 0;
 }
 
-// Called once a story run actually clears its final stage -- reveals the
-// hint for good (idempotent: saving again once already revealed is harmless,
-// just skipped) if this run beat `hard` specifically without a single game
-// over (see state.story_game_overs, tallied across the whole run).
+// Idempotent: only reveals (and saves) on a clean hard-tier clear.
 pub fn maybeRevealXhard(tier: StoryTier, game_overs: u32) void {
     if (xhard_revealed or !earnsXhardReveal(tier, game_overs)) return;
     xhard_revealed = true;
@@ -207,4 +165,13 @@ test "earnsXhardReveal only for a clean (zero game-over) hard clear" {
     try testing.expect(!earnsXhardReveal(.hard, 1)); // had a game over
     try testing.expect(!earnsXhardReveal(.xhard, 0)); // wrong tier (already the top)
     try testing.expect(earnsXhardReveal(.hard, 0));
+}
+
+test "maybeRevealXhard is idempotent and only reveals on a clean hard clear" {
+    xhard_revealed = false;
+    maybeRevealXhard(.medium, 0);
+    try testing.expect(!xhard_revealed);
+    maybeRevealXhard(.hard, 0);
+    try testing.expect(xhard_revealed);
+    xhard_revealed = false; // restore so no other test sees a leftover reveal
 }

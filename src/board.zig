@@ -1,16 +1,11 @@
-// Row generation, the rising floor, and (re)starting a game -- all take an
-// explicit `*s.Board` (see state.zig) so the exact same logic drives both
-// the player's and the CPU's side of a vs-CPU match.
+// Row generation, the rising floor, and (re)starting a game all take an
+// explicit `*s.Board` so the same logic drives both sides of a match.
 
 const c = @import("constants.zig");
 const s = @import("state.zig");
 const row_cache = @import("state_row_cache.zig");
 
-// Frames needed per pixel of rise -- larger is slower. Starts at a quarter
-// of the original pace (32 vs. the old 8) and eases toward the floor much
-// more gradually too (a wider start-to-floor range spread over a bigger
-// per-level score threshold, vs. the old steep ramp that maxed out by score
-// 2400).
+// Frames needed per pixel of rise -- larger is slower.
 const RISE_START_FRAMES_PER_PIXEL: u32 = 32;
 const RISE_FLOOR_FRAMES_PER_PIXEL: u32 = 4; // fastest/hardest -- unchanged from before
 const RISE_SCORE_PER_LEVEL: u32 = 1200;
@@ -21,19 +16,14 @@ pub fn riseSpeedFramesPerPixel(score: u32) u32 {
         RISE_FLOOR_FRAMES_PER_PIXEL
     else
         RISE_START_FRAMES_PER_PIXEL - level;
-    // Story mode's "stack rise speed" knob (see constants.RISE_SPEED_SCALE_PCT/
-    // game_modes.applyProfile) -- 100 (quick match, versus) leaves this exactly
-    // as it always was. At least 1 frame/pixel regardless of how aggressive a
-    // tier's scale gets, so rise speed can never divide down to instant/zero.
+    // Story mode's rise-speed-scale knob (constants.RISE_SPEED_SCALE_PCT);
+    // floored at 1 frame/pixel so it can never divide down to instant/zero.
     const scaled = base * c.RISE_SPEED_SCALE_PCT / 100;
     return @max(scaled, 1);
 }
 
-// Draws from the shared RNG stream (state.shared_row_rng_state) -- never
-// either board's own rng_state -- so the result depends only on how many
-// times this has been called since the stream was last reseeded, never on
-// anything board-specific. That's what makes rowForIndex's result
-// reproducible purely from an index (see its own doc comment).
+// Draws from the shared RNG stream (never either board's own rng_state), so
+// the result depends only on call count since last reseed, not the board.
 fn sharedRandRange(n: u32) u32 {
     var x = row_cache.shared_row_rng_state;
     x ^= x << 13;
@@ -43,14 +33,8 @@ fn sharedRandRange(n: u32) u32 {
     return x % n;
 }
 
-// Picks one row's colors, avoiding a horizontal run of 3 within the row
-// (row_colors itself) and a vertical run of 3 against the previous two rows
-// -- but *in the shared sequence itself* (above1/above2), never either
-// board's own actual stack content like this used to check: a board's stack
-// is a downstream consequence of match play, popping, and gravity, which
-// differs between boards immediately, so checking against it would make two
-// boards' otherwise-identical sequences diverge and defeat the whole point
-// of rowForIndex below.
+// Avoids 3-in-a-row checks against the shared sequence (above1/above2), not
+// either board's real stack, which diverges and would defeat rowForIndex.
 fn pickRowColors(above1: ?[c.COLS]u8, above2: ?[c.COLS]u8) [c.COLS]u8 {
     var row_colors: [c.COLS]u8 = undefined;
     var ci: u8 = 0;
@@ -73,39 +57,20 @@ fn pickRowColors(above1: ?[c.COLS]u8, above2: ?[c.COLS]u8) [c.COLS]u8 {
     return row_colors;
 }
 
-// Resets the shared row cache at match start. Deliberately separate from
-// resetGame (which runs once PER BOARD): calling this from inside resetGame
-// would reset shared_rows_count back to 0 a second time when the second
-// board resets, discarding the row the first board may have already
-// generated for index 0 and replacing it with a *different* one -- exactly
-// the desync this whole mechanism exists to prevent. Callers reset both
-// boards and the shared cache together instead (see main.zig).
-// shared_row_rng_state itself is deliberately left untouched here -- see its
-// own doc comment in state.zig for why.
+// Kept separate from resetGame (which runs once per board) so the second
+// board's reset can't re-zero shared_rows_count and desync the two boards.
 pub fn resetSharedRows() void {
     row_cache.shared_rows_count = 0;
 }
 
-// Advances the shared RNG stream by one step without consuming a row --
-// mirrors each board's own idle title-screen rngNext() perturbation (see
-// main.zig), so how long a player dawdles on the title screen before
-// starting still changes the eventual row sequence, exactly like it always
-// has, just for the shared stream now instead of the player's own.
+// Mirrors each board's own idle title-screen rngNext() perturbation, so
+// dawdling on the title screen still changes the eventual row sequence.
 pub fn perturbSharedRng() void {
     _ = sharedRandRange(2);
 }
 
-// Returns the colors for the `index`-th row risen since the match started,
-// shared by both boards (see state.shared_rows) -- generates and caches it
-// the first time either board reaches that index, and simply replays the
-// cached result for whichever board reaches it second, however much later.
-// This -- not either board's own rng_state -- is what "predetermined at
-// match start" and "the same for both players per row" mean in practice:
-// the sequence depends only on shared_row_rng_state's evolution and the
-// row's own position in it, never on anything board-specific, so the Nth
-// row either board has ever seen rise in looks identical regardless of
-// which board reached N first -- a fair, reproducible comparison of how
-// each side handles the same material.
+// Colors for the `index`-th risen row, shared by both boards: generated and
+// cached on first reach, replayed (identical) on second (see tests below).
 fn rowForIndex(index: u32) [c.COLS]u8 {
     if (index < row_cache.shared_rows_count) return row_cache.shared_rows[index % row_cache.SHARED_ROW_CACHE];
 
@@ -117,9 +82,8 @@ fn rowForIndex(index: u32) [c.COLS]u8 {
     return colors;
 }
 
-// Writes this board's next shared row into `target_phys`, advancing its own
-// count of how many rows it's consumed since match start (see
-// Board.rows_generated, the index into the shared sequence above).
+// Writes this board's next shared row, advancing rows_generated -- its
+// index into the shared sequence above.
 fn writeNextRow(self: *s.Board, target_phys: u8) void {
     const colors = rowForIndex(self.rows_generated);
     self.rows_generated += 1;
@@ -133,18 +97,9 @@ pub fn doRise(self: *s.Board) void {
     writeNextRow(self, c.SPAWN_ROWS + self.top);
     self.top = @intCast((@as(u16, self.top) + 1) % @as(u16, c.RING_SIZE));
 
-    // Logical row indices are relative to `top`, so a fixed cursor_row would
-    // silently point at a different (lower) absolute row after this shift,
-    // which reads as the cursor snapping down. Decrement it to keep tracking
-    // the same physical row it was on, so the cursor rises with the stack
-    // unless the player is actively moving it.
+    // cursor_row is relative to `top`, so decrement it here to keep tracking
+    // the same physical row rather than snapping down after this shift.
     if (self.cursor_row > 0) self.cursor_row -= 1;
-
-    // Reaching the top row no longer ends the game by itself -- see
-    // updateDangerTimer below, which checks this same condition (a block at
-    // or above the ceiling) continuously every frame instead, gated behind a
-    // forgiveness timer so a high-level player gets a real beat to clear it
-    // rather than losing the instant a rise happens to touch row 0.
 }
 
 fn rowOccupied(self: *s.Board, row: u8) bool {
@@ -154,13 +109,8 @@ fn rowOccupied(self: *s.Board, row: u8) bool {
     return false;
 }
 
-// The actual loss condition: continuously (not just right after a rise)
-// checks whether the board is idle with a block at or above the ceiling
-// (row 0 occupied), and ticks a forgiveness timer while both hold -- only
-// once that's run for DANGER_FORGIVENESS_FRAMES (1 second) does the game
-// actually end. Reset to 0 the instant either condition stops holding (the
-// board goes busy again, or the danger row clears), so a close call that
-// gets cleared in time never carries over into the next one.
+// The real loss condition: checked continuously (not just after a rise).
+// Ticks a forgiveness timer while idle and at the ceiling; resets otherwise.
 pub fn updateDangerTimer(self: *s.Board) void {
     if (self.game_over) return;
     if (!self.boardBusy() and rowOccupied(self, c.SPAWN_ROWS)) {
@@ -171,12 +121,8 @@ pub fn updateDangerTimer(self: *s.Board) void {
     }
 }
 
-// Requests a manual raise (the Z button): finishes whatever fraction of the
-// current row is left to rise, over a fixed MANUAL_RAISE_FRAMES duration
-// regardless of how much was already risen -- see updateRise, which actually
-// carries it out once per frame from here on. A no-op while still cooling
-// down from the last one or while a raise is already in progress (pressing
-// Z again mid-raise doesn't stack or restart it).
+// Finishes the current row's remaining rise over a fixed MANUAL_RAISE_FRAMES
+// duration (see updateRise); a no-op while cooling down or already raising.
 pub fn tryManualRaise(self: *s.Board) void {
     if (self.manual_raise_cooldown > 0 or self.manual_raise_elapsed > 0) return;
     self.manual_raise_start_scroll = self.scroll_px;
@@ -185,18 +131,15 @@ pub fn tryManualRaise(self: *s.Board) void {
 }
 
 pub fn updateRise(self: *s.Board) void {
-    // The cooldown is a plain countdown on how often Z can be *pressed* --
-    // ticks every frame regardless of board state, unlike the raise it
-    // gates, which (like the normal automatic rise) pauses while busy.
+    // Cooldown ticks every frame regardless of board state, unlike the
+    // raise it gates, which pauses while busy like the automatic rise.
     if (self.manual_raise_cooldown > 0) self.manual_raise_cooldown -= 1;
 
     if (self.boardBusy()) return;
 
     if (self.manual_raise_elapsed > 0) {
-        // Recomputed fresh from start_scroll/elapsed each frame (not
-        // accumulated incrementally) so it lands on exactly TILE at
-        // MANUAL_RAISE_FRAMES with no rounding drift, whatever fraction of
-        // the row was left when it was triggered.
+        // Recomputed fresh each frame (not accumulated) so it lands exactly
+        // on TILE at MANUAL_RAISE_FRAMES with no rounding drift.
         const remaining: u32 = @as(u32, @intCast(c.TILE)) - self.manual_raise_start_scroll;
         self.scroll_px = self.manual_raise_start_scroll + (remaining * self.manual_raise_elapsed) / c.MANUAL_RAISE_FRAMES;
         if (self.manual_raise_elapsed >= c.MANUAL_RAISE_FRAMES) {
@@ -222,13 +165,8 @@ pub fn updateRise(self: *s.Board) void {
     }
 }
 
-// Resets a board to a fresh game start: every piece of state except its RNG
-// stream (preserved across a restart so replaying doesn't just repeat the
-// exact same reveal colors -- see state.Board.rng_state), plus an initial
-// stack of rows already filled in, same as a freshly-risen board would have
-// -- drawn from the shared row sequence (see writeNextRow/resetSharedRows),
-// so this initial stack is identical for both boards too, not just the rows
-// that rise in later.
+// Resets all state except rng_state (preserved so a restart doesn't repeat
+// the same reveal colors); fills an initial stack from the shared rows.
 pub fn resetGame(self: *s.Board) void {
     const rng_state = self.rng_state;
     self.* = s.Board{};
@@ -241,12 +179,8 @@ pub fn resetGame(self: *s.Board) void {
     }
 }
 
-// Kicks off a fresh match: resets the shared row cache and both boards (see
-// resetSharedRows/resetGame), then starts the "3 2 1 START" countdown (see
-// state.countdown_timer/render.drawCountdown) instead of jumping straight
-// into simulation. The only place either board ever gets reset -- called
-// once per match, from both the title screen's and the game-over screen's
-// own "press X" handling in main.zig.
+// Resets the shared row cache and both boards, then starts the "3 2 1
+// START" countdown. The only place either board ever gets reset.
 pub fn beginCountdown() void {
     resetSharedRows();
     resetGame(&s.player);
@@ -255,17 +189,14 @@ pub fn beginCountdown() void {
     s.started = false;
 }
 
-// Starts the closing "pop everything, top to bottom" wipe (see
-// state.closing_timer/render.drawBoard's wipe skip) -- called once, right
-// when `winner` first leaves .none (see main.zig).
+// Starts the closing "pop everything" wipe; called once, right when
+// `winner` first leaves .none.
 pub fn beginClosing() void {
     s.closing_timer = c.CLOSING_TOTAL_FRAMES;
 }
 
-// Awards this match's point to whoever won it (a draw awards neither side
-// one), then checks whether that's enough to take the whole best-of-N
-// series -- see constants.POINTS_TO_WIN/state.set_winner. Called once, at
-// the same moment as beginClosing (see main.zig).
+// Awards this match's point (a draw awards neither side), then checks
+// whether that's enough to take the best-of-N series.
 pub fn awardMatchPoint(winner: s.Winner) void {
     switch (winner) {
         .player => s.player_points += 1,
@@ -281,11 +212,16 @@ pub fn awardMatchPoint(winner: s.Winner) void {
 
 const testing = @import("std").testing;
 
+test "resetGame restarts rows_generated from the same baseline regardless of prior value" {
+    var a: s.Board = .{ .rows_generated = 42 };
+    var b: s.Board = .{ .rows_generated = 0 };
+    resetGame(&a);
+    resetGame(&b);
+    try testing.expectEqual(b.rows_generated, a.rows_generated);
+}
+
 test "doRise no longer ends the game directly -- see updateDangerTimer's forgiveness timer" {
     var b: s.Board = .{};
-    // At the ceiling from frame 0 -- reaching it doesn't instantly end the
-    // game anymore (that's updateDangerTimer's job, gated behind its own
-    // forgiveness timer).
     b.cellAt(c.SPAWN_ROWS, 0).state = .normal;
     doRise(&b);
     try testing.expect(!b.game_over);
@@ -384,9 +320,7 @@ test "the shared row sequence gives the same row to both boards, whichever reach
     resetSharedRows();
     row_cache.shared_row_rng_state = 999;
 
-    // `b` reaches index 0 first (generating and caching it); `a` then
-    // reaches the SAME index later and must see the identical result, not a
-    // freshly-generated (and almost certainly different) one of its own.
+    // `b` caches index 0 first; `a` must see the identical result later.
     writeNextRow(&b, 0);
     writeNextRow(&a, 0);
     for (0..c.COLS) |col| try testing.expectEqual(b.grid[0][col].color, a.grid[0][col].color);

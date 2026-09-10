@@ -1,42 +1,12 @@
-// Garbage-specific simulation: spawning and the rigid-body group gravity
-// that makes a connected clump fall and land as one piece -- split out from
-// sim.zig to keep that file under the project's ~500-line-per-file
-// guideline. See Cell.is_garbage for the broader design (propagation into a
-// pop, reveal on clear, etc., which stay in sim.zig/checkMatches since
-// they're tightly coupled to match detection).
-//
-// Every entry point takes an explicit `*s.Board` (see state.zig) so the same
-// logic drives both the player's and the CPU's board.
+// Garbage-specific simulation: spawning and the rigid-body group gravity that
+// makes a connected clump fall and land as one piece, split out of sim.zig to keep it under the project's ~500-line guideline. Every entry point takes an explicit `*s.Board` so the same logic drives both boards.
 
 const std = @import("std");
 const c = @import("constants.zig");
 const s = @import("state.zig");
 
-// Drops `rows` garbage rows (each `width` columns wide, anchored at
-// `anchor_col` -- clamped to fit the board, so callers can pass a match's
-// own min_col without worrying about overflow) onto `target`, placed
-// entirely within the offscreen spawn buffer (logical rows 0..SPAWN_ROWS-1 --
-// see constants.SPAWN_ROWS/Board.physRow), never directly onto the visible
-// board: garbage is never self-inflicted in vs-CPU play, so this is always
-// called with the *other* board than the one whose combo/chain triggered it
-// (see the call site in sim.checkMatches).
-//
-// All-or-nothing: if any cell the piece would occupy is already taken (most
-// likely by an earlier piece still waiting in the buffer to fall clear), the
-// whole piece is skipped rather than placed with holes around whatever's in
-// the way -- a partially-placed piece could snag on a free-standing block
-// and deadlock (unable to fall itself, while also blocking that block from
-// falling). Returns whether it actually placed anything, so a caller queuing
-// this can leave it queued and retry once the buffer has room (see
-// releaseIncomingGarbage below) instead of losing the attack outright.
-//
-// A placed piece starts out connected (a solid rectangle), so
-// updateGarbageGravity picks it up as a single rigid body from the very next
-// frame -- falling out of the buffer into view the same way any other
-// garbage falls -- and all its cells share one fresh Cell.garbage_group id
-// (this is the *only* place a new one is handed out), so a match recycling
-// any part of this piece later always pulls in the whole thing, and never
-// bleeds into some other piece it merely happens to be touching by then.
+// Drops `rows` garbage rows (each `width` cols wide, anchored at `anchor_col`,
+// clamped to fit) into `target`'s offscreen spawn buffer. All-or-nothing: if any cell is already taken, the whole piece is skipped (a partial placement could deadlock against a free-standing block) -- returns whether it placed anything, so a caller can leave a failed attack queued and retry. All cells share one fresh Cell.garbage_group id, so later recycling always pulls in the whole piece.
 pub fn spawnGarbage(target: *s.Board, rows: u8, width: u8, anchor_col: u8) bool {
     const clamped_rows = @min(rows, c.SPAWN_ROWS);
     const start_col = if (anchor_col + width > c.COLS) c.COLS - width else anchor_col;
@@ -61,31 +31,14 @@ pub fn spawnGarbage(target: *s.Board, rows: u8, width: u8, anchor_col: u8) bool 
     return true;
 }
 
-// Garbage queueing: rather than spawning the instant a combo/chain is
-// detected (which used to let it fall mid-cascade, and let a multi-step
-// chain dribble out several separate blocks as it grew), every attack now
-// waits in a queue and only actually lands via spawnGarbage once the
-// relevant board is idle -- see sim.checkMatches (the only caller of
-// queueChainGarbage/queueComboGarbage) and main.zig (which drives
-// resolveChainEnd/releaseIncomingGarbage once per frame for both boards).
-
-// Records what a still-ongoing chain on `self` would currently send,
-// overwriting whatever an earlier step in the SAME chain recorded -- a x4
-// chain should hand over one block sized by x4 alone once it concludes, not
-// the sum of what x2/x3/x4 would each have sent on their own. See
-// resolveChainEnd for where this actually gets sent.
+// Overwrites whatever an earlier step in the SAME chain recorded -- a x4
+// chain hands over one block sized by x4 alone once it concludes, not the sum of what x2/x3/x4 would each have sent. See resolveChainEnd for where this gets sent.
 pub fn queueChainGarbage(self: *s.Board, rows: u8, width: u8, anchor_col: u8) void {
     self.chain_pending_garbage = .{ .rows = rows, .width = width, .anchor_col = anchor_col };
 }
 
-// Queues a single, already-complete attack (a combo, or a chain's final
-// sealed attack from resolveChainEnd below) into `target`'s own incoming
-// queue, to actually land once `target` itself goes idle -- see
-// releaseIncomingGarbage. Silently dropped if the queue is somehow already
-// full (as generous as it is, that would take many simultaneous attacks
-// piling up while target's board stays busy the whole time) -- missing one
-// attack under such an extreme pile-up is far less disruptive than crashing
-// or blocking every other attack behind it.
+// Queues a single, already-complete attack into `target`'s incoming queue,
+// to land once `target` goes idle -- see releaseIncomingGarbage. Silently dropped if the queue is already full; missing one attack beats crashing or blocking every other attack behind it.
 pub fn queueComboGarbage(target: *s.Board, rows: u8, width: u8, anchor_col: u8) void {
     for (&target.incoming_garbage) |*slot| {
         if (slot.* == null) {
@@ -95,15 +48,8 @@ pub fn queueComboGarbage(target: *s.Board, rows: u8, width: u8, anchor_col: u8) 
     }
 }
 
-// Called once per frame per board (see main.zig) -- seals and hands off
-// `self`'s currently-pending chain garbage (if any) to `opponent` the
-// instant `self` goes idle, i.e. its chain has genuinely concluded (mirrors
-// the chain-reset check this replaces: chain only resets once the board is
-// fully idle, so a chain still cascading through further steps never gets
-// cut short here). Rule 1 (garbage never falls mid-match/chain) is enforced
-// on the *receiving* side instead, by releaseIncomingGarbage below -- sealing
-// it here only decides the final size and hands it off, it doesn't spawn
-// anything on `opponent` directly.
+// Called once per frame per board -- seals and hands off `self`'s pending
+// chain garbage to `opponent` once `self` goes idle (chain genuinely concluded). Rule 1 (garbage never falls mid-match/chain) is enforced on the receiving side instead, by releaseIncomingGarbage below.
 pub fn resolveChainEnd(self: *s.Board, opponent: *s.Board) void {
     if (self.boardBusy()) return;
     if (self.chain_pending_garbage) |p| {
@@ -113,18 +59,14 @@ pub fn resolveChainEnd(self: *s.Board, opponent: *s.Board) void {
     self.chain = 0;
 }
 
-// Called once per frame per board (see main.zig) -- drains `self`'s own
-// incoming queue into the board via spawnGarbage, but only once `self` is
-// idle: rule 1 (garbage never falls mid-match/chain), enforced from the
-// receiving side so a big attack landing while the recipient is still deep
-// in their own cascade never interrupts it.
+// Called once per frame per board -- drains `self`'s incoming queue via
+// spawnGarbage, but only once `self` is idle (rule 1: receiving side enforces garbage never falls mid-match/chain).
 pub fn releaseIncomingGarbage(self: *s.Board) void {
     if (self.boardBusy()) return;
     for (&self.incoming_garbage) |*slot| {
         if (slot.*) |p| {
-            // Stays queued (retried next frame) if the spawn buffer doesn't
-            // have room for the whole piece yet -- see spawnGarbage's
-            // all-or-nothing placement.
+            // Stays queued (retried next frame) if the buffer has no room --
+            // see spawnGarbage's all-or-nothing placement.
             if (spawnGarbage(self, p.rows, p.width, p.anchor_col)) {
                 slot.* = null;
                 // Drives the character portrait's "punish" reaction (see
@@ -135,9 +77,6 @@ pub fn releaseIncomingGarbage(self: *s.Board) void {
     }
 }
 
-// True if (r, col) is one of the given component's own members -- used to
-// tell "internal support" (another cell of the same rigid body sitting
-// directly below) apart from a genuine obstacle or empty space.
 fn isComponentMember(members: []const [2]u8, r: u8, col: u8) bool {
     for (members) |pos| {
         if (pos[0] == r and pos[1] == col) return true;
@@ -145,11 +84,8 @@ fn isComponentMember(members: []const [2]u8, r: u8, col: u8) bool {
     return false;
 }
 
-// True if every member's cell directly below it is either another member of
-// this same component (internal support -- ignored) or genuinely empty; i.e.
-// the whole body has room to advance one more row. False the instant *any*
-// member is blocked (by the board's edge or an occupied cell outside the
-// component), since the body moves as one rigid piece.
+// True unless every member has room to advance one row (internal support from
+// another member is ignored) -- false the instant any member is blocked, since the whole rigid body moves together.
 fn garbageComponentBlocked(self: *s.Board, members: []const [2]u8) bool {
     for (members) |pos| {
         const r = pos[0];
@@ -162,11 +98,7 @@ fn garbageComponentBlocked(self: *s.Board, members: []const [2]u8) bool {
 }
 
 // Garbage falls and lands as one rigid connected body, not independently per
-// column like a real block -- see Cell.is_garbage -- so a piece touching
-// down anywhere in the group stops the whole group at once. Connectivity is
-// recomputed fresh every frame (rather than tracked via a persisted group
-// id) so it stays correct as pieces pop away via propagation or a
-// newly-landed clump merges with a neighboring one.
+// column -- connectivity is recomputed fresh every frame (not tracked via a persisted group id) so it stays correct as pieces pop away or clumps merge.
 pub fn updateGarbageGravity(self: *s.Board) void {
     var visited: [c.ROWS][c.COLS]bool = std.mem.zeroes([c.ROWS][c.COLS]bool);
     var stack: [c.ROWS * c.COLS][2]u8 = undefined;
@@ -247,9 +179,8 @@ pub fn updateGarbageGravity(self: *s.Board) void {
                 continue;
             }
 
-            // Already falling: advance the shared fall_off in lockstep --
-            // every member is guaranteed to already agree on it, since the
-            // whole body only ever moves together.
+            // Already falling: advance the shared fall_off in lockstep -- every
+            // member is guaranteed to already agree on it, since the body only ever moves together.
             const new_fall_off = self.cellAt(body[0][0], body[0][1]).fall_off - c.FALL_SPEED;
             if (new_fall_off > 0) {
                 for (body) |pos| self.cellAt(pos[0], pos[1]).fall_off = new_fall_off;

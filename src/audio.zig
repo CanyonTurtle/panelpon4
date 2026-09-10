@@ -1,11 +1,8 @@
 const builtin = @import("builtin");
 const w4 = @import("wasm4.zig");
 
-// Guarded on builtin.is_test rather than left to call the real extern "env"
-// host functions during tests: those are WASM4 imports with no host to
-// resolve them when zig test runs natively, and since is_test is
-// comptime-known, this branch is fully eliminated (zero cost) in the real
-// cart build.
+// Guarded on builtin.is_test since these are extern "env" WASM4 host calls
+// with nothing to link against when zig test runs natively.
 pub fn playPopSound(multiplier: u8) void {
     if (builtin.is_test) return;
     const freq = 220 + @as(u32, multiplier) * 40;

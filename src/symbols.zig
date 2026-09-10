@@ -1,12 +1,10 @@
 // Pixel-art symbols drawn on top of each block color, so shapes stay
-// distinguishable even without color. See render.zig's SYMBOLS pairing
-// comment for which symbol goes with which color.
+// distinguishable without color. See SYMBOLS below for the color pairing.
 
 pub const SYMBOL_SIZE: usize = 11; // same parity as render_cells.BLOCK_SIZE -> perfectly centered, no remainder
 
-// Inset a full pixel from every edge (unlike the original design, which
-// touched column 0/10 at its widest row) so it doesn't touch the block's
-// border now that BLOCK_SIZE == SYMBOL_SIZE leaves no padding of its own.
+// Inset a full pixel from every edge so it doesn't touch the block's border,
+// since BLOCK_SIZE == SYMBOL_SIZE leaves no padding of its own.
 pub const SYM_CIRCLE = [SYMBOL_SIZE][]const u8{
     "...........",
     "....###....",
@@ -35,10 +33,8 @@ pub const SYM_TRIANGLE = [SYMBOL_SIZE][]const u8{
     "...........",
     "...........",
 };
-// Inset a full pixel from every edge (unlike the original design, which
-// touched row 0/10 at its top/bottom point and column 0/10 at its widest
-// row) so it doesn't touch the block's border now that BLOCK_SIZE ==
-// SYMBOL_SIZE leaves no padding of its own.
+// Inset a full pixel from every edge so it doesn't touch the block's border,
+// since BLOCK_SIZE == SYMBOL_SIZE leaves no padding of its own.
 pub const SYM_DIAMOND = [SYMBOL_SIZE][]const u8{
     "...........",
     ".....#.....",
@@ -66,10 +62,8 @@ pub const SYM_HEART = [SYMBOL_SIZE][]const u8{
     ".....#.....",
     "...........",
 };
-// The tips of all 4 arms trimmed by a pixel (unlike the original design,
-// which touched row 0/10 at the top/bottom arm tip and column 0/10 at the
-// crossbar's full-width row) so it doesn't touch the block's border now
-// that BLOCK_SIZE == SYMBOL_SIZE leaves no padding of its own.
+// The tips of all 4 arms trimmed by a pixel so it doesn't touch the block's
+// border, since BLOCK_SIZE == SYMBOL_SIZE leaves no padding of its own.
 pub const SYM_STAR = [SYMBOL_SIZE][]const u8{
     "...........",
     ".....#.....",
@@ -83,21 +77,12 @@ pub const SYM_STAR = [SYMBOL_SIZE][]const u8{
     ".....#.....",
     "...........",
 };
-// Colors 0-2 are the solid hues (red, teal, yellow). Colors 3-4 are dithered
-// checkerboard blends of two adjacent hues -- red+teal reads as purple, and
-// teal+yellow reads as green -- giving 5 distinguishable block colors out of
-// only 3 real hues (WASM-4's palette has just 4 slots total, one of which is
-// the background). Symbols follow the requested pairing: heart/red,
-// triangle/teal, star/yellow, diamond/purple, circle/green.
+// Colors 0-2 are the solid hues (red, teal, yellow); 3-4 are dithered blends
+// (red+teal=purple, teal+yellow=green), giving 5 colors from 3 real hues.
 pub const SYMBOLS = [5][SYMBOL_SIZE][]const u8{ SYM_HEART, SYM_TRIANGLE, SYM_STAR, SYM_DIAMOND, SYM_CIRCLE };
 
-// Tiny 3x3 analogs of the symbols above, for render_cpu.zig's micro-scale
-// board -- there's no room for the full 11x11 designs at that size, so
-// these are abstracted down to their simplest recognizable silhouette
-// (heart's twin-lobe-over-point, triangle's apex-over-base, star's
-// four-point cross, diamond's hollow point-outline, circle's hollow ring)
-// while keeping each one a visually distinct bit pattern from the others.
-// Same color pairing/order as SYMBOLS.
+// Tiny 3x3 analogs for render_cpu.zig's micro board -- abstracted down to
+// each symbol's simplest recognizable silhouette. Same order as SYMBOLS.
 pub const MICRO_SYMBOL_SIZE: usize = 3;
 pub const MICRO_SYM_HEART = [MICRO_SYMBOL_SIZE][]const u8{
     "#.#",

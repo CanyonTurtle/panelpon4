@@ -41,7 +41,9 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
 
-    const run_lint = b.addSystemCommand(&.{ "bash", "tools/check-line-counts.sh" });
-    const lint_step = b.step("lint", "Check file line counts");
-    lint_step.dependOn(&run_lint.step);
+    const run_line_count_lint = b.addSystemCommand(&.{ "bash", "tools/check-line-counts.sh" });
+    const run_comment_length_lint = b.addSystemCommand(&.{ "bash", "tools/check-comment-lengths.sh" });
+    const lint_step = b.step("lint", "Check file line counts and comment lengths");
+    lint_step.dependOn(&run_line_count_lint.step);
+    lint_step.dependOn(&run_comment_length_lint.step);
 }

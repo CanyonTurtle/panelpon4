@@ -1,9 +1,5 @@
-// A slow-drifting decorative background for the title/setup menu screens
-// (see render.drawTitleScreen/drawSetupScreen): faint block-colored
-// squares scrolling diagonally, wrapping seamlessly at the screen edge.
-// Purely cosmetic -- the particle layout is generated once at compile time
-// from a fixed seed, entirely independent of any gameplay RNG stream (see
-// board.zig's shared row sequence), since nothing ever reads it back.
+// Decorative drifting background for title/setup screens; purely cosmetic,
+// so its particle layout is fixed at compile time, not gameplay RNG.
 
 const w4 = @import("wasm4.zig");
 const s = @import("state.zig");
@@ -21,10 +17,8 @@ const DRIFT_FRAMES_PER_PX: i32 = 3;
 
 const Particle = struct { x: i32, y: i32, hue: u8 };
 
-// A fixed, comptime-shuffled layout (same trick as render_badge.zig's own
-// checkerboard bitmap) -- deterministic and free of any runtime RNG
-// dependency, since this never needs to look different across sessions,
-// only spread out and varied-looking within one.
+// Comptime-shuffled layout (same trick as render_badge.zig's checkerboard) --
+// deterministic since it only needs to look varied, not differ per session.
 const particles: [NUM_PARTICLES]Particle = blk: {
     @setEvalBranchQuota(10_000);
     var list: [NUM_PARTICLES]Particle = undefined;
@@ -47,9 +41,8 @@ const particles: [NUM_PARTICLES]Particle = blk: {
     break :blk list;
 };
 
-// A single faint speckled square -- a sparse dither (half the pixels only),
-// not a solid fill, so it reads as a dim background detail rather than
-// competing with foreground UI drawn in the same hues.
+// A sparse dither (half the pixels), not a solid fill, so this reads as a
+// dim background detail instead of competing with foreground UI hues.
 fn drawParticle(x: i32, y: i32, hue: u8) void {
     var dy: i32 = 0;
     while (dy < PARTICLE_SIZE) : (dy += 1) {

@@ -1,11 +1,5 @@
-// The match-over overlays (drawGameOver/drawStoryGameOver) and the "3 2 1
-// START" countdown overlay. Split out of render_screens.zig (which keeps
-// the pre-game menu/setup screens) to keep that file under the project's
-// ~500-line-per-file guideline -- render.zig re-exports drawGameOver/
-// drawCountdown below alongside render_screens.zig's own re-exports, so
-// main.zig's call sites are unaffected. Imports render_screens.zig back for
-// drawPanelBorder (shared chrome with the title/mode-select/setup screens)
-// and render.zig for mainCharacter/miniCharacter.
+// Match-over overlays and the "3 2 1 START" countdown, split out of
+// render_screens.zig; render.zig re-exports these.
 
 const std = @import("std");
 const c = @import("constants.zig");
@@ -16,13 +10,8 @@ const game_modes = @import("game_modes.zig");
 const screens = @import("render_screens.zig");
 const render = @import("render.zig");
 
-// Shared by drawGameOver's two branches below: both characters stay visible
-// through the transition, whichever won celebrating on the right and the
-// loser wincing on the left (a draw shows both idle, since neither actually
-// won or lost) -- `won` is from the *rendering* main side's own perspective
-// (see render()'s own mainBoard/mainCharacter), not always state.player, so
-// this reads correctly for a versus peer whose own board is rendered as
-// `cpu` (see state.versus_render_swapped).
+// Winner celebrates, loser winces (idle on a draw). `won` is from the main
+// side's rendering perspective, not always state.player.
 fn drawGameOverPortraits(x: i32, y: i32, w: i32, won: ?bool) void {
     const frame = rchar.currentFrame();
     const main_state: rchar.CharState = if (won) |w_| (if (w_) .win else .punish) else .normal;
@@ -31,21 +20,13 @@ fn drawGameOverPortraits(x: i32, y: i32, w: i32, won: ?bool) void {
     rchar.draw(x + w - rchar.W - 4, y + 4, render.miniCharacter(), mini_state, frame);
 }
 
-// Only ever shown once the closing wipe (state.closing_timer, see
-// board.beginClosing) has finished popping every row -- see main.zig, which
-// gates the call on that -- so the loss reads as "board clears, then the
-// verdict appears", not both at once. Story mode (see state.GameMode) plays
-// single-game stages rather than a best-of-N series, and has its own
-// stage-clear/game-over/story-clear text instead of a running series score
-// -- see drawStoryGameOver below, which this defers to entirely.
+// Only called once the closing wipe finishes popping every row. Story mode
+// defers entirely to drawStoryGameOver below instead of a series score.
 pub fn drawGameOver() void {
     if (s.game_mode == .story) return drawStoryGameOver();
 
-    // "YOU WIN"/"YOU LOSE" is inherently a *perspective* -- versus mode's
-    // own main side isn't always state.player (see state.
-    // versus_render_swapped/render()'s own mainBoard), so this reads winner
-    // against whichever Winner value the main side actually corresponds to,
-    // not always .player.
+    // Versus mode's main side isn't always state.player -- see
+    // state.versus_render_swapped -- so compare against main_side, not .player.
     const main_side: s.Winner = if (s.versus_render_swapped) .cpu else .player;
     const text: []const u8 = switch (s.winner) {
         .draw => "DRAW",
@@ -84,13 +65,8 @@ pub fn drawGameOver() void {
     }
 }
 
-// Story mode's own match-over overlay: no running series score (a stage is
-// one game, not a best-of-N series -- see main.zig), just this stage's own
-// outcome, the run's own game-over tally on a loss, and (once the final
-// stage actually clears) whether this run just earned the X Hard reveal
-// (see game_modes.maybeRevealXhard, called from main.zig the instant the
-// final stage's win is detected -- so by the time this ever renders, .
-// xhard_revealed already reflects it if this run just earned it).
+// One stage's outcome plus the run's game-over tally, not a series score.
+// xhard_revealed is already set (game_modes.maybeRevealXhard) by render time.
 fn drawStoryGameOver() void {
     const won = s.winner == .player;
     const cleared_run = won and s.story_stage + 1 >= game_modes.STORY_STAGES;
@@ -130,12 +106,8 @@ fn drawStoryGameOver() void {
     }
 }
 
-// "3 2 1 START" shown once per match, right after resetGame -- see
-// state.countdown_timer (which this turns back into "which stage, how far
-// into it") and board.beginCountdown, the only place that gets set. "3",
-// "2", "1" each rise a couple pixels then hold steady for about a second;
-// "START" rises the same way but then blinks a few times instead of holding
-// steady.
+// "3 2 1 START" shown once per match (see state.countdown_timer,
+// board.beginCountdown). Numbers rise then hold; START rises then blinks.
 pub fn drawCountdown() void {
     const elapsed = c.COUNTDOWN_TOTAL_FRAMES - s.countdown_timer;
 
@@ -156,9 +128,6 @@ pub fn drawCountdown() void {
         is_start = true;
     }
 
-    // Eases up from a couple pixels below its resting spot, then either
-    // holds there steady (numbers) or blinks a few times (START) -- see
-    // this function's own doc comment.
     var visible = true;
     var rise_offset: i32 = 0;
     if (stage_elapsed < c.COUNTDOWN_RISE_FRAMES) {

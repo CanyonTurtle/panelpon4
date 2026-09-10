@@ -1,13 +1,5 @@
-// Debug-only helpers for scripted testing: setting up exact board scenarios
-// and reading back cell/chain state from outside the cart, for use by
-// tools/wasm4-harness.js (screenshots, frame-by-frame scenario scripts).
-// Every function takes a `board: u32` selector (0 = player, 1 = anything
-// else = cpu) so a script can set up both sides of a vs-CPU scenario.
-//
-// These are plain `pub fn`s, not `export fn`s -- main.zig conditionally
-// exports them as WASM exports only in Debug builds (see the comptime block
-// there), so a release cart (`zig build --release=small`) never gains this
-// surface and still exports only start/update.
+// Debug-only board-scenario helpers for tools/wasm4-harness.js -- plain `pub
+// fn`s; main.zig exports them as WASM only in Debug builds.
 
 const s = @import("state.zig");
 
@@ -61,9 +53,8 @@ pub fn getCellInfo(board: u32, logical_row: u32, col: u32) callconv(.c) u32 {
     return v;
 }
 
-// state.Winner's ordinal (none=0, player=1, cpu=2, draw=3) -- lets a script
-// confirm a vs-CPU match actually resolved, and which way, without having to
-// infer it from rendered text.
+// state.Winner's ordinal -- lets a script confirm a match's outcome without
+// reading rendered text.
 pub fn getWinner() callconv(.c) u32 {
     return @intFromEnum(s.winner);
 }
@@ -78,20 +69,14 @@ pub fn getScrollPx(board: u32) callconv(.c) u32 {
     return boardFor(board).scroll_px;
 }
 
-// The CPU difficulty currently set (see state.difficulty) -- lets a script
-// confirm the title screen's left/right adjustment actually took effect
-// without having to infer it from rendered text (the harness doesn't render
-// real font glyphs -- see tools/wasm4-harness.js's doText).
+// Lets a script confirm the title screen's difficulty adjustment took effect
+// without reading rendered text (the harness doesn't render real glyphs).
 pub fn getDifficulty() callconv(.c) u32 {
     return s.difficulty;
 }
 
-// Sets state.difficulty directly, bypassing the title screen's left/right
-// adjustment -- lets a script compare CPU behavior across levels without
-// spending a different number of title-screen frames per level first (each
-// of which advances the player's own RNG stream -- see main.zig -- and so
-// would otherwise skew the player board's row generation differently per
-// level, confounding any side-by-side comparison).
+// Bypasses the title screen's adjustment so a script can compare CPU levels
+// without skewing the player's RNG via a different number of title frames.
 pub fn setDifficulty(level: u32) callconv(.c) void {
     s.difficulty = @intCast(level);
 }

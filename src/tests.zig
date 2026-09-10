@@ -1,10 +1,5 @@
-// Root file for `zig build test`. Deliberately does NOT import main.zig:
-// main.zig's `export fn start/update` are always fully compiled (exports are
-// never tree-shaken), and they reach into render.zig's WASM4 draw calls,
-// which are extern "env" host functions with nothing to link against when
-// running natively. Importing only the pure-logic modules below keeps this
-// test binary free of that dependency -- see input.zig/render.zig's module
-// comments for why those two aren't included here.
+// Root file for `zig build test`. Skips main.zig/input.zig/render.zig --
+// those reach WASM4 extern "env" host calls with nothing to link natively.
 test {
     _ = @import("state.zig");
     _ = @import("board.zig");
