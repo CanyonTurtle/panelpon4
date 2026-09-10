@@ -5,6 +5,7 @@ const std = @import("std");
 const testing = std.testing;
 const c = @import("constants.zig");
 const s = @import("state.zig");
+const fx = @import("state_fx.zig");
 const sim = @import("sim.zig");
 const garbage = @import("sim_garbage.zig");
 
@@ -221,7 +222,7 @@ test "a CPU-side match spawns its popup in the micro board's own coordinate syst
     _ = sim.checkMatches(&s.cpu, &opp, no_settled);
 
     try testing.expectEqualStrings("4", activePopupLabel(&s.cpu).?);
-    var popup: s.MatchPopup = undefined;
+    var popup: fx.MatchPopup = undefined;
     for (s.cpu.match_popups) |p| {
         if (p.active) {
             popup = p;

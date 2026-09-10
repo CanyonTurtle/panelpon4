@@ -4,6 +4,7 @@
 
 const c = @import("constants.zig");
 const s = @import("state.zig");
+const row_cache = @import("state_row_cache.zig");
 
 // Frames needed per pixel of rise -- larger is slower. Starts at a quarter
 // of the original pace (32 vs. the old 8) and eases toward the floor much
@@ -34,11 +35,11 @@ pub fn riseSpeedFramesPerPixel(score: u32) u32 {
 // anything board-specific. That's what makes rowForIndex's result
 // reproducible purely from an index (see its own doc comment).
 fn sharedRandRange(n: u32) u32 {
-    var x = s.shared_row_rng_state;
+    var x = row_cache.shared_row_rng_state;
     x ^= x << 13;
     x ^= x >> 17;
     x ^= x << 5;
-    s.shared_row_rng_state = x;
+    row_cache.shared_row_rng_state = x;
     return x % n;
 }
 
@@ -82,7 +83,7 @@ fn pickRowColors(above1: ?[c.COLS]u8, above2: ?[c.COLS]u8) [c.COLS]u8 {
 // shared_row_rng_state itself is deliberately left untouched here -- see its
 // own doc comment in state.zig for why.
 pub fn resetSharedRows() void {
-    s.shared_rows_count = 0;
+    row_cache.shared_rows_count = 0;
 }
 
 // Advances the shared RNG stream by one step without consuming a row --
@@ -106,13 +107,13 @@ pub fn perturbSharedRng() void {
 // which board reached N first -- a fair, reproducible comparison of how
 // each side handles the same material.
 fn rowForIndex(index: u32) [c.COLS]u8 {
-    if (index < s.shared_rows_count) return s.shared_rows[index % s.SHARED_ROW_CACHE];
+    if (index < row_cache.shared_rows_count) return row_cache.shared_rows[index % row_cache.SHARED_ROW_CACHE];
 
-    const above1: ?[c.COLS]u8 = if (index >= 1) s.shared_rows[(index - 1) % s.SHARED_ROW_CACHE] else null;
-    const above2: ?[c.COLS]u8 = if (index >= 2) s.shared_rows[(index - 2) % s.SHARED_ROW_CACHE] else null;
+    const above1: ?[c.COLS]u8 = if (index >= 1) row_cache.shared_rows[(index - 1) % row_cache.SHARED_ROW_CACHE] else null;
+    const above2: ?[c.COLS]u8 = if (index >= 2) row_cache.shared_rows[(index - 2) % row_cache.SHARED_ROW_CACHE] else null;
     const colors = pickRowColors(above1, above2);
-    s.shared_rows[index % s.SHARED_ROW_CACHE] = colors;
-    s.shared_rows_count = index + 1;
+    row_cache.shared_rows[index % row_cache.SHARED_ROW_CACHE] = colors;
+    row_cache.shared_rows_count = index + 1;
     return colors;
 }
 
@@ -359,7 +360,7 @@ test "doRise shifts top and keeps the cursor tracking the same physical row" {
 test "the shared row sequence never produces a 3-in-a-row horizontally" {
     var b: s.Board = .{};
     resetSharedRows();
-    s.shared_row_rng_state = 12345;
+    row_cache.shared_row_rng_state = 12345;
     for (0..50) |i| {
         writeNextRow(&b, 0);
         var run: u8 = 1;
@@ -381,7 +382,7 @@ test "the shared row sequence gives the same row to both boards, whichever reach
     var a: s.Board = .{};
     var b: s.Board = .{};
     resetSharedRows();
-    s.shared_row_rng_state = 999;
+    row_cache.shared_row_rng_state = 999;
 
     // `b` reaches index 0 first (generating and caching it); `a` then
     // reaches the SAME index later and must see the identical result, not a

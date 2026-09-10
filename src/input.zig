@@ -14,6 +14,7 @@
 
 const c = @import("constants.zig");
 const s = @import("state.zig");
+const touch_state = @import("state_touch.zig");
 const w4 = @import("wasm4.zig");
 const sim = @import("sim.zig");
 
@@ -142,19 +143,19 @@ pub fn canSwapAt(board: *s.Board, row: u8, col: u8) bool {
 pub fn updateTouch() void {
     const held = w4.MOUSE_BUTTONS.* & w4.MOUSE_LEFT != 0;
     if (!held) {
-        s.touch_active = false;
+        touch_state.touch_active = false;
         return;
     }
 
     const mx: i32 = w4.MOUSE_X.*;
     const my: i32 = w4.MOUSE_Y.*;
 
-    if (!s.touch_active) {
-        s.touch_active = true;
-        s.cursor_hidden = true;
-        s.touch_swipe_origin_x = mx;
-        s.touch_swipe_origin_y = my;
-        s.touch_pending_dir = 0;
+    if (!touch_state.touch_active) {
+        touch_state.touch_active = true;
+        touch_state.cursor_hidden = true;
+        touch_state.touch_swipe_origin_x = mx;
+        touch_state.touch_swipe_origin_y = my;
+        touch_state.touch_pending_dir = 0;
 
         // Re-anchor to wherever this new touch landed -- clamped onto the
         // board so a finger landing just outside its exact pixels still
@@ -165,23 +166,23 @@ pub fn updateTouch() void {
         var row = @divTrunc(my - c.BOARD_Y + @as(i32, @intCast(s.player.scroll_px)), c.TILE);
         if (row < 0) row = 0;
         if (row > c.VISIBLE_ROWS - 1) row = c.VISIBLE_ROWS - 1;
-        s.touch_anchor_col = @intCast(col);
-        s.touch_anchor_row = @intCast(row);
+        touch_state.touch_anchor_col = @intCast(col);
+        touch_state.touch_anchor_row = @intCast(row);
     }
 
-    const dx = mx - s.touch_swipe_origin_x;
-    const dy = my - s.touch_swipe_origin_y;
+    const dx = mx - touch_state.touch_swipe_origin_x;
+    const dy = my - touch_state.touch_swipe_origin_y;
     const adx = @abs(dx);
     const ady = @abs(dy);
     if (@max(adx, ady) >= TOUCH_SWIPE_THRESHOLD) {
         // Reset the measurement origin here (not just on touch-down) so one
         // long continuous drag keeps generating swipes as it travels,
         // rather than needing separate lift-and-touch gestures each time.
-        s.touch_swipe_origin_x = mx;
-        s.touch_swipe_origin_y = my;
+        touch_state.touch_swipe_origin_x = mx;
+        touch_state.touch_swipe_origin_y = my;
         // Newest swipe always wins over whatever was still pending -- only
         // ever one buffered at a time.
-        s.touch_pending_dir = if (adx > ady)
+        touch_state.touch_pending_dir = if (adx > ady)
             (if (dx > 0) w4.BUTTON_RIGHT else w4.BUTTON_LEFT)
         else
             (if (dy > 0) w4.BUTTON_DOWN else w4.BUTTON_UP);
@@ -197,41 +198,41 @@ pub fn updateTouch() void {
 // fastest rate the swap animation allows rather than dropping the ones that
 // arrive before the last one finishes.
 fn applyPendingTouchSwipe() void {
-    switch (s.touch_pending_dir) {
+    switch (touch_state.touch_pending_dir) {
         w4.BUTTON_UP => {
             s.cursor_idle_frames = 0;
-            if (s.touch_anchor_row > 0) s.touch_anchor_row -= 1;
-            s.touch_pending_dir = 0;
+            if (touch_state.touch_anchor_row > 0) touch_state.touch_anchor_row -= 1;
+            touch_state.touch_pending_dir = 0;
         },
         w4.BUTTON_DOWN => {
             s.cursor_idle_frames = 0;
-            if (s.touch_anchor_row < c.VISIBLE_ROWS - 1) s.touch_anchor_row += 1;
-            s.touch_pending_dir = 0;
+            if (touch_state.touch_anchor_row < c.VISIBLE_ROWS - 1) touch_state.touch_anchor_row += 1;
+            touch_state.touch_pending_dir = 0;
         },
         w4.BUTTON_LEFT => {
-            if (s.touch_anchor_col == 0) {
-                s.touch_pending_dir = 0; // no neighbor to swap with -- drop it, not stuck retrying forever
+            if (touch_state.touch_anchor_col == 0) {
+                touch_state.touch_pending_dir = 0; // no neighbor to swap with -- drop it, not stuck retrying forever
                 return;
             }
-            const target = s.touch_anchor_col - 1;
-            if (!canSwapAt(&s.player, s.touch_anchor_row, target)) return; // keep pending, retry next frame
-            s.player.cursor_row = s.touch_anchor_row;
+            const target = touch_state.touch_anchor_col - 1;
+            if (!canSwapAt(&s.player, touch_state.touch_anchor_row, target)) return; // keep pending, retry next frame
+            s.player.cursor_row = touch_state.touch_anchor_row;
             s.player.cursor_col = target;
             sim.trySwap(&s.player);
-            s.touch_anchor_col = target; // the touched block moved left with it
-            s.touch_pending_dir = 0;
+            touch_state.touch_anchor_col = target; // the touched block moved left with it
+            touch_state.touch_pending_dir = 0;
         },
         w4.BUTTON_RIGHT => {
-            if (s.touch_anchor_col >= c.COLS - 1) {
-                s.touch_pending_dir = 0;
+            if (touch_state.touch_anchor_col >= c.COLS - 1) {
+                touch_state.touch_pending_dir = 0;
                 return;
             }
-            if (!canSwapAt(&s.player, s.touch_anchor_row, s.touch_anchor_col)) return;
-            s.player.cursor_row = s.touch_anchor_row;
-            s.player.cursor_col = s.touch_anchor_col;
+            if (!canSwapAt(&s.player, touch_state.touch_anchor_row, touch_state.touch_anchor_col)) return;
+            s.player.cursor_row = touch_state.touch_anchor_row;
+            s.player.cursor_col = touch_state.touch_anchor_col;
             sim.trySwap(&s.player);
-            s.touch_anchor_col += 1; // the touched block moved right with it
-            s.touch_pending_dir = 0;
+            touch_state.touch_anchor_col += 1; // the touched block moved right with it
+            touch_state.touch_pending_dir = 0;
         },
         else => {},
     }

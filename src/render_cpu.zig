@@ -68,8 +68,9 @@ fn fillChecker(x: i32, y: i32, w: i32, h: i32, dc_a: u16, dc_b: u16, clip_top: i
 }
 
 // A real block color: a solid hue, or (colors 3-4) a checkerboard dither of
-// two adjacent hues -- same rule as render.drawColorRect. Garbage is a
-// muted background+teal checkerboard, same as render.drawGarbageRect.
+// two adjacent hues -- same rule as render_cells.zig's own drawColorRect.
+// Garbage is a muted background+teal checkerboard, same as
+// render.drawGarbageRect.
 fn fillCell(x: i32, y: i32, w: i32, h: i32, color: u8, is_garbage: bool, clip_top: i32, clip_bottom: i32) void {
     if (is_garbage) {
         fillChecker(x, y, w, h, DC_BG, HUE_DRAWCOLOR[GARBAGE_HUE], clip_top, clip_bottom);

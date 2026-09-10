@@ -1,50 +1,52 @@
-// All drawing: palette setup, the board/cursor/panel, and the title/game-over
-// screens. Not unit tested -- everything here bottoms out in WASM4's extern
-// draw calls, which only make sense under an actual WASM4 host.
+// Palette setup, the in-game board/cursor/frame/panel, and the render()
+// dispatcher. Not unit tested -- everything here bottoms out in WASM4's
+// extern draw calls, which only make sense under an actual WASM4 host.
 //
 // The player's board renders in full detail (bevel, symbols, dither,
 // linked-garbage bezel) at its normal size via drawBoard/drawCursor, always
 // on `s.player`. The CPU's board shares the exact same simulation but is
-// drawn at a simplified micro scale by the companion render_cpu.zig, split
-// out to keep this file under the project's ~500-line-per-file guideline.
+// drawn at a simplified micro scale by the companion render_cpu.zig. The
+// single-cell drawing primitives (color fills, dithering, per-CellState cell
+// drawers) live in render_cells.zig; the pre-game menu/setup screens live in
+// render_screens.zig; and the match-over overlays plus the countdown live in
+// the companion render_screens_game.zig -- all split out, along with
+// render_cpu.zig, to keep this file under the project's ~500-line-per-file
+// guideline. This file re-exports both screens files' public screen-drawing
+// functions below so main.zig's `render.drawXScreen()` call sites are
+// unaffected by that split.
 
 const std = @import("std");
 const c = @import("constants.zig");
 const s = @import("state.zig");
+const fx = @import("state_fx.zig");
+const touch_state = @import("state_touch.zig");
 const w4 = @import("wasm4.zig");
-const sym = @import("symbols.zig");
 const badge = @import("render_badge.zig");
 const render_cpu = @import("render_cpu.zig");
 const rgarbage = @import("render_garbage.zig");
-const bg = @import("render_bg.zig");
 const characters = @import("characters.zig");
 const rchar = @import("render_character.zig");
 const game_modes = @import("game_modes.zig");
+const cells = @import("render_cells.zig");
+const screens = @import("render_screens.zig");
+const screens_game = @import("render_screens_game.zig");
 
-// nibble values for DRAW_COLORS color1, one per palette slot (index+1)
-const DC_BG: u16 = 1;
-const HUE_DRAWCOLOR = [3]u16{ 2, 3, 4 };
+pub const drawTitleScreen = screens.drawTitleScreen;
+pub const drawModeSelectScreen = screens.drawModeSelectScreen;
+pub const drawVersusConfirmScreen = screens.drawVersusConfirmScreen;
+pub const drawSetupCharacterScreen = screens.drawSetupCharacterScreen;
+pub const drawSetupCpuRevealScreen = screens.drawSetupCpuRevealScreen;
+pub const drawSetupDifficultyScreen = screens.drawSetupDifficultyScreen;
+pub const drawStoryTierScreen = screens.drawStoryTierScreen;
+pub const drawGameOver = screens_game.drawGameOver;
+pub const drawCountdown = screens_game.drawCountdown;
 
 // Blocks have no border color of their own anymore: just a 1px background
-// corner-bevel (see BEVEL_RADIUS) and a 1px background gap between tiles
-// (see BLOCK_SIZE), plus a symbol drawn in the background color so shapes
-// stay distinguishable even without color.
-const FRAME_THICKNESS: i32 = 2;
+// corner-bevel and a 1px background gap between tiles (see
+// render_cells.BLOCK_SIZE), plus a symbol drawn in the background color so
+// shapes stay distinguishable even without color.
+pub const FRAME_THICKNESS: i32 = 2;
 const FRAME_RADIUS: i32 = 2;
-const BEVEL_RADIUS: i32 = 1;
-// Each block is drawn 1px smaller than its tile, flush with the tile's
-// top-left corner; the unused trailing row/column becomes the 1px gap to the
-// next tile, so gaps aren't doubled up between neighbors.
-const BLOCK_SIZE: i32 = c.TILE - 1;
-const SYMBOL_SIZE: i32 = sym.SYMBOL_SIZE; // same parity as BLOCK_SIZE -> perfectly centered, no remainder
-
-const DITHER_HUES = [2][2]u8{ .{ 0, 1 }, .{ 1, 2 } };
-
-fn ditherHues(color: u8) ?[2]u8 {
-    if (color < 3) return null;
-    return DITHER_HUES[color - 3];
-}
-
 
 pub fn setupPalette() void {
     w4.PALETTE[0] = 0x1a1c2c; // background
@@ -54,302 +56,9 @@ pub fn setupPalette() void {
 }
 
 pub fn clearBackground() void {
-    w4.DRAW_COLORS.* = DC_BG;
+    w4.DRAW_COLORS.* = cells.DC_BG;
     w4.Rect(0, 0, w4.SCREEN_SIZE, w4.SCREEN_SIZE);
 }
-
-// Fills a w x h rectangle with a block color: a solid hue, or a 1px
-// checkerboard dither blending two hues for colors 3-4.
-fn drawColorRect(x: i32, y: i32, w: i32, h: i32, color: u8) void {
-    if (w <= 0 or h <= 0) return;
-    if (ditherHues(color)) |hues| {
-        var dy: i32 = 0;
-        while (dy < h) : (dy += 1) {
-            var dx: i32 = 0;
-            while (dx < w) : (dx += 1) {
-                const hue = if (@mod(dx + dy, 2) == 0) hues[0] else hues[1];
-                w4.DRAW_COLORS.* = HUE_DRAWCOLOR[hue];
-                w4.Rect(x + dx, y + dy, 1, 1);
-            }
-        }
-    } else {
-        w4.DRAW_COLORS.* = HUE_DRAWCOLOR[color];
-        w4.Rect(x, y, @intCast(w), @intCast(h));
-    }
-}
-
-// Traces a 1px rectangle outline as a checkerboard dither of two hues,
-// pixel by pixel (an outline can't be dithered via a single rect() call the
-// way a fill can, since its DRAW_COLORS border nibble is one solid color).
-fn drawDitheredRectOutline(x: i32, y: i32, w: i32, h: i32, hues: [2]u8) void {
-    if (w <= 0 or h <= 0) return;
-    var i: i32 = 0;
-    while (i < w) : (i += 1) {
-        plotDithered(x + i, y, hues);
-        plotDithered(x + i, y + h - 1, hues);
-    }
-    var j: i32 = 0;
-    while (j < h) : (j += 1) {
-        plotDithered(x, y + j, hues);
-        plotDithered(x + w - 1, y + j, hues);
-    }
-}
-
-fn plotDithered(x: i32, y: i32, hues: [2]u8) void {
-    const hue = if (@mod(x + y, 2) == 0) hues[0] else hues[1];
-    w4.DRAW_COLORS.* = HUE_DRAWCOLOR[hue];
-    w4.Rect(x, y, 1, 1);
-}
-
-fn drawHueSquareCentered(x: i32, y: i32, color: u8, size: i32) void {
-    if (size <= 0) return;
-    const off = @divTrunc(c.TILE - size, 2);
-    drawColorRect(x + off, y + off, size, size, color);
-}
-
-fn drawSymbolFor(color: u8, x: i32, y: i32) void {
-    w4.DRAW_COLORS.* = DC_BG;
-    const rows = sym.SYMBOLS[color];
-    for (rows, 0..) |row, ry| {
-        for (row, 0..) |ch, rx| {
-            if (ch == '#') {
-                w4.Rect(x + @as(i32, @intCast(rx)), y + @as(i32, @intCast(ry)), 1, 1);
-            }
-        }
-    }
-}
-
-// Like drawSymbolFor, but the glyph itself is vertically compressed into
-// (SYMBOL_SIZE - squash) rows (simple nearest-row sampling) and the result
-// re-centered within the normal SYMBOL_SIZE-tall space -- the panic squish
-// (see PANIC_SQUISH_AMOUNT/drawNormalCell) squishes only the symbol, never
-// the block it's drawn on, so this leaves the block's own bevel/fill
-// completely untouched -- only the glyph inside it looks compressed.
-fn drawSymbolSquished(color: u8, x: i32, y: i32, squash: i32) void {
-    if (squash <= 0) {
-        drawSymbolFor(color, x, y);
-        return;
-    }
-    const new_h = SYMBOL_SIZE - squash;
-    if (new_h <= 0) return;
-    w4.DRAW_COLORS.* = DC_BG;
-    const rows = sym.SYMBOLS[color];
-    const y_off = @divTrunc(squash, 2);
-    var oy: i32 = 0;
-    while (oy < new_h) : (oy += 1) {
-        const src_row: usize = @intCast(@divTrunc(oy * SYMBOL_SIZE, new_h));
-        const row = rows[src_row];
-        for (row, 0..) |ch, rx| {
-            if (ch == '#') w4.Rect(x + @as(i32, @intCast(rx)), y + y_off + oy, 1, 1);
-        }
-    }
-}
-
-// Fills a w x h block and punches its 4 corner pixels to background color --
-// the same chamfer technique as the frame's rounded corners, just at a fixed
-// 1px radius -- giving a subtly rounded look instead of a hard square edge.
-fn drawBevelledBlock(x: i32, y: i32, w: i32, h: i32, color: u8) void {
-    drawColorRect(x, y, w, h, color);
-    if (w <= 2 * BEVEL_RADIUS or h <= 2 * BEVEL_RADIUS) return;
-    w4.DRAW_COLORS.* = DC_BG;
-    var dy: i32 = 0;
-    while (dy < BEVEL_RADIUS) : (dy += 1) {
-        var dx: i32 = 0;
-        while (dx < BEVEL_RADIUS) : (dx += 1) {
-            if (dx + dy < BEVEL_RADIUS) {
-                w4.Rect(x + dx, y + dy, 1, 1);
-                w4.Rect(x + w - 1 - dx, y + dy, 1, 1);
-                w4.Rect(x + dx, y + h - 1 - dy, 1, 1);
-                w4.Rect(x + w - 1 - dx, y + h - 1 - dy, 1, 1);
-            }
-        }
-    }
-}
-
-// sym_bounce nudges only the symbol glyph up/down, not the block underneath
-// it (see isColumnStressed/stressBounceOffset) -- keeps the block's own
-// position (and anything keyed to it, like the hidden row's dither overlay)
-// perfectly still even while a stressed column's symbols wobble in place.
-// squash instead vertically compresses only the symbol glyph itself (see
-// drawSymbolSquished/PANIC_SQUISH_AMOUNT) -- the block's own bevel/fill is
-// never touched by either one, only ever the symbol drawn on top of it.
-// Mutually exclusive with sym_bounce in practice (see drawBoard), so both
-// are never meaningfully nonzero at once.
-fn drawNormalCell(x: i32, y: i32, color: u8, sym_bounce: i32, squash: i32) void {
-    // Flush with the tile's top-left corner; the unused trailing 1px on the
-    // right/bottom becomes the gap to the next tile (see BLOCK_SIZE).
-    drawBevelledBlock(x, y, BLOCK_SIZE, BLOCK_SIZE, color);
-    const sym_off = @divTrunc(BLOCK_SIZE - SYMBOL_SIZE, 2);
-    drawSymbolSquished(color, x + sym_off, y + sym_off + sym_bounce, squash);
-}
-
-// A real matched block disappearing (see CellState.popping). Garbage never
-// uses this state -- a garbage cell pulled into the same event instead
-// recycles (see drawRecyclingCell below), which has no animation of its own.
-fn drawPoppingCell(x: i32, y: i32, color: u8, timer: i16, pre_pop_timer: i16) void {
-    if (pre_pop_timer > 0) {
-        // The whole group's shared pre-pop preamble (see Cell.pre_pop_timer)
-        // -- every member of the match is in this same phase simultaneously,
-        // not staggered like the pop cascade below: first a hard on/off
-        // blink every single frame (distinct from the size-wobble flash
-        // below, which stays visible the whole time), then a short steady
-        // pause looking perfectly normal -- a heads-up cue that this cell is
-        // about to pop, before the actual (staggered) pop cascade begins.
-        const elapsed = c.PRE_POP_TOTAL_FRAMES - pre_pop_timer;
-        if (elapsed < c.PRE_POP_BLINK_FRAMES) {
-            if (@mod(elapsed, 2) == 0) drawNormalCell(x, y, color, 0, 0);
-        } else {
-            drawNormalCell(x, y, color, 0, 0);
-        }
-        return;
-    }
-    const elapsed = c.POP_FRAMES - timer;
-    if (elapsed < 0) {
-        // Still waiting its turn in the pop cascade (see POP_STAGGER_FRAMES)
-        // -- render exactly like a settled block until then.
-        drawNormalCell(x, y, color, 0, 0);
-        return;
-    }
-    var size: i32 = BLOCK_SIZE;
-    if (elapsed < c.POP_FLASH_FRAMES) {
-        const puls: i32 = @intCast(@mod(elapsed, 8));
-        const delta: i32 = if (puls < 4) puls else 8 - puls;
-        size = BLOCK_SIZE - delta;
-    } else {
-        const shrink_elapsed = elapsed - c.POP_FLASH_FRAMES;
-        const shrink_total = c.POP_FRAMES - c.POP_FLASH_FRAMES;
-        const remain = shrink_total - shrink_elapsed;
-        size = @divTrunc(BLOCK_SIZE * remain, shrink_total);
-        if (size < 0) size = 0;
-    }
-    drawHueSquareCentered(x, y, color, size);
-}
-
-// A garbage cell being recycled (see CellState.recycling). Unlike a real
-// match's pop, there's no shrink/flash animation: a garbage cell in a
-// recycling group that's actually going to convert (see Cell.garbage_reveals
-// -- a clump taller than one row only ever converts its bottom-most row per
-// event, see sim.checkMatches) is revealed one at a time, with a delay
-// between each (its own staggered timer, same mechanism as the pop cascade
-// -- see POP_STAGGER_FRAMES), and the instant its own turn comes it just
-// hard-cuts to looking like a plain normal block and stays that way,
-// inactive, doing nothing further, until the whole group resolves (see
-// sim.simulate). A non-converting cell (the rest of a taller clump) never
-// reaches that reveal at all -- it just keeps looking like inert garbage
-// through its own staggered turn and beyond, having only ever played the
-// shared flash/pause preamble as a heads-up. Before its own turn (including
-// the pre-pop blink+pause preamble -- see PRE_POP_TOTAL_FRAMES), it still
-// looks like part of the not-yet-recycled garbage clump (see
-// render_garbage's isAttached, which keys off this same timer -- and
-// garbage_reveals -- to know when to stop treating it as attached).
-fn drawRecyclingCell(x: i32, y: i32, color: u8, timer: i16, edges: rgarbage.Edges, pre_pop_timer: i16, garbage_reveals: bool) void {
-    if (pre_pop_timer > 0) {
-        // The whole group's shared pre-pop preamble (see Cell.pre_pop_timer
-        // and drawPoppingCell above) -- blink (hard on/off every frame) then
-        // a short steady pause, both still showing the inert/attached
-        // garbage look; the actual reveal only happens once the preamble
-        // finishes and this cell's own staggered turn comes up.
-        const elapsed = c.PRE_POP_TOTAL_FRAMES - pre_pop_timer;
-        if (elapsed < c.PRE_POP_BLINK_FRAMES) {
-            if (@mod(elapsed, 2) == 0) rgarbage.drawLinked(x, y, edges);
-        } else {
-            rgarbage.drawLinked(x, y, edges);
-        }
-        return;
-    }
-    if (!garbage_reveals) {
-        // Purely cosmetic: this row isn't actually converting or clearing
-        // (see Cell.garbage_reveals), but it should still visibly read as
-        // being processed for the same span a genuine reveal would take --
-        // a flash (phase-inverted checkerboard, alternating with the normal
-        // look) rather than sitting there looking untouched while the rest
-        // of the group pops -- then back to its ordinary inert look once
-        // that span elapses, since it never actually resolves to anything
-        // else.
-        const elapsed = c.POP_FRAMES - timer;
-        if (elapsed < 0 or elapsed >= c.POP_FRAMES) {
-            rgarbage.drawLinked(x, y, edges);
-        } else if (@mod(elapsed, 8) < 4) {
-            rgarbage.drawLinkedFlash(x, y, edges);
-        } else {
-            rgarbage.drawLinked(x, y, edges);
-        }
-        return;
-    }
-    const elapsed = c.POP_FRAMES - timer;
-    if (elapsed < 0) {
-        rgarbage.drawLinked(x, y, edges);
-        return;
-    }
-    drawNormalCell(x, y, color, 0, 0);
-}
-
-fn drawLandingCell(x: i32, y: i32, color: u8, timer: i16, is_garbage: bool, edges: rgarbage.Edges) void {
-    const elapsed = c.LAND_FRAMES - timer;
-    const squash: i32 = if (elapsed < 3) (3 - @as(i32, elapsed)) * 2 else 0;
-    const height = BLOCK_SIZE - squash;
-    if (is_garbage) {
-        // A connected clump lands (and squash-bounces) in lockstep -- see
-        // sim.zig's group-based gravity -- so this stays a seamless slab
-        // through the bounce too, not just at rest.
-        const w: i32 = if (edges.right) BLOCK_SIZE + 1 else BLOCK_SIZE;
-        rgarbage.drawGarbageRect(x, y + squash, w, height);
-        w4.DRAW_COLORS.* = DC_BG;
-        if (!edges.up and !edges.left) w4.Rect(x, y + squash, 1, 1);
-        if (!edges.up and !edges.right) w4.Rect(x + w - 1, y + squash, 1, 1);
-        if (!edges.down and !edges.left) w4.Rect(x, y + squash + height - 1, 1, 1);
-        if (!edges.down and !edges.right) w4.Rect(x + w - 1, y + squash + height - 1, 1, 1);
-        return;
-    }
-    drawBevelledBlock(x, y + squash, BLOCK_SIZE, height, color);
-    if (squash == 0) {
-        const sym_off = @divTrunc(BLOCK_SIZE - SYMBOL_SIZE, 2);
-        drawSymbolFor(color, x + sym_off, y + sym_off);
-    }
-}
-
-fn drawSwappingCell(x: i32, y: i32, color: u8, timer: i16, dir: i8) void {
-    const offset: i32 = @as(i32, dir) * @divTrunc(c.TILE * @as(i32, timer), c.SWAP_FRAMES);
-    drawNormalCell(x + offset, y, color, 0, 0);
-}
-
-// A column with any content within this many rows of the ceiling (see
-// board.updateDangerTimer's game-over check, at logical row SPAWN_ROWS) is
-// close enough to the rise hazard that its settled blocks bounce in place as
-// a warning -- matching other Panel de Pon clients' more generous warning
-// zone (a few rows of headroom before the stack is actually touching the
-// top) now that the full 12-row board gives room for it, rather than only
-// reacting once a column is already touching the very top row.
-const STRESS_WARNING_ROWS: u8 = 3;
-
-// An explicit per-frame timing chart, not a plain linear triangle wave --
-// standard keyframe-animation practice for a bounce: hold longer on the
-// highest and second-highest positions (slow in/out at the top, like real
-// gravity briefly arresting upward motion) and spend fewer frames in the
-// quick transit through the lower positions, rather than moving at a
-// constant rate the whole way. Reads as a snappier, more deliberate hop
-// instead of a mechanical wobble.
-const BOUNCE_KEYFRAMES = [16]i32{ 0, 0, -1, -2, -2, -3, -3, -3, -3, -3, -3, -2, -2, -1, 0, 0 };
-
-fn isColumnStressed(b: *s.Board, col: u8) bool {
-    var lr: u8 = 0;
-    while (lr < STRESS_WARNING_ROWS) : (lr += 1) {
-        if (b.cellAt(c.SPAWN_ROWS + lr, col).state != .empty) return true;
-    }
-    return false;
-}
-
-fn stressBounceOffset() i32 {
-    return BOUNCE_KEYFRAMES[s.frame_count % BOUNCE_KEYFRAMES.len];
-}
-
-// How many pixels shorter a settled real block renders while the board's
-// own lose timer (Board.danger_timer) is actually running -- see
-// drawBoard's `panicking` check. A constant squash rather than another
-// animated bounce: the point is a plain, unmistakably different look from
-// the ordinary ambient stress bounce, read at a glance rather than timed
-// against.
-const PANIC_SQUISH_AMOUNT: i32 = 2;
 
 // The board's own visible area ends here vertically -- VISIBLE_ROWS*TILE no
 // longer happens to equal SCREEN_SIZE now that the board isn't always
@@ -376,12 +85,20 @@ pub fn closingWipedRows() u8 {
     return @intCast(@min(rows, c.RING_SIZE));
 }
 
+// How many pixels shorter a settled real block renders while the board's
+// own lose timer (Board.danger_timer) is actually running -- see
+// drawBoard's `panicking` check. A constant squash rather than another
+// animated bounce: the point is a plain, unmistakably different look from
+// the ordinary ambient stress bounce, read at a glance rather than timed
+// against.
+const PANIC_SQUISH_AMOUNT: i32 = 2;
+
 // Full-detail board rendering -- always `s.player`, at the normal board
 // position/scale. See render_cpu.zig for the CPU's simplified equivalent.
 fn drawBoard(b: *s.Board) void {
     var col_stressed: [c.COLS]bool = undefined;
-    for (0..c.COLS) |ci| col_stressed[ci] = isColumnStressed(b, @intCast(ci));
-    const bounce = stressBounceOffset();
+    for (0..c.COLS) |ci| col_stressed[ci] = cells.isColumnStressed(b, @intCast(ci));
+    const bounce = cells.stressBounceOffset();
     const wiped = closingWipedRows();
     // The lose timer (see board.updateDangerTimer) is a strictly more
     // urgent warning than the ordinary per-column stress bounce above --
@@ -416,20 +133,20 @@ fn drawBoard(b: *s.Board) void {
                     if (cell.is_garbage) {
                         rgarbage.drawLinked(x, base_y, rgarbage.edgesAt(b, lr, col));
                     } else if (panicking) {
-                        drawNormalCell(x, base_y, cell.color, 0, PANIC_SQUISH_AMOUNT);
+                        cells.drawNormalCell(x, base_y, cell.color, 0, PANIC_SQUISH_AMOUNT);
                     } else {
                         const sym_bounce = if (col_stressed[col]) bounce else 0;
-                        drawNormalCell(x, base_y, cell.color, sym_bounce, 0);
+                        cells.drawNormalCell(x, base_y, cell.color, sym_bounce, 0);
                     }
                 },
                 .falling => {
                     const y = base_y - cell.fall_off;
-                    if (cell.is_garbage) rgarbage.drawLinked(x, y, rgarbage.edgesAt(b, lr, col)) else drawNormalCell(x, y, cell.color, 0, 0);
+                    if (cell.is_garbage) rgarbage.drawLinked(x, y, rgarbage.edgesAt(b, lr, col)) else cells.drawNormalCell(x, y, cell.color, 0, 0);
                 },
-                .popping => drawPoppingCell(x, base_y, cell.color, cell.timer, cell.pre_pop_timer),
-                .recycling => drawRecyclingCell(x, base_y, cell.color, cell.timer, rgarbage.edgesAt(b, lr, col), cell.pre_pop_timer, cell.garbage_reveals),
-                .landing => drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, rgarbage.edgesAt(b, lr, col)),
-                .swapping => drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
+                .popping => cells.drawPoppingCell(x, base_y, cell.color, cell.timer, cell.pre_pop_timer),
+                .recycling => cells.drawRecyclingCell(x, base_y, cell.color, cell.timer, rgarbage.edgesAt(b, lr, col), cell.pre_pop_timer, cell.garbage_reveals),
+                .landing => cells.drawLandingCell(x, base_y, cell.color, cell.timer, cell.is_garbage, rgarbage.edgesAt(b, lr, col)),
+                .swapping => cells.drawSwappingCell(x, base_y, cell.color, cell.timer, cell.swap_dir),
                 .empty => {},
             }
             // The one hidden ring-buffer row (see sim_matches.HIDDEN_ROW):
@@ -444,7 +161,7 @@ fn drawBoard(b: *s.Board) void {
                     var dx: i32 = 0;
                     while (dx < c.TILE) : (dx += 1) {
                         if (@mod(dx + dy, 2) != 0) continue;
-                        w4.DRAW_COLORS.* = DC_BG;
+                        w4.DRAW_COLORS.* = cells.DC_BG;
                         w4.Rect(x + dx, base_y + dy, 1, 1);
                     }
                 }
@@ -476,7 +193,7 @@ fn drawBoard(b: *s.Board) void {
 fn maskBelowBoard() void {
     const screen: i32 = @intCast(w4.SCREEN_SIZE);
     if (BOARD_BOTTOM >= screen) return; // nothing below the board to mask
-    w4.DRAW_COLORS.* = DC_BG;
+    w4.DRAW_COLORS.* = cells.DC_BG;
     w4.Rect(0, BOARD_BOTTOM, @intCast(c.PANEL_X), @intCast(screen - BOARD_BOTTOM));
 }
 
@@ -486,8 +203,9 @@ fn maskBelowBoard() void {
 // chosen character's own border style (see characters.BorderStyle) --
 // "their own style of menu border for the main frame". A two-hue character
 // dithers between its pair everywhere the style would otherwise show a
-// single solid hue.
-fn drawThemedBand(x: i32, y: i32, w: i32, h: i32, hues: [2]u8, style: characters.BorderStyle, horizontal: bool) void {
+// single solid hue. Also used by render_screens.drawThemedPanelBorder to
+// retheme the setup screens the same way.
+pub fn drawThemedBand(x: i32, y: i32, w: i32, h: i32, hues: [2]u8, style: characters.BorderStyle, horizontal: bool) void {
     const len = if (horizontal) w else h;
     const thick = if (horizontal) h else w;
     var i: i32 = 0;
@@ -502,24 +220,12 @@ fn drawThemedBand(x: i32, y: i32, w: i32, h: i32, hues: [2]u8, style: characters
             };
             if (!on) continue;
             const hue_idx: usize = if (hues[0] == hues[1]) 0 else @intCast(@mod(i + j, 2));
-            w4.DRAW_COLORS.* = HUE_DRAWCOLOR[hues[hue_idx]];
+            w4.DRAW_COLORS.* = cells.HUE_DRAWCOLOR[hues[hue_idx]];
             const px = if (horizontal) x + i else x + j;
             const py = if (horizontal) y + j else y + i;
             w4.Rect(px, py, 1, 1);
         }
     }
-}
-
-// A plain (unchamfered) themed border around an arbitrary panel -- used by
-// the setup screen to retheme itself to whichever character is currently
-// selected (see drawSetupScreen), the same color+pattern treatment
-// drawFrame below gives the real game board.
-fn drawThemedPanelBorder(x: i32, y: i32, w: i32, h: i32, char: characters.Character) void {
-    const t = FRAME_THICKNESS;
-    drawThemedBand(x, y, w, t, char.hues, char.border_style, true);
-    drawThemedBand(x, y + h - t, w, t, char.hues, char.border_style, true);
-    drawThemedBand(x, y, t, h, char.hues, char.border_style, false);
-    drawThemedBand(x + w - t, y, t, h, char.hues, char.border_style, false);
 }
 
 // Frame around the playable area with a 2px-radius chamfer at each corner
@@ -554,7 +260,7 @@ fn drawFrame(character: u8) void {
     drawThemedBand(x, y, t, h, char.hues, char.border_style, false); // left
     drawThemedBand(x + w - t, y, t, h, char.hues, char.border_style, false); // right
 
-    w4.DRAW_COLORS.* = DC_BG;
+    w4.DRAW_COLORS.* = cells.DC_BG;
     var dy: i32 = 0;
     while (dy < radius) : (dy += 1) {
         var dx: i32 = 0;
@@ -570,12 +276,13 @@ fn drawFrame(character: u8) void {
 }
 
 // How far each bracket sits beyond the block's own edge (not the tile's --
-// the block is flush with the tile's top-left corner, see BLOCK_SIZE, so a
-// bracket centered on the block is offset the same amount on every side
-// regardless). CURSOR_OUT_BASE is the resting/contracted distance -- the
-// default look, and what a fresh move snaps back to; while idling, it
-// breathes out to CURSOR_OUT_BASE + CURSOR_OUT_PULSE and back (see
-// drawCursor) rather than sitting at a fixed size the whole time.
+// the block is flush with the tile's top-left corner, see
+// render_cells.BLOCK_SIZE, so a bracket centered on the block is offset the
+// same amount on every side regardless). CURSOR_OUT_BASE is the resting/
+// contracted distance -- the default look, and what a fresh move snaps back
+// to; while idling, it breathes out to CURSOR_OUT_BASE + CURSOR_OUT_PULSE
+// and back (see drawCursor) rather than sitting at a fixed size the whole
+// time.
 const CURSOR_OUT_BASE: i32 = 1;
 const CURSOR_OUT_PULSE: i32 = 1;
 const CURSOR_CORNER_LEN: i32 = 3;
@@ -585,7 +292,8 @@ const CURSOR_CORNER_LEN: i32 = 3;
 // engine frames before toggling to the other. A gradual per-pixel slide
 // instead reads as the dithered checkerboard's two hues swapping in place
 // (since which hue lands on a given pixel depends on its absolute
-// position -- see plotDithered) rather than an actual size change.
+// position -- see render_cells.plotDithered) rather than an actual size
+// change.
 const CURSOR_BREATHE_HOLD_FRAMES: u32 = 15;
 const CURSOR_DITHER_HUES = badge.WARM_DITHER_HUES;
 
@@ -597,18 +305,18 @@ const CURSOR_DITHER_HUES = badge.WARM_DITHER_HUES;
 fn drawCursorCorners(x: i32, y: i32, out: i32, hues: [2]u8) void {
     const x0 = x - out;
     const y0 = y - out;
-    const x1 = x + BLOCK_SIZE - 1 + out;
-    const y1 = y + BLOCK_SIZE - 1 + out;
+    const x1 = x + cells.BLOCK_SIZE - 1 + out;
+    const y1 = y + cells.BLOCK_SIZE - 1 + out;
     var i: i32 = 0;
     while (i < CURSOR_CORNER_LEN) : (i += 1) {
-        plotDithered(x0 + i, y0, hues); // top-left
-        plotDithered(x0, y0 + i, hues);
-        plotDithered(x1 - i, y0, hues); // top-right
-        plotDithered(x1, y0 + i, hues);
-        plotDithered(x0 + i, y1, hues); // bottom-left
-        plotDithered(x0, y1 - i, hues);
-        plotDithered(x1 - i, y1, hues); // bottom-right
-        plotDithered(x1, y1 - i, hues);
+        cells.plotDithered(x0 + i, y0, hues); // top-left
+        cells.plotDithered(x0, y0 + i, hues);
+        cells.plotDithered(x1 - i, y0, hues); // top-right
+        cells.plotDithered(x1, y0 + i, hues);
+        cells.plotDithered(x0 + i, y1, hues); // bottom-left
+        cells.plotDithered(x0, y1 - i, hues);
+        cells.plotDithered(x1 - i, y1, hues); // bottom-right
+        cells.plotDithered(x1, y1 - i, hues);
     }
 }
 
@@ -627,7 +335,7 @@ fn drawCursorCorners(x: i32, y: i32, out: i32, hues: [2]u8) void {
 // swipes move it relative to wherever it already is rather than aiming at a
 // touched tile, so there's nothing the player needs to see it for.
 fn drawCursor(board: *s.Board, idle_frames: u32) void {
-    if (s.winner != .none or s.cursor_hidden) return;
+    if (s.winner != .none or touch_state.cursor_hidden) return;
     const row = board.cursor_row;
     const col = board.cursor_col;
     const base_x = c.BOARD_X + @as(i32, col) * c.TILE;
@@ -697,501 +405,25 @@ fn drawPanel(board: *s.Board, character: u8, points: u8) void {
     }
 }
 
-const MENU_PANEL_X: i32 = 20;
-const MENU_PANEL_W: i32 = 120;
-
-// Common backdrop for every pre-game screen: the parallaxing background
-// (see render_bg.zig) plus the panel's own fill, held perfectly still --
-// callers draw their own border (the title screen's neutral bezel vs. the
-// setup screens' character-themed one) and content into the returned Y.
-// `base_y`/`h` differ per screen (some have more to fit than others), so
-// both are the caller's own choice rather than shared constants.
-fn drawMenuPanelFill(base_y: i32, h: i32) i32 {
-    bg.draw();
-    w4.DRAW_COLORS.* = 0x0001;
-    w4.Rect(MENU_PANEL_X, base_y, MENU_PANEL_W, @intCast(h));
-    return base_y;
-}
-
-pub fn drawTitleScreen() void {
-    const y = drawMenuPanelFill(30, 100);
-    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100);
-    w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("PANELPON4", 40, y + 24);
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("PRESS X", 52, y + 64);
-}
-
-// Right after the title, before any character/difficulty picking -- neither
-// of which applies yet, so this uses the same plain (non-themed) bezel the
-// title screen does, not a character-themed one. `state.GameMode`'s own
-// left/right cycling order (see main.zig's prevMode/nextMode) matches this
-// list's own order top to bottom.
-const GAME_MODE_LABELS = [3][]const u8{ "1P STORY", "1P QUICK MATCH", "2P VERSUS" };
-fn gameModeIndex(m: s.GameMode) u8 {
-    return switch (m) {
-        .story => 0,
-        .quick => 1,
-        .versus => 2,
-    };
-}
-
-pub fn drawModeSelectScreen() void {
-    const y = drawMenuPanelFill(30, 100);
-    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100);
-    w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("SELECT MODE", 34, y + 12);
-
-    const cur = gameModeIndex(s.game_mode);
-    for (GAME_MODE_LABELS, 0..) |label, i| {
-        const line_y = y + 34 + @as(i32, @intCast(i)) * 14;
-        w4.DRAW_COLORS.* = if (i == cur) 0x0004 else 0x0002;
-        w4.Text(label, 30, line_y);
-    }
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("<-      ->", 40, y + 80);
-    w4.Text("PRESS X", 52, y + 92);
-}
-
-// A manual gate between picking versus mode and actually starting a
-// countdown (see state.MenuPhase's own doc comment on why this exists) --
-// makes sure the second player has actually joined via netplay (or is ready
-// on a second local controller) before `main.zig` ever reads `wasm4.NETPLAY`
-// or resets the boards, since joining mid-match would desync the two peers.
-pub fn drawVersusConfirmScreen() void {
-    const y = drawMenuPanelFill(30, 100);
-    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100);
-    w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("2P VERSUS", 40, y + 10);
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("CONNECT VIA", 34, y + 34);
-    w4.Text("NETPLAY NOW", 34, y + 46);
-    w4.Text("(OR READY P2", 30, y + 62);
-    w4.Text("ON GAMEPAD 2)", 26, y + 74);
-    w4.DRAW_COLORS.* = 0x0004;
-    w4.Text("THEN PRESS X", 28, y + 90);
-}
-
-// One filled-in segment per difficulty level (1-10), replacing the old
-// plain "LEVEL {d}" text with something that reads at a glance without
-// needing to parse a number.
-fn drawDifficultyBar(x: i32, y: i32) void {
-    var i: u8 = 1;
-    while (i <= 10) : (i += 1) {
-        const px = x + @as(i32, i - 1) * 8;
-        if (i <= s.difficulty) {
-            w4.DRAW_COLORS.* = 0x0004;
-            w4.Rect(px, y, 6, 6);
-        } else {
-            w4.DRAW_COLORS.* = 0x0002;
-            w4.Rect(px, y, 6, 1);
-            w4.Rect(px, y + 5, 6, 1);
-            w4.Rect(px, y, 1, 6);
-            w4.Rect(px + 5, y, 1, 6);
-        }
-    }
-}
-
-// Position of each portrait in the setup screen's character grid -- wraps
-// into rows of CHARS_PER_ROW rather than one long line (7 characters, at
-// this sprite size plus gap, are too wide for the panel to fit in a single
-// row), each row independently centered in the panel's own width so a
-// shorter final row (3, not 4) still sits centered under the one above it
-// rather than left-aligned.
-const CHARS_PER_ROW: u8 = 4;
-const CHAR_SLOT_GAP: i32 = 8;
-const CHAR_ROW_GAP: i32 = 8;
-
-fn charRowCount(row: u8) u8 {
-    const start = row * CHARS_PER_ROW;
-    return @intCast(@min(CHARS_PER_ROW, characters.COUNT - start));
-}
-
-fn charSlotPos(index: u8) struct { x: i32, y: i32, row: u8 } {
-    const row = index / CHARS_PER_ROW;
-    const col = index % CHARS_PER_ROW;
-    const row_w = @as(i32, charRowCount(row)) * rchar.W + (@as(i32, charRowCount(row)) - 1) * CHAR_SLOT_GAP;
-    const start_x = MENU_PANEL_X + @divTrunc(MENU_PANEL_W - row_w, 2);
-    const x = start_x + @as(i32, col) * (rchar.W + CHAR_SLOT_GAP);
-    const y = @as(i32, row) * (rchar.H + CHAR_ROW_GAP);
-    return .{ .x = x, .y = y, .row = row };
-}
-
-// The setup flow's own screen position -- held fixed across all 3 steps
-// (character, CPU reveal, difficulty) so the panel doesn't jump around
-// between them, just its height/content changes.
-const SETUP_BASE_Y: i32 = 24;
-
-pub fn drawSetupCharacterScreen() void {
-    const y = drawMenuPanelFill(SETUP_BASE_Y, 120);
-    // Retheme the panel border itself to whichever character is currently
-    // selected -- "switching should retheme the setup menu".
-    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 120, characters.ALL[s.player_character]);
-
-    w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("SETUP", 58, y + 6);
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("CHARACTER", 40, y + 18);
-
-    // Every character is shown at once (not just the current pick) --
-    // left/right cycles the player's own selection (see main.zig),
-    // highlighted with a dithered outline -- solid normally, blinking on/off
-    // for a moment right after confirming (see state.setup_flash_timer)
-    // before moving on to watch the CPU pick its own.
-    const frame = rchar.currentFrame();
-    const grid_y = y + 34;
-    const flashing = s.setup_flash_timer > 0;
-    const flash_on = !flashing or blinkOn(c.SETUP_FLASH_TOTAL_FRAMES - s.setup_flash_timer, c.SETUP_FLASH_TOGGLE_FRAMES);
-    var last_row: u8 = 0;
-    for (0..characters.COUNT) |i| {
-        const pos = charSlotPos(@intCast(i));
-        const cy = grid_y + pos.y;
-        last_row = pos.row;
-        rchar.draw(pos.x, cy, @intCast(i), .normal, frame);
-        if (i == s.player_character and flash_on) {
-            drawDitheredRectOutline(pos.x - 2, cy - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
-        }
-    }
-    const grid_bottom = grid_y + @as(i32, last_row) * (rchar.H + CHAR_ROW_GAP) + rchar.H;
-
-    w4.DRAW_COLORS.* = 0x0002;
-    var buf: [24]u8 = undefined;
-    const you_label = std.fmt.bufPrint(&buf, "YOU: {s}", .{characters.ALL[s.player_character].name}) catch "YOU";
-    w4.Text(you_label, 28, grid_bottom + 6);
-    if (!flashing) {
-        w4.Text("<-      ->", 40, grid_bottom + 18);
-        w4.Text("PRESS X", 52, grid_bottom + 30);
-    }
-}
-
-// True during the "on" half of a simple on/off blink -- elapsed frames
-// since some start point, toggling every `period` frames.
-fn blinkOn(elapsed: u16, period: u16) bool {
-    return @mod(elapsed, period * 2) < period;
-}
-
-// Left edge of one of 2 side-by-side portraits (see drawSetupCpuRevealScreen)
-// -- same centered-row idea as charSlotX, just for 2 slots instead of 4.
-const REVEAL_GAP: i32 = 24;
-fn revealSlotX(which: u8) i32 {
-    const total_w = rchar.W * 2 + REVEAL_GAP;
-    const start = MENU_PANEL_X + @divTrunc(MENU_PANEL_W - total_w, 2);
-    return start + @as(i32, which) * (rchar.W + REVEAL_GAP);
-}
-
-pub fn drawSetupCpuRevealScreen() void {
-    const y = drawMenuPanelFill(SETUP_BASE_Y, 80);
-    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 80, characters.ALL[s.player_character]);
-
-    w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("SETUP", 58, y + 6);
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("CPU IS CHOOSING", 26, y + 18);
-
-    const frame = rchar.currentFrame();
-    const row_y = y + 34;
-    const you_x = revealSlotX(0);
-    const cpu_x = revealSlotX(1);
-    rchar.draw(you_x, row_y, s.player_character, .normal, frame);
-    drawDitheredRectOutline(you_x - 2, row_y - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
-
-    // Spins through every character once per tick, holding each a little
-    // longer than the last (see state.cpu_reveal_tick/constants.
-    // CPU_REVEAL_HOLD_*), landing for good on the real pick at the final
-    // tick -- a slot machine slowing to a stop rather than an instant reveal.
-    const done = s.cpu_reveal_tick >= c.CPU_REVEAL_STEPS - 1;
-    const spin_index: u8 = if (done) s.cpu_character else @intCast(s.cpu_reveal_tick % characters.COUNT);
-    rchar.draw(cpu_x, row_y, spin_index, .normal, frame);
-    drawDitheredRectOutline(cpu_x - 2, row_y - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
-
-    w4.DRAW_COLORS.* = 0x0002;
-    var buf: [24]u8 = undefined;
-    const you_label = std.fmt.bufPrint(&buf, "YOU: {s}", .{characters.ALL[s.player_character].name}) catch "YOU";
-    w4.Text(you_label, 22, row_y + rchar.H + 8);
-    w4.DRAW_COLORS.* = 0x0004;
-    var buf2: [24]u8 = undefined;
-    const cpu_label = if (done)
-        std.fmt.bufPrint(&buf2, "CPU: {s}", .{characters.ALL[s.cpu_character].name}) catch "CPU"
-    else
-        "CPU: ???";
-    w4.Text(cpu_label, 22, row_y + rchar.H + 20);
-}
-
-pub fn drawSetupDifficultyScreen() void {
-    const y = drawMenuPanelFill(SETUP_BASE_Y, 110);
-    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 110, characters.ALL[s.player_character]);
-
-    w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("SETUP", 58, y + 6);
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("DIFFICULTY", 40, y + 18);
-
-    var buf: [24]u8 = undefined;
-    const you_label = std.fmt.bufPrint(&buf, "YOU: {s}", .{characters.ALL[s.player_character].name}) catch "YOU";
-    w4.Text(you_label, 28, y + 32);
-    w4.DRAW_COLORS.* = 0x0004;
-    var buf2: [24]u8 = undefined;
-    const cpu_label = std.fmt.bufPrint(&buf2, "CPU: {s}", .{characters.ALL[s.cpu_character].name}) catch "CPU";
-    w4.Text(cpu_label, 28, y + 44);
-
-    w4.DRAW_COLORS.* = 0x0002;
-    drawDifficultyBar(40, y + 62);
-    var buf3: [24]u8 = undefined;
-    // Every level runs cpu_engine's actual move search -- see
-    // cpu_ai.configFor -- lower levels just listen to it far less reliably.
-    const label = std.fmt.bufPrint(&buf3, "LEVEL {d}", .{s.difficulty}) catch "LEVEL ?";
-    w4.Text(label, 58, y + 74);
-    w4.Text("<-      ->", 40, y + 88);
-    w4.Text("PRESS X", 52, y + 100);
-}
-
-const STORY_TIER_LABELS = [4][]const u8{ "EASY", "MEDIUM", "HARD", "X HARD" };
-
-// Story mode's own difficulty screen -- no CPU portrait/name here (unlike
-// drawSetupDifficultyScreen above), since the opponent sequence is
-// predetermined by the run itself (see game_modes.storyOpponentFor), not
-// picked or rolled. Left/right only ever cycles EASY/MEDIUM/HARD (see
-// main.zig's own cycling logic) -- X Hard is "by tradition" only reachable
-// by holding left and pressing Z while sitting on HARD, so it never appears
-// in the ordinary cycling order, and this screen only ever hints that it
-// exists (never spells out the actual input) once game_modes.xhard_revealed
-// says the player has actually earned that hint.
-pub fn drawStoryTierScreen() void {
-    const y = drawMenuPanelFill(SETUP_BASE_Y, 110);
-    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 110, characters.ALL[s.player_character]);
-
-    w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("STORY", 58, y + 6);
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("DIFFICULTY", 40, y + 18);
-
-    var buf: [24]u8 = undefined;
-    const you_label = std.fmt.bufPrint(&buf, "YOU: {s}", .{characters.ALL[s.player_character].name}) catch "YOU";
-    w4.Text(you_label, 28, y + 32);
-
-    w4.DRAW_COLORS.* = 0x0004;
-    w4.Text(STORY_TIER_LABELS[@intFromEnum(s.story_tier)], 52, y + 50);
-
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("<-      ->", 40, y + 66);
-    w4.Text("PRESS X", 52, y + 78);
-
-    if (game_modes.xhard_revealed and s.story_tier == .hard) {
-        w4.Text("HOLD <- + Z ...", 22, y + 96);
-    }
-}
-
-// Bezeled orange border for a full-screen overlay panel (the countdown and
-// match-over screens): two concentric dithered outlines for a raised bezel
-// look (the same technique drawCursor uses), plus a 1px black (background)
-// outline just outside that so the bezel itself reads clearly against
-// whatever's behind the panel -- the board, mid-scroll or otherwise --
-// rather than risking blending into it the way a single flat-colored edge
-// might.
-fn drawPanelBorder(x: i32, y: i32, w: i32, h: i32) void {
-    w4.DRAW_COLORS.* = DC_BG;
-    w4.Rect(x - 1, y - 1, @intCast(w + 2), 1);
-    w4.Rect(x - 1, y + h, @intCast(w + 2), 1);
-    w4.Rect(x - 1, y - 1, 1, @intCast(h + 2));
-    w4.Rect(x + w, y - 1, 1, @intCast(h + 2));
-
-    drawDitheredRectOutline(x, y, w, h, badge.WARM_DITHER_HUES);
-    if (w > 2 and h > 2) {
-        drawDitheredRectOutline(x + 1, y + 1, w - 2, h - 2, badge.WARM_DITHER_HUES);
-    }
-}
-
-// Shared by drawGameOver's two branches below: both characters stay visible
-// through the transition, whichever won celebrating on the right and the
-// loser wincing on the left (a draw shows both idle, since neither actually
-// won or lost) -- `won` is from the *rendering* main side's own perspective
-// (see render()'s own mainBoard/mainCharacter), not always state.player, so
-// this reads correctly for a versus peer whose own board is rendered as
-// `cpu` (see state.versus_render_swapped).
-fn drawGameOverPortraits(x: i32, y: i32, w: i32, won: ?bool) void {
-    const frame = rchar.currentFrame();
-    const main_state: rchar.CharState = if (won) |w_| (if (w_) .win else .punish) else .normal;
-    const mini_state: rchar.CharState = if (won) |w_| (if (w_) .punish else .win) else .normal;
-    rchar.draw(x + 4, y + 4, mainCharacter(), main_state, frame);
-    rchar.draw(x + w - rchar.W - 4, y + 4, miniCharacter(), mini_state, frame);
-}
-
-// Only ever shown once the closing wipe (state.closing_timer, see
-// board.beginClosing) has finished popping every row -- see main.zig, which
-// gates the call on that -- so the loss reads as "board clears, then the
-// verdict appears", not both at once. Story mode (see state.GameMode) plays
-// single-game stages rather than a best-of-N series, and has its own
-// stage-clear/game-over/story-clear text instead of a running series score
-// -- see drawStoryGameOver below, which this defers to entirely.
-pub fn drawGameOver() void {
-    if (s.game_mode == .story) return drawStoryGameOver();
-
-    // "YOU WIN"/"YOU LOSE" is inherently a *perspective* -- versus mode's
-    // own main side isn't always state.player (see state.
-    // versus_render_swapped/render()'s own mainBoard), so this reads winner
-    // against whichever Winner value the main side actually corresponds to,
-    // not always .player.
-    const main_side: s.Winner = if (s.versus_render_swapped) .cpu else .player;
-    const text: []const u8 = switch (s.winner) {
-        .draw => "DRAW",
-        .none => unreachable, // drawGameOver is only ever called once winner != .none
-        else => if (s.winner == main_side) "YOU WIN" else "YOU LOSE",
-    };
-    const x = 20;
-    const y = 52;
-    const w = 120;
-    const h = 68;
-    w4.DRAW_COLORS.* = 0x0001;
-    w4.Rect(x, y, w, h);
-    drawPanelBorder(x, y, w, h);
-
-    const won: ?bool = if (s.winner == .draw) null else s.winner == main_side;
-    drawGameOverPortraits(x, y, w, won);
-
-    w4.DRAW_COLORS.* = 0x0004;
-    w4.Text("MATCH OVER", 40, 58);
-    w4.Text(text, 32, 74);
-
-    var buf: [16]u8 = undefined;
-    const pts = std.fmt.bufPrint(&buf, "{d} - {d}", .{ s.player_points, s.cpu_points }) catch "";
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text(pts, 64, 84);
-
-    if (s.set_winner != .none) {
-        const set_text: []const u8 = if (s.set_winner == main_side) "YOU WIN THE SET!" else "OPPONENT WINS THE SET!";
-        w4.DRAW_COLORS.* = 0x0004;
-        w4.Text(set_text, 8, 96);
-        w4.DRAW_COLORS.* = 0x0002;
-        w4.Text("PRESS X", 40, 106);
-    } else {
-        w4.DRAW_COLORS.* = 0x0002;
-        w4.Text("PRESS X", 40, 98);
-    }
-}
-
-// Story mode's own match-over overlay: no running series score (a stage is
-// one game, not a best-of-N series -- see main.zig), just this stage's own
-// outcome, the run's own game-over tally on a loss, and (once the final
-// stage actually clears) whether this run just earned the X Hard reveal
-// (see game_modes.maybeRevealXhard, called from main.zig the instant the
-// final stage's win is detected -- so by the time this ever renders, .
-// xhard_revealed already reflects it if this run just earned it).
-fn drawStoryGameOver() void {
-    const won = s.winner == .player;
-    const cleared_run = won and s.story_stage + 1 >= game_modes.STORY_STAGES;
-
-    const x = 20;
-    const y = 52;
-    const w = 120;
-    const h = 68;
-    w4.DRAW_COLORS.* = 0x0001;
-    w4.Rect(x, y, w, h);
-    drawPanelBorder(x, y, w, h);
-    drawGameOverPortraits(x, y, w, won);
-
-    w4.DRAW_COLORS.* = 0x0004;
-    const headline: []const u8 = if (!won) "GAME OVER" else if (cleared_run) "STORY CLEAR!" else "STAGE CLEAR";
-    w4.Text(headline, 40, 58);
-
-    w4.DRAW_COLORS.* = 0x0002;
-    var buf: [24]u8 = undefined;
-    if (!won) {
-        const go = std.fmt.bufPrint(&buf, "GAME OVERS: {d}", .{s.story_game_overs}) catch "";
-        w4.Text(go, 34, 76);
-        w4.Text("PRESS X TO RETRY", 22, 96);
-    } else if (cleared_run) {
-        const stage_str = std.fmt.bufPrint(&buf, "ALL {d} CLEARED!", .{game_modes.STORY_STAGES}) catch "";
-        w4.Text(stage_str, 30, 76);
-        if (s.story_game_overs == 0 and s.story_tier == .hard) {
-            w4.DRAW_COLORS.* = 0x0004;
-            w4.Text("X HARD UNLOCKED!", 22, 88);
-            w4.DRAW_COLORS.* = 0x0002;
-        }
-        w4.Text("PRESS X", 52, 100);
-    } else {
-        const stage_str = std.fmt.bufPrint(&buf, "STAGE {d}/{d} DONE", .{ s.story_stage + 1, game_modes.STORY_STAGES }) catch "";
-        w4.Text(stage_str, 26, 76);
-        w4.Text("PRESS X", 52, 96);
-    }
-}
-
-// "3 2 1 START" shown once per match, right after resetGame -- see
-// state.countdown_timer (which this turns back into "which stage, how far
-// into it") and board.beginCountdown, the only place that gets set. "3",
-// "2", "1" each rise a couple pixels then hold steady for about a second;
-// "START" rises the same way but then blinks a few times instead of holding
-// steady.
-pub fn drawCountdown() void {
-    const elapsed = c.COUNTDOWN_TOTAL_FRAMES - s.countdown_timer;
-
-    var label: []const u8 = "3";
-    var stage_elapsed: i32 = elapsed;
-    var is_start = false;
-    if (elapsed < c.COUNTDOWN_NUMBER_FRAMES) {
-        label = "3";
-    } else if (elapsed < c.COUNTDOWN_NUMBER_FRAMES * 2) {
-        label = "2";
-        stage_elapsed = elapsed - c.COUNTDOWN_NUMBER_FRAMES;
-    } else if (elapsed < c.COUNTDOWN_NUMBER_FRAMES * 3) {
-        label = "1";
-        stage_elapsed = elapsed - c.COUNTDOWN_NUMBER_FRAMES * 2;
-    } else {
-        label = "START";
-        stage_elapsed = elapsed - c.COUNTDOWN_NUMBER_FRAMES * 3;
-        is_start = true;
-    }
-
-    // Eases up from a couple pixels below its resting spot, then either
-    // holds there steady (numbers) or blinks a few times (START) -- see
-    // this function's own doc comment.
-    var visible = true;
-    var rise_offset: i32 = 0;
-    if (stage_elapsed < c.COUNTDOWN_RISE_FRAMES) {
-        const remain = c.COUNTDOWN_RISE_FRAMES - stage_elapsed;
-        rise_offset = @divTrunc(remain * c.COUNTDOWN_RISE_PX, c.COUNTDOWN_RISE_FRAMES);
-    } else if (is_start) {
-        const blink_elapsed = stage_elapsed - c.COUNTDOWN_RISE_FRAMES;
-        const phase = @divTrunc(blink_elapsed, c.COUNTDOWN_BLINK_HALF_FRAMES);
-        visible = @mod(phase, 2) == 0;
-    }
-    if (!visible) return;
-
-    const char_w: i32 = 8;
-    const text_w: i32 = @as(i32, @intCast(label.len)) * char_w;
-    const cx: i32 = 80; // screen center (SCREEN_SIZE/2)
-    const base_y: i32 = 70;
-    const y = base_y - rise_offset;
-    const pad: i32 = 8;
-    const box_x = cx - @divTrunc(text_w, 2) - pad;
-    const box_y = y - 6;
-    const box_w = text_w + 2 * pad;
-    const box_h = char_w + 12;
-
-    w4.DRAW_COLORS.* = 0x0001;
-    w4.Rect(box_x, box_y, @intCast(box_w), @intCast(box_h));
-    drawPanelBorder(box_x, box_y, box_w, box_h);
-    w4.DRAW_COLORS.* = 0x0004;
-    w4.Text(label, cx - @divTrunc(text_w, 2), y);
-}
-
 // How far a particle travels from its spawn point by the end of its life,
 // and how big it starts out (shrinking to nothing by the same point) -- see
-// state.Particle/Board.spawnPopParticles. Linear growth/shrink, same
+// state_fx.Particle/state_fx.spawnPopParticles. Linear growth/shrink, same
 // integer-elapsed-over-total style as every other timed animation here
-// (e.g. drawSwappingCell's slide) rather than anything fancier.
+// (e.g. render_cells.drawSwappingCell's slide) rather than anything
+// fancier.
 const PARTICLE_MAX_DIST: i32 = 10;
 const PARTICLE_START_SIZE: i32 = 3;
 
-fn drawParticles(particles: []const s.Particle) void {
+fn drawParticles(particles: []const fx.Particle) void {
     for (particles) |p| {
         if (!p.active) continue;
-        const dist = @divTrunc(PARTICLE_MAX_DIST * @as(i32, p.elapsed), s.PARTICLE_LIFE);
-        const size = PARTICLE_START_SIZE - @divTrunc(PARTICLE_START_SIZE * @as(i32, p.elapsed), s.PARTICLE_LIFE);
+        const dist = @divTrunc(PARTICLE_MAX_DIST * @as(i32, p.elapsed), fx.PARTICLE_LIFE);
+        const size = PARTICLE_START_SIZE - @divTrunc(PARTICLE_START_SIZE * @as(i32, p.elapsed), fx.PARTICLE_LIFE);
         if (size <= 0) continue;
         const x = p.x + @as(i32, p.dir_x) * dist - @divTrunc(size, 2);
         const y = p.y + @as(i32, p.dir_y) * dist - @divTrunc(size, 2);
-        const hue = if (p.color < 3) p.color else DITHER_HUES[p.color - 3][0];
-        w4.DRAW_COLORS.* = HUE_DRAWCOLOR[hue];
+        const hue = if (p.color < 3) p.color else cells.DITHER_HUES[p.color - 3][0];
+        w4.DRAW_COLORS.* = cells.HUE_DRAWCOLOR[hue];
         w4.Oval(x, y, @intCast(size), @intCast(size));
     }
 }
@@ -1213,10 +445,13 @@ fn mainBoard() *s.Board {
 fn miniBoard() *s.Board {
     return if (s.versus_render_swapped) &s.player else &s.cpu;
 }
-fn mainCharacter() u8 {
+// pub: render_screens.drawGameOverPortraits also needs to know which
+// character is on which side, from this same rendering-main-seat
+// perspective.
+pub fn mainCharacter() u8 {
     return if (s.versus_render_swapped) s.cpu_character else s.player_character;
 }
-fn miniCharacter() u8 {
+pub fn miniCharacter() u8 {
     return if (s.versus_render_swapped) s.player_character else s.cpu_character;
 }
 fn mainPoints() u8 {

@@ -2,7 +2,7 @@
 // distinguishable even without color. See render.zig's SYMBOLS pairing
 // comment for which symbol goes with which color.
 
-pub const SYMBOL_SIZE: usize = 11; // same parity as render.BLOCK_SIZE -> perfectly centered, no remainder
+pub const SYMBOL_SIZE: usize = 11; // same parity as render_cells.BLOCK_SIZE -> perfectly centered, no remainder
 
 // Inset a full pixel from every edge (unlike the original design, which
 // touched column 0/10 at its widest row) so it doesn't touch the block's

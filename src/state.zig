@@ -15,6 +15,7 @@
 
 const std = @import("std");
 const c = @import("constants.zig");
+const fx = @import("state_fx.zig");
 
 // `recycling` is garbage's own analog of `popping` (see Cell.is_garbage) --
 // kept as a distinct state, not reusing `popping`, so the two can never be
@@ -106,28 +107,6 @@ pub const Cell = struct {
     garbage_group: u8 = 0,
 };
 
-// A small floating text badge (an orange-dithered block with black text)
-// that appears at a chain-or-combo match's location, then flies to the score
-// display. Purely cosmetic -- spawned by sim.checkMatches (text like "x2" or
-// "5", pre-rendered into `label` there so this module and render.zig stay
-// agnostic of what the text actually says), advanced once per frame by
-// tickMatchPopups (called from sim.simulate), and drawn by
-// render.drawMatchPopups. Nothing here affects gameplay, so none of it needs
-// to be exact -- just cleared on reset like everything else.
-//
-// Three phases: it eases up just a couple pixels from the center of the
-// match's topmost block (`x`/`y` below) to that block's own top edge
-// (`edge_y`) -- a small hop meant to catch the eye right at the match, not
-// travel anywhere -- then waits there until the match's own pop animation
-// actually finishes (`pop_end`, in the same elapsed-frame timeline as this
-// popup), then flies from there into the score display. See
-// render.drawMatchPopups for the actual interpolation.
-pub const MATCH_POPUP_RISE: i16 = 6; // frames easing up to the block's own top edge
-pub const MATCH_POPUP_RISE_PX: i32 = 3; // how far up that is -- a couple pixels, not half a tile
-pub const MATCH_POPUP_FLY: i16 = 28; // frames easing from that edge into the score
-const MAX_MATCH_POPUPS = 4;
-const MATCH_POPUP_LABEL_CAP = 16;
-
 // A single pending garbage attack -- rows/width/anchor_col are exactly
 // sim_garbage.spawnGarbage's own parameters, just not applied to the board
 // yet. See sim_garbage.zig's queueChainGarbage/queueComboGarbage/
@@ -136,39 +115,6 @@ const MATCH_POPUP_LABEL_CAP = 16;
 pub const GarbageAttack = struct { rows: u8 = 0, width: u8 = 0, anchor_col: u8 = 0 };
 
 const MAX_INCOMING_GARBAGE = 8;
-
-// A short burst of small particles flying diagonally outward from a real
-// block's own center the instant it's actually removed (see sim.simulate's
-// just_cleared handling) -- a bit of impact feedback for a satisfying-
-// feeling pop. Purely cosmetic, exactly like MatchPopup above: nothing here
-// affects gameplay, and it's cleared along with everything else on reset.
-// `x`/`y` (the spawn origin, in pixel space) and `color` never change after
-// spawn -- only `elapsed` advances (see Board.tickParticles) -- render.zig
-// derives each particle's actual on-screen position and size from that and
-// its own fixed diagonal direction.
-pub const Particle = struct {
-    active: bool = false,
-    x: i32 = 0,
-    y: i32 = 0,
-    dir_x: i8 = 1, // -1/+1: which of the 4 diagonals this particle flies toward
-    dir_y: i8 = 1,
-    color: u8 = 0,
-    elapsed: i16 = 0,
-};
-
-pub const PARTICLE_LIFE: i16 = 16; // frames a burst's particles stay alive
-const MAX_PARTICLES = 16; // 4 per burst, room for several simultaneous pops
-
-pub const MatchPopup = struct {
-    active: bool = false,
-    label: [MATCH_POPUP_LABEL_CAP]u8 = undefined,
-    label_len: u8 = 0,
-    x: i32 = 0, // badge center, at spawn -- see sim.checkMatches for how it's picked
-    y: i32 = 0, // center of the match's topmost block, at spawn
-    edge_y: i32 = 0, // a couple pixels above y -- the rise phase's target, and where it waits
-    pop_end: i16 = 0, // elapsed frame (this popup's own timeline) the match's pop finishes; flight starts then
-    elapsed: i16 = 0,
-};
 
 // One player's whole side of the match: the board grid, cursor, rise state,
 // score/chain, its own independent RNG stream, and its own match-popup pool.
@@ -260,9 +206,9 @@ pub const Board = struct {
     // still resolving, on the sending board OR the receiving one.
     incoming_garbage: [MAX_INCOMING_GARBAGE]?GarbageAttack = [_]?GarbageAttack{null} ** MAX_INCOMING_GARBAGE,
 
-    match_popups: [MAX_MATCH_POPUPS]MatchPopup = [_]MatchPopup{.{}} ** MAX_MATCH_POPUPS,
+    match_popups: [fx.MAX_MATCH_POPUPS]fx.MatchPopup = [_]fx.MatchPopup{.{}} ** fx.MAX_MATCH_POPUPS,
 
-    particles: [MAX_PARTICLES]Particle = [_]Particle{.{}} ** MAX_PARTICLES,
+    particles: [fx.MAX_PARTICLES]fx.Particle = [_]fx.Particle{.{}} ** fx.MAX_PARTICLES,
 
     pub fn rngNext(self: *Board) u32 {
         var x = self.rng_state;
@@ -305,66 +251,6 @@ pub const Board = struct {
         return false;
     }
 
-    pub fn spawnMatchPopup(self: *Board, label: []const u8, x: i32, y: i32, edge_y: i32, pop_end: i16) void {
-        for (&self.match_popups) |*p| {
-            if (!p.active) {
-                p.active = true;
-                p.label_len = @intCast(@min(label.len, p.label.len));
-                @memcpy(p.label[0..p.label_len], label[0..p.label_len]);
-                p.x = x;
-                p.y = y;
-                p.edge_y = edge_y;
-                p.pop_end = pop_end;
-                p.elapsed = 0;
-                return;
-            }
-        }
-        // Pool full -- would need 4+ simultaneous chain/combo groups landing in
-        // the same frame. Silently drop rather than crash; missing one flourish
-        // is harmless.
-    }
-
-    pub fn tickMatchPopups(self: *Board) void {
-        for (&self.match_popups) |*p| {
-            if (!p.active) continue;
-            p.elapsed += 1;
-            if (p.elapsed >= p.pop_end + MATCH_POPUP_FLY) p.active = false;
-        }
-    }
-
-    pub fn clearMatchPopups(self: *Board) void {
-        for (&self.match_popups) |*p| p.* = .{};
-    }
-
-    // One small burst of 4 particles, one per diagonal direction, flying
-    // outward from (x, y) -- a popped real block's own center, in pixel
-    // space. Silently drops whichever particles don't fit if the pool's
-    // already full (see spawnMatchPopup's identical reasoning) -- missing a
-    // few sparks during an enormous simultaneous multi-pop is harmless.
-    pub fn spawnPopParticles(self: *Board, x: i32, y: i32, color: u8) void {
-        const dirs = [4][2]i8{ .{ -1, -1 }, .{ 1, -1 }, .{ -1, 1 }, .{ 1, 1 } };
-        for (dirs) |d| {
-            for (&self.particles) |*p| {
-                if (p.active) continue;
-                p.active = true;
-                p.x = x;
-                p.y = y;
-                p.dir_x = d[0];
-                p.dir_y = d[1];
-                p.color = color;
-                p.elapsed = 0;
-                break;
-            }
-        }
-    }
-
-    pub fn tickParticles(self: *Board) void {
-        for (&self.particles) |*p| {
-            if (!p.active) continue;
-            p.elapsed += 1;
-            if (p.elapsed >= PARTICLE_LIFE) p.active = false;
-        }
-    }
 };
 
 // Every seed but the player's own gets an arbitrary different starting
@@ -375,38 +261,6 @@ pub const CPU_RNG_SEED: u32 = 0x853c49e6;
 
 pub var player: Board = .{};
 pub var cpu: Board = .{ .rng_state = CPU_RNG_SEED };
-
-// The shared row sequence both boards' rising rows are drawn from (see
-// board.rowForIndex) -- "predetermined at match start" and "the same for
-// both players per row" in practice: whichever board first reaches a given
-// row index (Board.rows_generated) generates and caches it here; the other
-// board just replays that exact result once it reaches the same index,
-// however much later. Deliberately keyed purely by index, never by either
-// board's own actual stack content, since that's exactly what would make
-// the two boards' sequences diverge and defeat the point -- see
-// board.pickRowColors, which avoids an accidental run of 3 against the
-// previous two rows *in this sequence*, not whatever's really on a board.
-//
-// A fixed-size ring rather than something unbounded: `shared_rows_count`
-// only ever grows, but a lookup wraps via `% SHARED_ROW_CACHE`, so a board
-// that somehow fell more than a full cache's worth of rows behind the other
-// would start reading overwritten (stale) entries -- 512 rows is roughly
-// 6-7 minutes of continuous rising even at the fastest pace (see
-// board.riseSpeedFramesPerPixel's floor), comfortably past how long a real
-// match actually runs before someone's board tops out, so this is treated
-// as effectively unbounded in practice rather than engineered against.
-pub const SHARED_ROW_CACHE: u32 = 512;
-pub var shared_row_rng_state: u32 = 0x2545f491;
-pub var shared_rows: [SHARED_ROW_CACHE][c.COLS]u8 = undefined;
-// How many rows of the shared sequence have been generated so far, across
-// the whole session -- NOT reset by resetGame (which runs once per board,
-// and resetting this from there would corrupt the cache for whichever
-// board resets second); see board.resetSharedRows, called once per match
-// instead. shared_row_rng_state itself is never reseeded at all, mirroring
-// each board's own rng_state -- it just keeps evolving continuously across
-// the whole session/every rematch, so consecutive rematches still see a
-// different sequence rather than literally the same one every time.
-pub var shared_rows_count: u32 = 0;
 
 // Who won the match once either board tops out (see board.updateDangerTimer) -- both
 // simultaneously (extremely unlikely, but possible if both boards top out
@@ -587,46 +441,6 @@ pub var cursor_idle_frames: u32 = 0;
 // input.updateSwap. Only one press is ever remembered; pressing again while
 // one is already pending changes nothing (there's nothing more to buffer).
 pub var button_pending_swap: bool = false;
-
-// True whenever touch is the active input method (see input.updateTouch) --
-// hides the player's cursor (render.drawCursor) until a gamepad button
-// brings it back (see main.zig). Touch aims directly at the block it
-// touches down on (see touch_anchor_col/row below) rather than needing to
-// see where a separate cursor currently sits, so there's nothing on-screen
-// the player needs the cursor visible for while using it.
-pub var cursor_hidden: bool = false;
-
-// Touch/mouse state: swipe-only (see input.updateTouch) -- a tap or hold
-// with no meaningful drag does nothing at all. Touching down picks a target
-// cell directly from the touch's on-board position (`touch_anchor_col/row`);
-// swiping left/right then swaps that cell with its neighbor in that
-// direction (moving the anchor along with it, so a continued drag in the
-// same direction keeps swapping the same physical block further across the
-// board), and swiping up/down retargets to the row above/below instead
-// (there's no vertical swap to perform -- blocks only ever swap
-// horizontally). Starting a new touch elsewhere re-anchors to that new
-// location, abandoning whatever the previous touch was doing.
-//
-// `touch_swipe_origin_x/y` is where the *current* swipe-detection window
-// started measuring from -- reset on every new press and every time a drag
-// crosses the swipe threshold in some direction (so one long continuous
-// drag chains multiple swipes instead of requiring separate lift-and-touch
-// gestures each time). `touch_pending_dir` implements one-deep input
-// buffering: a swipe detected while the target cell can't swap yet (e.g.
-// still mid-animation from the *previous* swap) is remembered -- only the
-// most recent one, a newer swipe always overwrites an older still-pending
-// one rather than queuing both -- and retried every frame until it
-// succeeds, so a fast continuous drag chains swaps at the fastest rate the
-// swap animation allows, with none silently dropped. A vertical (retarget)
-// request has no such waiting condition, so it always resolves the same
-// frame it's queued. Only ever drives `player` -- the CPU has no real input
-// (see cpu_ai.zig).
-pub var touch_active: bool = false;
-pub var touch_anchor_col: u8 = 0;
-pub var touch_anchor_row: u8 = 0;
-pub var touch_swipe_origin_x: i32 = 0;
-pub var touch_swipe_origin_y: i32 = 0;
-pub var touch_pending_dir: u8 = 0;
 
 const testing = std.testing;
 

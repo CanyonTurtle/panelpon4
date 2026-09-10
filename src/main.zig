@@ -2,6 +2,7 @@ const builtin = @import("builtin");
 const w4 = @import("wasm4.zig");
 const c = @import("constants.zig");
 const s = @import("state.zig");
+const touch_state = @import("state_touch.zig");
 const board = @import("board.zig");
 const sim = @import("sim.zig");
 const garbage = @import("sim_garbage.zig");
@@ -72,7 +73,7 @@ export fn update() void {
     // Any gamepad button (a direction or X) brings the cursor back -- see
     // state.cursor_hidden and input.updateTouch, which hides it the instant
     // touch starts.
-    if (gp != 0) s.cursor_hidden = false;
+    if (gp != 0) touch_state.cursor_hidden = false;
 
     // The "3 2 1 START" countdown, right after board.beginCountdown resets
     // both boards -- freezes input/simulation entirely and just renders the

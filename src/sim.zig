@@ -13,6 +13,7 @@
 const std = @import("std");
 const c = @import("constants.zig");
 const s = @import("state.zig");
+const fx = @import("state_fx.zig");
 const audio = @import("audio.zig");
 const garbage = @import("sim_garbage.zig");
 
@@ -59,8 +60,8 @@ pub fn trySwap(self: *s.Board) void {
 }
 
 pub fn simulate(self: *s.Board, opponent: *s.Board) void {
-    self.tickMatchPopups();
-    self.tickParticles();
+    fx.tickMatchPopups(self);
+    fx.tickParticles(self);
     if (self.combo_display_timer > 0) self.combo_display_timer -= 1;
     if (self.garbage_punish_timer > 0) self.garbage_punish_timer -= 1;
 
@@ -133,7 +134,7 @@ pub fn simulate(self: *s.Board, opponent: *s.Board) void {
                             if (!cell.is_garbage) {
                                 const px = c.BOARD_X + @as(i32, @intCast(col)) * c.TILE + @divTrunc(c.TILE, 2);
                                 const py = c.BOARD_Y + (@as(i32, @intCast(lr)) - @as(i32, c.SPAWN_ROWS)) * c.TILE - @as(i32, @intCast(self.scroll_px)) + @divTrunc(c.TILE, 2);
-                                self.spawnPopParticles(px, py, cell.color);
+                                fx.spawnPopParticles(self, px, py, cell.color);
                             }
                         }
                         // A garbage cell's own "turn" reads completely
@@ -160,7 +161,7 @@ pub fn simulate(self: *s.Board, opponent: *s.Board) void {
                             // (color value 1 -- see
                             // render_garbage.GARBAGE_HUE).
                             const particle_color: u8 = if (cell.garbage_reveals) cell.color else 1;
-                            self.spawnPopParticles(px, py, particle_color);
+                            fx.spawnPopParticles(self, px, py, particle_color);
                         }
                     }
                     cell.pop_group_end -= 1;

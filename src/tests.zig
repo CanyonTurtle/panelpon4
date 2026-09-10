@@ -11,6 +11,7 @@ test {
     _ = @import("sim.zig");
     _ = @import("sim_test.zig");
     _ = @import("sim_garbage_test.zig");
+    _ = @import("sim_garbage_spawn_test.zig");
     _ = @import("sim_recycle_test.zig");
     _ = @import("cpu_ai.zig");
     _ = @import("cpu_engine_test.zig");

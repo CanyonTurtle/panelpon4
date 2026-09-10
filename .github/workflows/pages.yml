@@ -24,6 +24,9 @@ jobs:
         with:
           version: 0.16.0
 
+      - name: Lint file sizes
+        run: zig build lint
+
       - name: Run unit tests
         run: zig build test
 

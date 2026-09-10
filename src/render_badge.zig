@@ -1,11 +1,12 @@
-// Rendering for the chain/combo match popup badge (see state.MatchPopup) --
-// split out from render.zig to keep that file under the project's
+// Rendering for the chain/combo match popup badge (see state_fx.MatchPopup)
+// -- split out from render.zig to keep that file under the project's
 // ~500-line-per-file guideline. Also home to the shared checkerboard-blit
 // dithering primitive (drawDitheredRectBlit), a reusable building block for
 // any future dithered-highlight effect, not just this badge.
 
 const c = @import("constants.zig");
 const s = @import("state.zig");
+const fx = @import("state_fx.zig");
 const w4 = @import("wasm4.zig");
 
 // nibble values for DRAW_COLORS color1, one per palette slot (index+1) --
@@ -133,18 +134,18 @@ pub fn drawPoints(x: i32, y: i32, points: u8) void {
 // (see render.drawPanel/render_cpu.draw) -- popups fly there. A parameter
 // rather than a fixed constant since the player and CPU panels put their
 // score at different positions/scales.
-pub fn drawMatchPopups(match_popups: []const s.MatchPopup, target_x: i32, target_y: i32) void {
+pub fn drawMatchPopups(match_popups: []const fx.MatchPopup, target_x: i32, target_y: i32) void {
     for (match_popups) |p| {
         if (!p.active) continue;
 
         var cur_x = p.x;
         var cur_y = p.y;
-        if (p.elapsed < s.MATCH_POPUP_RISE) {
+        if (p.elapsed < fx.MATCH_POPUP_RISE) {
             // Quickly eases up just a couple pixels -- a small, local hop
             // meant to catch the eye right at the match, not travel anywhere
             // (ease-out: fast start, settling in).
             const t: i32 = p.elapsed;
-            const total: i32 = s.MATCH_POPUP_RISE;
+            const total: i32 = fx.MATCH_POPUP_RISE;
             const remain = total - t;
             const num = total * total - remain * remain;
             const den = total * total;
@@ -158,7 +159,7 @@ pub fn drawMatchPopups(match_popups: []const s.MatchPopup, target_x: i32, target
             // starts slow and accelerates now that the match has cleared,
             // reading as a "magnetic pull" rather than a simple slide.
             const fly_elapsed: i32 = p.elapsed - p.pop_end;
-            const fly_total: i32 = s.MATCH_POPUP_FLY;
+            const fly_total: i32 = fx.MATCH_POPUP_FLY;
             const num = fly_elapsed * fly_elapsed;
             const den = fly_total * fly_total;
             cur_x = p.x + @divTrunc((target_x - p.x) * num, den);

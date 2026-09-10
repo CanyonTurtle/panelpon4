@@ -40,4 +40,8 @@ pub fn build(b: *std.Build) void {
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_unit_tests.step);
+
+    const run_lint = b.addSystemCommand(&.{ "bash", "tools/check-line-counts.sh" });
+    const lint_step = b.step("lint", "Check file line counts");
+    lint_step.dependOn(&run_lint.step);
 }
