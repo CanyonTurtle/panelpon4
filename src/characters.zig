@@ -126,7 +126,7 @@ pub const Character = struct {
     border_style: BorderStyle,
     base_hue: f32, // degrees; see triadicPalette -- this character's own console palette
     // Story mode's walk-up transition line, spoken as cursed opponent or
-    // party member alike (render_screens.drawStoryWalkTransition); keep under 16 chars.
+    // party member alike (render_screens.drawStoryWalkTransition); keep to 14 chars or fewer, the panel's own text width.
     dialogue: []const u8,
 };
 
@@ -147,13 +147,13 @@ pub const ROBOT_INDEX: u8 = 6;
 // Only 3 hues exist, so robot deliberately reuses mermaid's solid teal
 // (the garbage block's own accent color) and border_style cycles a second time.
 pub const ALL = [COUNT]Character{
-    .{ .name = "LIZARD", .sprite = &SPRITE_LIZARD, .face = .{ 9, 3 }, .hues = .{ 0, 0 }, .border_style = .solid, .base_hue = 0, .dialogue = "STILL CURSED..." },
-    .{ .name = "MERMAID", .sprite = &SPRITE_MERMAID, .face = .{ 7, 2 }, .hues = .{ 1, 1 }, .border_style = .checkered, .base_hue = 51, .dialogue = "LET'S FREE THEM!" },
+    .{ .name = "LIZARD", .sprite = &SPRITE_LIZARD, .face = .{ 9, 3 }, .hues = .{ 0, 0 }, .border_style = .solid, .base_hue = 0, .dialogue = "STILL CURSED" },
+    .{ .name = "MERMAID", .sprite = &SPRITE_MERMAID, .face = .{ 7, 2 }, .hues = .{ 1, 1 }, .border_style = .checkered, .base_hue = 51, .dialogue = "FREE THEM ALL!" },
     .{ .name = "BUG", .sprite = &SPRITE_BUG, .face = .{ 7, 3 }, .hues = .{ 2, 2 }, .border_style = .dashed, .base_hue = 103, .dialogue = "IT BITES AT ME" },
     .{ .name = "CLOUD", .sprite = &SPRITE_CLOUD, .face = .{ 7, 3 }, .hues = .{ 0, 2 }, .border_style = .double, .base_hue = 154, .dialogue = "SO FOGGY..." },
     .{ .name = "SLIME", .sprite = &SPRITE_SLIME, .face = .{ 7, 3 }, .hues = .{ 1, 2 }, .border_style = .solid, .base_hue = 206, .dialogue = "CAN'T STOP IT" },
-    .{ .name = "CROW", .sprite = &SPRITE_CROW, .face = .{ 8, 2 }, .hues = .{ 0, 1 }, .border_style = .checkered, .base_hue = 257, .dialogue = "SOMETHING PULLS" },
-    .{ .name = "ROBOT", .sprite = &SPRITE_ROBOT, .face = .{ 7, 4 }, .hues = .{ 1, 1 }, .border_style = .dashed, .base_hue = 309, .dialogue = "SYSTEM CORRUPTED" },
+    .{ .name = "CROW", .sprite = &SPRITE_CROW, .face = .{ 8, 2 }, .hues = .{ 0, 1 }, .border_style = .checkered, .base_hue = 257, .dialogue = "IT PULLS AT ME" },
+    .{ .name = "ROBOT", .sprite = &SPRITE_ROBOT, .face = .{ 7, 4 }, .hues = .{ 1, 1 }, .border_style = .dashed, .base_hue = 309, .dialogue = "SYSTEM ERROR" },
 };
 
 // Always differs from player_pick; `roll` mod (COUNT - 1) picks uniformly
@@ -191,14 +191,40 @@ fn hslToRgb(h_deg: f32, s: f32, l: f32) u32 {
 
 pub const TriadicPalette = struct { bg: u32, a: u32, b: u32, c: u32 };
 
-// Three hues exactly 120 degrees apart, so any two dither-blended on screen
-// still read as one real triadic wheel. bg stays dark, just lightly tinted.
+// The pre-triadic fixed palette's own red/yellow hues (0xf97690/0xfbef6a,
+// recovered via HSL -- not round numbers since matching perceived hue matters more than a tidy constant).
+const RED_ANCHOR: f32 = 348.09;
+const YELLOW_ANCHOR: f32 = 55.03;
+
+fn circularDist(a: f32, b: f32) f32 {
+    const raw = @mod(a - b, 360.0);
+    return @abs(if (raw > 180.0) raw - 360.0 else raw);
+}
+
+// Which candidate offset (0, 120, or 240) reads closest to RED_ANCHOR.
+fn reddestOffset(base_hue_deg: f32) f32 {
+    const d0 = circularDist(base_hue_deg, RED_ANCHOR);
+    const d120 = circularDist(base_hue_deg + 120.0, RED_ANCHOR);
+    const d240 = circularDist(base_hue_deg + 240.0, RED_ANCHOR);
+    if (d0 <= d120 and d0 <= d240) return 0.0;
+    if (d120 <= d240) return 120.0;
+    return 240.0;
+}
+
+// 3 hues, 120 degrees apart -- reassigned by closeness so `a` (HEART) is
+// always the reddest of the 3, `c` (STAR) the yellowest of what's left, `b` (TRIANGLE) whatever remains.
 pub fn triadicPalette(base_hue_deg: f32) TriadicPalette {
+    const red_hue = base_hue_deg + reddestOffset(base_hue_deg);
+    const other1 = red_hue + 120.0;
+    const other2 = red_hue + 240.0;
+    const other1_is_yellow = circularDist(other1, YELLOW_ANCHOR) <= circularDist(other2, YELLOW_ANCHOR);
+    const yellow_hue = if (other1_is_yellow) other1 else other2;
+    const teal_hue = if (other1_is_yellow) other2 else other1;
     return .{
         .bg = hslToRgb(base_hue_deg, 0.30, 0.11),
-        .a = hslToRgb(base_hue_deg, 0.72, 0.68),
-        .b = hslToRgb(base_hue_deg + 120.0, 0.72, 0.68),
-        .c = hslToRgb(base_hue_deg + 240.0, 0.72, 0.68),
+        .a = hslToRgb(red_hue, 0.72, 0.68),
+        .b = hslToRgb(teal_hue, 0.72, 0.68),
+        .c = hslToRgb(yellow_hue, 0.72, 0.68),
     };
 }
 
@@ -241,17 +267,47 @@ test "hslToRgb wraps negative and >360 hues the same as their canonical hue" {
     try testing.expectEqual(hslToRgb(30, 0.6, 0.5), hslToRgb(-330, 0.6, 0.5));
 }
 
-test "triadicPalette's 3 hues are always exactly 120 degrees apart" {
+test "triadicPalette's a/b/c are always some rotation of base/+120/+240" {
     const testing = @import("std").testing;
     var base: f32 = 0;
-    while (base < 360) : (base += 37) {
+    while (base < 360) : (base += 7) {
         const p = triadicPalette(base);
-        // Reconstructing hue from RGB is lossy at the boundaries, so just
-        // confirm each color is exactly what base/base+120/base+240 produce.
-        try testing.expectEqual(hslToRgb(base, 0.72, 0.68), p.a);
-        try testing.expectEqual(hslToRgb(base + 120.0, 0.72, 0.68), p.b);
-        try testing.expectEqual(hslToRgb(base + 240.0, 0.72, 0.68), p.c);
+        const cands = [3]u32{
+            hslToRgb(base, 0.72, 0.68),
+            hslToRgb(base + 120.0, 0.72, 0.68),
+            hslToRgb(base + 240.0, 0.72, 0.68),
+        };
+        // a/b/c is some permutation of the 3 raw triadic candidates --
+        // reassigned by closeness (see reddestOffset), never invented.
+        for ([3]u32{ p.a, p.b, p.c }) |color| {
+            const found = color == cands[0] or color == cands[1] or color == cands[2];
+            try testing.expect(found);
+        }
+        // And genuinely a permutation, not the same candidate reused twice.
+        try testing.expect(p.a != p.b and p.b != p.c and p.a != p.c);
     }
+}
+
+test "triadicPalette's `a` is always this character's reddest of the 3 hues" {
+    const testing = @import("std").testing;
+    var base: f32 = 0;
+    while (base < 360) : (base += 7) {
+        const p = triadicPalette(base);
+        const da = circularDist(hueOf(p.a), RED_ANCHOR);
+        const db = circularDist(hueOf(p.b), RED_ANCHOR);
+        const dc = circularDist(hueOf(p.c), RED_ANCHOR);
+        try testing.expect(da <= db and da <= dc);
+    }
+}
+
+// Recovers a candidate's hue from its known 0.72/0.68 saturation/lightness --
+// lossy in general, but exact here since this same hslToRgb generated it.
+fn hueOf(rgb: u32) f32 {
+    var probe: f32 = 0;
+    while (probe < 360) : (probe += 1) {
+        if (hslToRgb(probe, 0.72, 0.68) == rgb) return probe;
+    }
+    unreachable; // every candidate this test feeds in came from hslToRgb itself
 }
 
 test "every character's base_hue is in [0, 360) and all 7 are distinct" {

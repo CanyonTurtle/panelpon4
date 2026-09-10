@@ -15,22 +15,22 @@ const characters = @import("characters.zig");
 const game_modes = @import("game_modes.zig");
 const tutorial = @import("tutorial.zig");
 
-// mode_select's own up/down cycling order, top to bottom: quick -> story ->
-// tutorial -> versus -> wraps back to quick (must match its displayed order).
+// mode_select's own up/down cycling order, top to bottom: tutorial -> quick ->
+// story -> versus -> wraps back to tutorial (must match its displayed order).
 fn prevMode(m: s.GameMode) s.GameMode {
     return switch (m) {
-        .quick => .versus,
+        .tutorial => .versus,
+        .quick => .tutorial,
         .story => .quick,
-        .tutorial => .story,
-        .versus => .tutorial,
+        .versus => .story,
     };
 }
 fn nextMode(m: s.GameMode) s.GameMode {
     return switch (m) {
+        .tutorial => .quick,
         .quick => .story,
-        .story => .tutorial,
-        .tutorial => .versus,
-        .versus => .quick,
+        .story => .versus,
+        .versus => .tutorial,
     };
 }
 
@@ -59,6 +59,28 @@ fn beginStoryFlow(advancing: bool) void {
         return;
     }
     s.story_flow_timer = 0;
+}
+
+// Attract mode: s.player/s.cpu play themselves via cpu_ai while the title
+// screen is up -- safe, since beginCountdown always resets both before any real match.
+fn updateTitleDemo() void {
+    cpu_ai.update(&s.player);
+    cpu_ai.update(&s.cpu);
+    sim.simulate(&s.player, &s.cpu);
+    sim.simulate(&s.cpu, &s.player);
+    garbage.resolveChainEnd(&s.player, &s.cpu);
+    garbage.resolveChainEnd(&s.cpu, &s.player);
+    garbage.releaseIncomingGarbage(&s.player);
+    garbage.releaseIncomingGarbage(&s.cpu);
+    board.updateRise(&s.player);
+    board.updateRise(&s.cpu);
+    board.updateDangerTimer(&s.player);
+    board.updateDangerTimer(&s.cpu);
+    if (s.player.game_over or s.cpu.game_over) {
+        board.resetSharedRows();
+        board.resetGame(&s.player);
+        board.resetGame(&s.cpu);
+    }
 }
 
 // Debug-only WASM exports (see debug.zig) for the JS test harness to drive;
@@ -180,6 +202,7 @@ export fn update() void {
         if (s.menu_transition_flash > 0) s.menu_transition_flash -= 1;
         switch (s.menu_phase) {
             .title => {
+                updateTitleDemo();
                 render.drawTitleScreen();
                 if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) setMenuPhase(.mode_select);
             },

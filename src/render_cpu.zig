@@ -188,7 +188,9 @@ fn closingWipedRows() u8 {
     return @intCast(@min(rows, c.RING_SIZE));
 }
 
-fn drawMicroBoard(b: *s.Board, character: u8, origin_x: i32, origin_y: i32) void {
+// pub: also reused by render_screens.drawTitleScreen for its attract-mode
+// demo boards, at positions of its own choosing.
+pub fn drawMicroBoard(b: *s.Board, character: u8, origin_x: i32, origin_y: i32) void {
     const clip_top = origin_y;
     const clip_bottom = origin_y + BOARD_H;
     // Proportional scroll: rescaled from the main board's TILE units to

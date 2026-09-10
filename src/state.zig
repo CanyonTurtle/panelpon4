@@ -163,7 +163,9 @@ pub var menu_transition_flash: u32 = 0;
 // story/quick/versus as before; tutorial is a scripted single-board
 // walkthrough (see tutorial.zig) with GAMEPAD2 driving `cpu` in versus only.
 pub const GameMode = enum { quick, story, tutorial, versus };
-pub var game_mode: GameMode = .quick;
+// Tutorial is first (main.zig's prevMode/nextMode, render_screens'
+// GAME_MODE_LABELS) so a new player's default highlight is the onboarding path.
+pub var game_mode: GameMode = .tutorial;
 
 // The tutorial's fixed lesson sequence (see tutorial.zig for content/logic).
 pub const TutorialStep = enum { intro, move, swap, match, chain, garbage, raise, outro };

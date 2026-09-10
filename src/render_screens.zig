@@ -13,6 +13,7 @@ const game_modes = @import("game_modes.zig");
 const cells = @import("render_cells.zig");
 const render = @import("render.zig");
 const logo = @import("logo.zig");
+const rcpu = @import("render_cpu.zig");
 
 const MENU_PANEL_X: i32 = 20;
 const MENU_PANEL_W: i32 = 120;
@@ -80,25 +81,33 @@ fn titleLogoBob() i32 {
     return @divTrunc(dist, 12) - 2;
 }
 
+// No panel -- s.player/s.cpu play themselves live (main.zig's updateTitleDemo),
+// flanking the logo. Fixed characters, not whichever the player last picked.
+const TITLE_BOARD_Y: i32 = 58;
+const TITLE_BOARD_L_X: i32 = 20;
+const TITLE_BOARD_R_X: i32 = 98;
+
 pub fn drawTitleScreen() void {
-    const y = drawMenuPanelFill(30, 100);
-    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100);
-    const logo_x = MENU_PANEL_X + @divTrunc(MENU_PANEL_W - logo.TOTAL_W, 2);
-    drawLogo(logo_x, y + 24 + titleLogoBob());
-    w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("PRESS X", 52, y + 64);
+    bg.draw();
+    rcpu.drawMicroBoard(&s.player, characters.LIZARD_INDEX, TITLE_BOARD_L_X, TITLE_BOARD_Y);
+    rcpu.drawMicroBoard(&s.cpu, characters.CROW_INDEX, TITLE_BOARD_R_X, TITLE_BOARD_Y);
+
+    const logo_x = @divTrunc(160 - logo.TOTAL_W, 2);
+    drawLogo(logo_x, 16 - panelSlideOffset() + titleLogoBob());
+    w4.DRAW_COLORS.* = 0x0004;
+    w4.Text("PRESS X", 52, 40);
 }
 
 // Uses the title screen's plain bezel, not a character-themed one. Order
 // must match state.GameMode's up/down cycling order (main.zig) top to bottom.
-const GAME_MODE_LABELS = [4][]const u8{ "1P QUICK MATCH", "1P STORY", "TUTORIAL", "2P VERSUS" };
+const GAME_MODE_LABELS = [4][]const u8{ "TUTORIAL", "1P QUICK MATCH", "1P STORY", "2P VERSUS" };
 const MODE_SELECT_PANEL_H: i32 = 114;
 const MODE_LIST_STEP: i32 = 12;
 fn gameModeIndex(m: s.GameMode) u8 {
     return switch (m) {
-        .quick => 0,
-        .story => 1,
-        .tutorial => 2,
+        .tutorial => 0,
+        .quick => 1,
+        .story => 2,
         .versus => 3,
     };
 }
@@ -407,17 +416,18 @@ pub fn drawStoryWalkTransition() void {
     rchar.draw(foe_x, row_y, s.cpu_character, .normal, frame);
     cells.drawDitheredRectOutline(foe_x - 2, row_y - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
 
-    // Each speaker gets 2 lines (name, then their dialogue) -- name+dialogue
-    // combined can run past the 20-char screen width, so they never share a line.
+    // Each speaker gets 2 lines (name, dialogue), inset to the panel's left
+    // margin -- dialogue is capped at 14 chars (Character.dialogue) so it fits.
+    const text_x = 24;
     const text_y = row_y + rchar.H + 8;
     w4.DRAW_COLORS.* = 0x0004;
-    w4.Text(characters.ALL[s.cpu_character].name, 4, text_y);
-    w4.Text(characters.ALL[s.cpu_character].dialogue, 4, text_y + 9);
+    w4.Text(characters.ALL[s.cpu_character].name, text_x, text_y);
+    w4.Text(characters.ALL[s.cpu_character].dialogue, text_x, text_y + 9);
 
     if (s.story_flow_timer >= c.STORY_WALK_TRANSITION_FRAMES) {
         w4.DRAW_COLORS.* = 0x0002;
-        w4.Text(characters.ALL[s.player_character].name, 4, text_y + 22);
-        w4.Text(characters.ALL[s.player_character].dialogue, 4, text_y + 31);
+        w4.Text(characters.ALL[s.player_character].name, text_x, text_y + 22);
+        w4.Text(characters.ALL[s.player_character].dialogue, text_x, text_y + 31);
         w4.Text("PRESS X", 52, y + 108);
     }
 }
