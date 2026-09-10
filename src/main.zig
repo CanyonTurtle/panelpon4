@@ -42,6 +42,7 @@ pub fn setMenuPhase(new: s.MenuPhase) void {
     s.menu_phase = new;
     s.menu_phase_timer = 0;
     s.menu_transition_flash = MENU_FLASH_FRAMES;
+    audio.playTransitionJingle();
 }
 
 // Enters whichever mid-run screen (or none) fits after a stage resolves --
@@ -119,6 +120,7 @@ export fn start() void {
 export fn update() void {
     s.frame_count += 1;
     render.updatePalette();
+    audio.updateMusic();
     const gp = w4.GAMEPAD1.*;
     // Read every frame regardless of mode so cpu_prev_gamepad's "was this
     // just pressed" history stays accurate across countdown/menu screens too.
@@ -402,7 +404,9 @@ export fn update() void {
             s.winner = .player;
         }
         if (s.winner != .none and !was_over) {
-            audio.playGameOverSound();
+            // Versus's main seat isn't always s.player (state.versus_render_swapped).
+            const main_side: s.Winner = if (s.versus_render_swapped) .cpu else .player;
+            if (s.winner == main_side) audio.playWinJingle() else audio.playLoseJingle();
             board.beginClosing();
             // Quick match's "big combo" unlock (GAMEPAD1 always drives s.player).
             game_modes.maybeUnlockForCombo(s.player.combo_display);
