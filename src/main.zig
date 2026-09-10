@@ -37,8 +37,8 @@ fn nextMode(m: s.GameMode) s.GameMode {
 const MENU_FLASH_FRAMES: u32 = 4;
 
 // The only place menu_phase should ever be assigned -- resets the ease-in
-// slide and flash-cut transition (see render_screens.zig/render.zig) together.
-fn setMenuPhase(new: s.MenuPhase) void {
+// slide and flash-cut transition together. pub: also used by debug.setMenuPhase.
+pub fn setMenuPhase(new: s.MenuPhase) void {
     s.menu_phase = new;
     s.menu_phase_timer = 0;
     s.menu_transition_flash = MENU_FLASH_FRAMES;
@@ -103,6 +103,8 @@ comptime {
         @export(&debug.getDangerTimer, .{ .name = "debugGetDangerTimer" });
         @export(&debug.setGameOver, .{ .name = "debugSetGameOver" });
         @export(&debug.setTutorialStep, .{ .name = "debugSetTutorialStep" });
+        @export(&debug.setMenuPhase, .{ .name = "debugSetMenuPhase" });
+        @export(&debug.setStoryFlowStep, .{ .name = "debugSetStoryFlowStep" });
     }
 }
 

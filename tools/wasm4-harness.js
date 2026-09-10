@@ -323,6 +323,11 @@ async function loadCart(wasmPath) {
     setGameOver: (board, over) => e.debugSetGameOver(board, over ? 1 : 0),
     // 0=intro, 1=move, 2=swap, 3=match, 4=chain, 5=garbage, 6=raise, 7=outro
     setTutorialStep: (step) => e.debugSetTutorialStep(step),
+    // 0=title, 1=mode_select, 2=setup_character, 3=setup_cpu_reveal,
+    // 4=setup_difficulty, 5=story_tier_select, 6=versus_confirm (state.MenuPhase)
+    setMenuPhase: (phase) => e.debugSetMenuPhase(phase),
+    // 0=none, 1=character_select, 2=walk_transition (state.StoryFlowStep)
+    setStoryFlowStep: (step) => e.debugSetStoryFlowStep(step),
   } : undefined;
 
   return { e, mem8, view, memory, setGamepad, setMouse, step, pressButton1, screenshot, debug };

@@ -2,7 +2,10 @@
 // fn`s; main.zig exports them as WASM only in Debug builds.
 
 const s = @import("state.zig");
+const c = @import("constants.zig");
 const tutorial = @import("tutorial.zig");
+const characters = @import("characters.zig");
+const main = @import("main.zig");
 
 fn boardFor(board: u32) *s.Board {
     return if (board == 0) &s.player else &s.cpu;
@@ -100,4 +103,27 @@ pub fn setGameOver(board: u32, over: u32) callconv(.c) void {
 // ordinal) instead of a script having to play every earlier step for real.
 pub fn setTutorialStep(step: u32) callconv(.c) void {
     tutorial.beginStep(@enumFromInt(@as(u8, @intCast(step))));
+}
+
+// Jumps straight to any pre-game menu screen (state.MenuPhase's ordinal),
+// via the same setMenuPhase every real navigation uses -- no title -> mode select -> ... click-through needed.
+pub fn setMenuPhase(phase: u32) callconv(.c) void {
+    s.started = false;
+    const p: s.MenuPhase = @enumFromInt(@as(u8, @intCast(phase)));
+    // Real navigation always seeds this before arriving here (setup_character's
+    // confirm) -- a zero timer underflows the very next frame's decrement.
+    if (p == .setup_cpu_reveal) s.cpu_reveal_timer = c.CPU_REVEAL_HOLD_BASE;
+    main.setMenuPhase(p);
+}
+
+// Jumps straight to a mid-run story screen (state.StoryFlowStep's ordinal),
+// seeding just enough state (a freed Mermaid) for it to render sensibly on its own.
+pub fn setStoryFlowStep(step: u32) callconv(.c) void {
+    s.started = true;
+    s.game_mode = .story;
+    s.player_character = characters.MERMAID_INDEX;
+    s.story_select_cursor = characters.MERMAID_INDEX;
+    s.story_party[characters.MERMAID_INDEX] = true;
+    s.story_flow_step = @enumFromInt(@as(u8, @intCast(step)));
+    s.story_flow_timer = 0;
 }
