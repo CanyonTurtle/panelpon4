@@ -91,6 +91,8 @@ pub fn drawTitleScreen() void {
     bg.draw();
     rcpu.drawMicroBoard(&s.player, characters.LIZARD_INDEX, TITLE_BOARD_L_X, TITLE_BOARD_Y);
     rcpu.drawMicroBoard(&s.cpu, characters.CROW_INDEX, TITLE_BOARD_R_X, TITLE_BOARD_Y);
+    rcpu.drawMicroCursor(&s.player, TITLE_BOARD_L_X, TITLE_BOARD_Y);
+    rcpu.drawMicroCursor(&s.cpu, TITLE_BOARD_R_X, TITLE_BOARD_Y);
 
     const logo_x = @divTrunc(160 - logo.TOTAL_W, 2);
     drawLogo(logo_x, 16 - panelSlideOffset() + titleLogoBob());

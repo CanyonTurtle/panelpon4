@@ -236,9 +236,9 @@ pub fn drawMicroBoard(b: *s.Board, character: u8, origin_x: i32, origin_y: i32) 
     drawThemedEdge(origin_x + w, origin_y - 1, BOARD_H + 2, char.hues, char.border_style, false);
 }
 
-// Same warm dither as the player's cursor (render.drawCursor), just without
-// the pulse/contract animation (not worth it at this scale).
-fn drawMicroCursor(b: *s.Board, origin_x: i32, origin_y: i32) void {
+// Same warm dither as the player's cursor, no pulse/contract animation --
+// pub since render_screens.drawTitleScreen also uses it for its demo boards.
+pub fn drawMicroCursor(b: *s.Board, origin_x: i32, origin_y: i32) void {
     if (s.winner != .none) return;
     const micro_scroll = @divTrunc(@as(i32, @intCast(b.scroll_px)) * MICRO_TILE, c.TILE);
     const x = origin_x + @as(i32, b.cursor_col) * MICRO_TILE;

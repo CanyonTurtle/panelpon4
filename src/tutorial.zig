@@ -106,11 +106,13 @@ fn seedMatch() void {
     s.player.cellAt(16, 3).* = .{ .color = 1, .state = .normal };
 }
 
-// Same match as above, plus a garbage cell resting on col 1 that the match
-// propagates into and converts.
+// Same match as above, plus a full-width garbage row dropped from the very
+// top of the visible board -- gravity carries it down onto row 16's match setup, visibly falling into place.
 fn seedGarbage() void {
     seedMatch();
-    s.player.cellAt(15, 1).* = .{ .state = .normal, .is_garbage = true };
+    for (0..c.COLS) |col| {
+        s.player.cellAt(c.SPAWN_ROWS, @intCast(col)).* = .{ .state = .normal, .is_garbage = true };
+    }
 }
 
 // The known-good "sets off a 2-deep chain" fixture from cpu_engine_test.zig;
@@ -129,11 +131,18 @@ fn seedChain() void {
     s.player.cellAt(21, 3).* = .{ .color = 4, .state = .normal };
 }
 
+// A tall filler stack so the first Z press visibly shifts something -- an
+// empty board has nothing to show moving. Rows 10-14 stay clear as headroom.
+fn seedRaise() void {
+    fillFloor(&.{ 0, 1, 2, 3, 4, 5 }, 15, 22);
+}
+
 // Cursor position and cell layout for a step's first entry. Repeats within
 // a step (match/garbage) call the matching seed*() directly instead.
 fn seedStep(step: s.TutorialStep) void {
     switch (step) {
-        .intro, .move, .raise, .outro => {},
+        .intro, .move, .outro => {},
+        .raise => seedRaise(),
         .swap => {
             s.player.cursor_row = 6;
             s.player.cursor_col = 2;
@@ -163,7 +172,8 @@ var last_row: u8 = 0;
 var last_score: u32 = 0;
 var last_raise_elapsed: u32 = 0;
 
-fn beginStep(step: s.TutorialStep) void {
+// pub: also used by debug.setTutorialStep, for scripted testing.
+pub fn beginStep(step: s.TutorialStep) void {
     s.player = s.Board{};
     s.tutorial_step = step;
     progress = 0;

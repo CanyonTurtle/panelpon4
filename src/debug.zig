@@ -2,6 +2,7 @@
 // fn`s; main.zig exports them as WASM only in Debug builds.
 
 const s = @import("state.zig");
+const tutorial = @import("tutorial.zig");
 
 fn boardFor(board: u32) *s.Board {
     return if (board == 0) &s.player else &s.cpu;
@@ -93,4 +94,10 @@ pub fn getDangerTimer(board: u32) callconv(.c) u32 {
 // closing wipe, story-flow transitions and all) instead of playing it out.
 pub fn setGameOver(board: u32, over: u32) callconv(.c) void {
     boardFor(board).game_over = over != 0;
+}
+
+// Jumps straight to a tutorial step's own seeded fixture (state.TutorialStep's
+// ordinal) instead of a script having to play every earlier step for real.
+pub fn setTutorialStep(step: u32) callconv(.c) void {
+    tutorial.beginStep(@enumFromInt(@as(u8, @intCast(step))));
 }

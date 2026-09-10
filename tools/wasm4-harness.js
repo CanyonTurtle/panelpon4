@@ -321,6 +321,8 @@ async function loadCart(wasmPath) {
       return { col: v & 0xff, row: (v >> 8) & 0xff };
     },
     setGameOver: (board, over) => e.debugSetGameOver(board, over ? 1 : 0),
+    // 0=intro, 1=move, 2=swap, 3=match, 4=chain, 5=garbage, 6=raise, 7=outro
+    setTutorialStep: (step) => e.debugSetTutorialStep(step),
   } : undefined;
 
   return { e, mem8, view, memory, setGamepad, setMouse, step, pressButton1, screenshot, debug };

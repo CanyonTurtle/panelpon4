@@ -102,6 +102,7 @@ comptime {
         @export(&debug.getManualRaiseElapsed, .{ .name = "debugGetManualRaiseElapsed" });
         @export(&debug.getDangerTimer, .{ .name = "debugGetDangerTimer" });
         @export(&debug.setGameOver, .{ .name = "debugSetGameOver" });
+        @export(&debug.setTutorialStep, .{ .name = "debugSetTutorialStep" });
     }
 }
 
