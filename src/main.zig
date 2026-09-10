@@ -135,6 +135,9 @@ export fn update() void {
     // neither real gameplay nor a MenuPhase, so they get their own branch.
     if (s.started and s.game_mode == .story and s.story_flow_step != .none) {
         s.story_flow_timer += 1;
+        // X carried over (held or mashed) from confirming the previous
+        // screen must not instantly confirm this one too.
+        const flow_confirmed = input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1) and s.story_flow_timer >= c.STORY_WALK_TRANSITION_FRAMES;
         switch (s.story_flow_step) {
             .character_select => {
                 render.drawStoryCharacterSelect();
@@ -144,7 +147,7 @@ export fn update() void {
                 if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_RIGHT)) {
                     s.story_select_cursor = game_modes.nextUnlocked(s.story_party, s.story_select_cursor);
                 }
-                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
+                if (flow_confirmed) {
                     s.player_character = s.story_select_cursor;
                     if (s.story_flow_advancing) {
                         s.story_flow_step = .walk_transition;
@@ -157,8 +160,7 @@ export fn update() void {
             },
             .walk_transition => {
                 render.drawStoryWalkTransition();
-                // Let the walk-up animation finish before X can skip ahead.
-                if (s.story_flow_timer >= c.STORY_WALK_TRANSITION_FRAMES and input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
+                if (flow_confirmed) {
                     s.story_flow_step = .none;
                     board.beginCountdown();
                 }
