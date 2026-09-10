@@ -31,11 +31,49 @@ pub const drawTutorialCaption = screens_game.drawTutorialCaption;
 pub const FRAME_THICKNESS: i32 = 2;
 const FRAME_RADIUS: i32 = 2;
 
-pub fn setupPalette() void {
-    w4.PALETTE[0] = 0x1a1c2c; // background
-    w4.PALETTE[1] = 0xf97690; // hue A: red
-    w4.PALETTE[2] = 0x36e4e7; // hue B: teal (dithers with A -> purple, with C -> green)
-    w4.PALETTE[3] = 0xfbef6a; // hue C: yellow
+fn applyPalette(p: characters.TriadicPalette) void {
+    w4.PALETTE[0] = p.bg;
+    w4.PALETTE[1] = p.a;
+    w4.PALETTE[2] = p.b;
+    w4.PALETTE[3] = p.c;
+}
+
+// Cycles the wheel while no character is locked in yet, then locks to the
+// chosen character's own hue -- reskins the whole console palette per pick.
+fn currentPaletteHue() f32 {
+    const animating = !s.started and switch (s.menu_phase) {
+        .title, .mode_select, .versus_confirm => true,
+        else => false,
+    };
+    if (animating) return @mod(@as(f32, @floatFromInt(s.frame_count)) * 0.25, 360.0);
+    return characters.ALL[s.player_character].base_hue;
+}
+
+// Called once per frame (see main.zig) -- cheap enough (4 palette writes)
+// that recomputing unconditionally beats tracking exactly when it changed.
+pub fn updatePalette() void {
+    applyPalette(characters.triadicPalette(currentPaletteHue()));
+}
+
+// A brief flash-and-dissolve punch on every menu_phase change: solid, then
+// a coarsening dithered checkerboard, drawn last to overlay the new screen.
+pub fn drawMenuTransitionFlash() void {
+    const t = s.menu_transition_flash;
+    if (t == 0) return;
+    w4.DRAW_COLORS.* = 0x0004;
+    if (t >= 3) {
+        w4.Rect(0, 0, w4.SCREEN_SIZE, w4.SCREEN_SIZE);
+        return;
+    }
+    const step: i32 = if (t == 2) 4 else 8;
+    const screen: i32 = @intCast(w4.SCREEN_SIZE);
+    var y: i32 = 0;
+    while (y < screen) : (y += 2) {
+        var x: i32 = 0;
+        while (x < screen) : (x += 2) {
+            if (@mod(x + y, step) == 0) w4.Rect(x, y, 2, 2);
+        }
+    }
 }
 
 pub fn clearBackground() void {

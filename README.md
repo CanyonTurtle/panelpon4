@@ -100,6 +100,11 @@ background, leaving 3 real hues. To get 5 distinguishable block colors out of th
 drawn as a 1px checkerboard dither blending two adjacent hues -- a deliberate adaptation to the
 console's real constraints.
 
+Those 3 hues aren't fixed: each character owns a base hue, and the other two are generated exactly
+120 degrees apart on the color wheel (see `characters.triadicPalette`), so picking a character
+reskins the entire console palette to a fresh triadic set instead of just recoloring a sprite. The
+title/mode-select screens slowly rotate through the wheel until a character locks it in.
+
 ## Project layout
 
 The game is organized as plain-data state plus a handful of systems that act on it, rather than
@@ -119,8 +124,9 @@ CPU's board.
   `render_character.zig`/`render_screens.zig`/`render_screens_game.zig` (the pieces that split out
   of those two to stay under the file-size guideline).
 - **Input**: `input.zig` -- gamepad (with DAS and one-deep swap buffering) and touch/swipe.
-- **Game data & modes**: `characters.zig` (the 7 playable characters), `symbols.zig` (block glyph
-  art), `game_modes.zig` (story-mode difficulty tiers and profiles), `constants.zig` (shared
+- **Game data & modes**: `characters.zig` (the 7 playable characters, and the triadic-palette
+  math above), `symbols.zig` (block glyph art), `logo.zig` (the title screen's bubble-letter
+  wordmark), `game_modes.zig` (story-mode difficulty tiers and profiles), `constants.zig` (shared
   layout/timing values), `garbage_pieces.zig` (grouping settled garbage into pieces, for marking).
 - **Entry point & support**: `main.zig` (wires everything behind WASM-4's `start`/`update`),
   `audio.zig` (sound effects), `debug.zig` (debug-build-only scripted-testing hooks), `wasm4.zig`

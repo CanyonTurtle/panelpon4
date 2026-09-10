@@ -12,17 +12,36 @@ const rchar = @import("render_character.zig");
 const game_modes = @import("game_modes.zig");
 const cells = @import("render_cells.zig");
 const render = @import("render.zig");
+const logo = @import("logo.zig");
 
 const MENU_PANEL_X: i32 = 20;
 const MENU_PANEL_W: i32 = 120;
 
-// Common backdrop for every pre-game screen; callers draw their own border
-// and content into the returned Y. `base_y`/`h` are each caller's own choice.
+const PANEL_EASE_FRAMES: u32 = 14;
+const PANEL_SLIDE_DIST: i32 = 30;
+
+fn easeOutCubic(t: f32) f32 {
+    const f = t - 1.0;
+    return f * f * f + 1.0;
+}
+
+// Distance still left to slide, decelerating to 0 as menu_phase_timer
+// reaches PANEL_EASE_FRAMES (see main.zig's setMenuPhase).
+fn panelSlideOffset() i32 {
+    if (s.menu_phase_timer >= PANEL_EASE_FRAMES) return 0;
+    const t = @as(f32, @floatFromInt(s.menu_phase_timer)) / @as(f32, @floatFromInt(PANEL_EASE_FRAMES));
+    const remaining = 1.0 - easeOutCubic(t);
+    return @intFromFloat(@round(@as(f32, @floatFromInt(PANEL_SLIDE_DIST)) * remaining));
+}
+
+// Common backdrop; the returned Y eases in from above on every fresh
+// menu_phase -- everything downstream reuses it, so the screen slides in together.
 fn drawMenuPanelFill(base_y: i32, h: i32) i32 {
     bg.draw();
+    const y = base_y - panelSlideOffset();
     w4.DRAW_COLORS.* = 0x0001;
-    w4.Rect(MENU_PANEL_X, base_y, MENU_PANEL_W, @intCast(h));
-    return base_y;
+    w4.Rect(MENU_PANEL_X, y, MENU_PANEL_W, @intCast(h));
+    return y;
 }
 
 // A plain (unchamfered) themed border, same treatment render.drawFrame
@@ -35,11 +54,33 @@ fn drawThemedPanelBorder(x: i32, y: i32, w: i32, h: i32, char: characters.Charac
     render.drawThemedBand(x + w - t, y, t, h, char.hues, char.border_style, false);
 }
 
+// The big bubble-letter wordmark (see logo.zig) -- top few rows draw as a
+// lighter "shine" tone, everything else the main fill, for a glossy look.
+const LOGO_HIGHLIGHT_ROWS: usize = 4;
+fn drawLogo(x0: i32, y0: i32) void {
+    for (logo.WORD, 0..) |glyph, gi| {
+        const gx = x0 + @as(i32, @intCast(gi)) * logo.STRIDE;
+        for (glyph, 0..) |row, ry| {
+            for (row, 0..) |ch, rx| {
+                if (ch != '#') continue;
+                w4.DRAW_COLORS.* = if (ry < LOGO_HIGHLIGHT_ROWS) 0x0003 else 0x0004;
+                w4.Rect(gx + @as(i32, @intCast(rx)), y0 + @as(i32, @intCast(ry)), 1, 1);
+            }
+        }
+    }
+}
+
+// A slow, gentle bob so the logo feels alive rather than static.
+fn titleLogoBob() i32 {
+    const t = @as(f32, @floatFromInt(s.frame_count)) * 0.05;
+    return @intFromFloat(@round(std.math.sin(t) * 2.0));
+}
+
 pub fn drawTitleScreen() void {
     const y = drawMenuPanelFill(30, 100);
     drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100);
-    w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("PANELPON4", 40, y + 24);
+    const logo_x = MENU_PANEL_X + @divTrunc(MENU_PANEL_W - logo.TOTAL_W, 2);
+    drawLogo(logo_x, y + 24 + titleLogoBob());
     w4.DRAW_COLORS.* = 0x0002;
     w4.Text("PRESS X", 52, y + 64);
 }

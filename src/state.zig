@@ -152,6 +152,12 @@ pub var started: bool = false;
 // connection before a countdown, since joining mid-match desyncs peers.
 pub const MenuPhase = enum { title, mode_select, setup_character, setup_cpu_reveal, setup_difficulty, story_tier_select, versus_confirm };
 pub var menu_phase: MenuPhase = .title;
+// Frames since menu_phase last changed (see main.zig's setMenuPhase) --
+// drives the panel's ease-in slide and flash-cut transition below.
+pub var menu_phase_timer: u32 = 0;
+// Counts down from a fixed value the instant menu_phase changes, driving a
+// brief flash-and-dissolve overlay -- purely cosmetic, never gates input.
+pub var menu_transition_flash: u32 = 0;
 
 // story/quick/versus as before; tutorial is a scripted single-board
 // walkthrough (see tutorial.zig) with GAMEPAD2 driving `cpu` in versus only.

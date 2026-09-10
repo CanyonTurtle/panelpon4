@@ -124,6 +124,7 @@ pub const Character = struct {
     face: [2]i32, // where the shared expression (eyes/mouth) centers, relative to the sprite's own top-left
     hues: [2]u8, // index into HUE_DRAWCOLOR (0=red,1=teal,2=yellow); equal = solid fill, different = dithered
     border_style: BorderStyle,
+    base_hue: f32, // degrees; see triadicPalette -- this character's own console palette
 };
 
 pub const COUNT = 7;
@@ -131,13 +132,13 @@ pub const COUNT = 7;
 // Only 3 hues exist, so robot deliberately reuses mermaid's solid teal
 // (the garbage block's own accent color) and border_style cycles a second time.
 pub const ALL = [COUNT]Character{
-    .{ .name = "LIZARD", .sprite = &SPRITE_LIZARD, .face = .{ 9, 3 }, .hues = .{ 0, 0 }, .border_style = .solid },
-    .{ .name = "MERMAID", .sprite = &SPRITE_MERMAID, .face = .{ 7, 2 }, .hues = .{ 1, 1 }, .border_style = .checkered },
-    .{ .name = "BUG", .sprite = &SPRITE_BUG, .face = .{ 7, 3 }, .hues = .{ 2, 2 }, .border_style = .dashed },
-    .{ .name = "CLOUD", .sprite = &SPRITE_CLOUD, .face = .{ 7, 3 }, .hues = .{ 0, 2 }, .border_style = .double },
-    .{ .name = "SLIME", .sprite = &SPRITE_SLIME, .face = .{ 7, 3 }, .hues = .{ 1, 2 }, .border_style = .solid },
-    .{ .name = "CROW", .sprite = &SPRITE_CROW, .face = .{ 8, 2 }, .hues = .{ 0, 1 }, .border_style = .checkered },
-    .{ .name = "ROBOT", .sprite = &SPRITE_ROBOT, .face = .{ 7, 4 }, .hues = .{ 1, 1 }, .border_style = .dashed },
+    .{ .name = "LIZARD", .sprite = &SPRITE_LIZARD, .face = .{ 9, 3 }, .hues = .{ 0, 0 }, .border_style = .solid, .base_hue = 0 },
+    .{ .name = "MERMAID", .sprite = &SPRITE_MERMAID, .face = .{ 7, 2 }, .hues = .{ 1, 1 }, .border_style = .checkered, .base_hue = 51 },
+    .{ .name = "BUG", .sprite = &SPRITE_BUG, .face = .{ 7, 3 }, .hues = .{ 2, 2 }, .border_style = .dashed, .base_hue = 103 },
+    .{ .name = "CLOUD", .sprite = &SPRITE_CLOUD, .face = .{ 7, 3 }, .hues = .{ 0, 2 }, .border_style = .double, .base_hue = 154 },
+    .{ .name = "SLIME", .sprite = &SPRITE_SLIME, .face = .{ 7, 3 }, .hues = .{ 1, 2 }, .border_style = .solid, .base_hue = 206 },
+    .{ .name = "CROW", .sprite = &SPRITE_CROW, .face = .{ 8, 2 }, .hues = .{ 0, 1 }, .border_style = .checkered, .base_hue = 257 },
+    .{ .name = "ROBOT", .sprite = &SPRITE_ROBOT, .face = .{ 7, 4 }, .hues = .{ 1, 1 }, .border_style = .dashed, .base_hue = 309 },
 };
 
 // Always differs from player_pick; `roll` mod (COUNT - 1) picks uniformly
@@ -145,6 +146,45 @@ pub const ALL = [COUNT]Character{
 pub fn cpuPickFor(player_pick: u8, roll: u32) u8 {
     const offset: u8 = @intCast(roll % (COUNT - 1));
     return (player_pick + 1 + offset) % COUNT;
+}
+
+fn channel(v: f32) u8 {
+    return @intFromFloat(@round(@min(1.0, @max(0.0, v)) * 255.0));
+}
+
+// Standard HSL -> packed 0xRRGGBB (h in degrees, any range; s/l in 0..1).
+fn hslToRgb(h_deg: f32, s: f32, l: f32) u32 {
+    const h = @mod(@mod(h_deg, 360.0) + 360.0, 360.0) / 360.0;
+    const chroma = (1.0 - @abs(2.0 * l - 1.0)) * s;
+    const hp = h * 6.0;
+    const x = chroma * (1.0 - @abs(@mod(hp, 2.0) - 1.0));
+    const m = l - chroma / 2.0;
+    const rgb: [3]f32 = if (hp < 1.0)
+        .{ chroma, x, 0 }
+    else if (hp < 2.0)
+        .{ x, chroma, 0 }
+    else if (hp < 3.0)
+        .{ 0, chroma, x }
+    else if (hp < 4.0)
+        .{ 0, x, chroma }
+    else if (hp < 5.0)
+        .{ x, 0, chroma }
+    else
+        .{ chroma, 0, x };
+    return (@as(u32, channel(rgb[0] + m)) << 16) | (@as(u32, channel(rgb[1] + m)) << 8) | channel(rgb[2] + m);
+}
+
+pub const TriadicPalette = struct { bg: u32, a: u32, b: u32, c: u32 };
+
+// Three hues exactly 120 degrees apart, so any two dither-blended on screen
+// still read as one real triadic wheel. bg stays dark, just lightly tinted.
+pub fn triadicPalette(base_hue_deg: f32) TriadicPalette {
+    return .{
+        .bg = hslToRgb(base_hue_deg, 0.30, 0.11),
+        .a = hslToRgb(base_hue_deg, 0.72, 0.68),
+        .b = hslToRgb(base_hue_deg + 120.0, 0.72, 0.68),
+        .c = hslToRgb(base_hue_deg + 240.0, 0.72, 0.68),
+    };
 }
 
 test "cpuPickFor always differs from player_pick and picks uniformly mod COUNT - 1" {
@@ -170,5 +210,42 @@ test "cpuPickFor always differs from player_pick and picks uniformly mod COUNT -
     var i: u8 = 0;
     while (i < COUNT) : (i += 1) {
         try testing.expectEqual(i != 2, seen[i]);
+    }
+}
+
+test "hslToRgb reproduces pure red/green/blue at their exact hues" {
+    const testing = @import("std").testing;
+    try testing.expectEqual(@as(u32, 0xff0000), hslToRgb(0, 1.0, 0.5));
+    try testing.expectEqual(@as(u32, 0x00ff00), hslToRgb(120, 1.0, 0.5));
+    try testing.expectEqual(@as(u32, 0x0000ff), hslToRgb(240, 1.0, 0.5));
+}
+
+test "hslToRgb wraps negative and >360 hues the same as their canonical hue" {
+    const testing = @import("std").testing;
+    try testing.expectEqual(hslToRgb(30, 0.6, 0.5), hslToRgb(390, 0.6, 0.5));
+    try testing.expectEqual(hslToRgb(30, 0.6, 0.5), hslToRgb(-330, 0.6, 0.5));
+}
+
+test "triadicPalette's 3 hues are always exactly 120 degrees apart" {
+    const testing = @import("std").testing;
+    var base: f32 = 0;
+    while (base < 360) : (base += 37) {
+        const p = triadicPalette(base);
+        // Reconstructing hue from RGB is lossy at the boundaries, so just
+        // confirm each color is exactly what base/base+120/base+240 produce.
+        try testing.expectEqual(hslToRgb(base, 0.72, 0.68), p.a);
+        try testing.expectEqual(hslToRgb(base + 120.0, 0.72, 0.68), p.b);
+        try testing.expectEqual(hslToRgb(base + 240.0, 0.72, 0.68), p.c);
+    }
+}
+
+test "every character's base_hue is in [0, 360) and all 7 are distinct" {
+    const testing = @import("std").testing;
+    var seen = [_]bool{false} ** 360;
+    for (ALL) |char| {
+        try testing.expect(char.base_hue >= 0 and char.base_hue < 360);
+        const idx: usize = @intFromFloat(char.base_hue);
+        try testing.expect(!seen[idx]);
+        seen[idx] = true;
     }
 }

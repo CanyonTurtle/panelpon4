@@ -34,6 +34,16 @@ fn nextMode(m: s.GameMode) s.GameMode {
     };
 }
 
+const MENU_FLASH_FRAMES: u32 = 4;
+
+// The only place menu_phase should ever be assigned -- resets the ease-in
+// slide and flash-cut transition (see render_screens.zig/render.zig) together.
+fn setMenuPhase(new: s.MenuPhase) void {
+    s.menu_phase = new;
+    s.menu_phase_timer = 0;
+    s.menu_transition_flash = MENU_FLASH_FRAMES;
+}
+
 // Debug-only WASM exports (see debug.zig) for the JS test harness to drive;
 // only compiled into Debug builds, so a release build stays minimal.
 comptime {
@@ -56,7 +66,7 @@ comptime {
 }
 
 export fn start() void {
-    render.setupPalette();
+    render.updatePalette();
     board.resetSharedRows();
     board.resetGame(&s.player);
     board.resetGame(&s.cpu);
@@ -65,6 +75,7 @@ export fn start() void {
 
 export fn update() void {
     s.frame_count += 1;
+    render.updatePalette();
     const gp = w4.GAMEPAD1.*;
     // Read every frame regardless of mode so cpu_prev_gamepad's "was this
     // just pressed" history stays accurate across countdown/menu screens too.
@@ -96,7 +107,7 @@ export fn update() void {
         render.drawTutorialCaption(lines.line1, lines.line2, tutorial.stepNumber(), tutorial.STEP_COUNT);
         if (finished) {
             s.started = false;
-            s.menu_phase = .mode_select;
+            setMenuPhase(.mode_select);
         }
         s.prev_gamepad = gp;
         s.cpu_prev_gamepad = gp2;
@@ -106,10 +117,12 @@ export fn update() void {
     if (!s.started) {
         _ = s.player.rngNext();
         board.perturbSharedRng();
+        s.menu_phase_timer += 1;
+        if (s.menu_transition_flash > 0) s.menu_transition_flash -= 1;
         switch (s.menu_phase) {
             .title => {
                 render.drawTitleScreen();
-                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) s.menu_phase = .mode_select;
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) setMenuPhase(.mode_select);
             },
             .mode_select => {
                 render.drawModeSelectScreen();
@@ -117,10 +130,10 @@ export fn update() void {
                 if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_DOWN)) s.game_mode = nextMode(s.game_mode);
                 if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
                     switch (s.game_mode) {
-                        .quick, .story => s.menu_phase = .setup_character,
+                        .quick, .story => setMenuPhase(.setup_character),
                         // Versus skips character/difficulty picking; confirm
                         // screen comes first since netplay handshakes outside the cart.
-                        .versus => s.menu_phase = .versus_confirm,
+                        .versus => setMenuPhase(.versus_confirm),
                         // Tutorial skips setup and the countdown entirely --
                         // it seeds its own scripted board state directly.
                         .tutorial => {
@@ -154,13 +167,13 @@ export fn update() void {
                                 s.cpu_character = characters.cpuPickFor(s.player_character, s.player.rngNext());
                                 s.cpu_reveal_tick = 0;
                                 s.cpu_reveal_timer = c.CPU_REVEAL_HOLD_BASE;
-                                s.menu_phase = .setup_cpu_reveal;
+                                setMenuPhase(.setup_cpu_reveal);
                             },
                             .story => {
                                 s.story_stage = 0;
                                 s.story_game_overs = 0;
                                 s.cpu_character = game_modes.storyOpponentFor(0);
-                                s.menu_phase = .story_tier_select;
+                                setMenuPhase(.story_tier_select);
                             },
                             // Neither ever reaches setup_character (see mode_select above).
                             .tutorial, .versus => unreachable,
@@ -184,7 +197,7 @@ export fn update() void {
                 if (s.cpu_reveal_timer == 0) {
                     s.cpu_reveal_tick += 1;
                     if (s.cpu_reveal_tick >= c.CPU_REVEAL_STEPS) {
-                        s.menu_phase = .setup_difficulty;
+                        setMenuPhase(.setup_difficulty);
                     } else {
                         s.cpu_reveal_timer = c.CPU_REVEAL_HOLD_BASE + s.cpu_reveal_tick * c.CPU_REVEAL_HOLD_GROWTH;
                     }
@@ -244,6 +257,7 @@ export fn update() void {
                 }
             },
         }
+        render.drawMenuTransitionFlash();
         s.prev_gamepad = gp;
         s.cpu_prev_gamepad = gp2;
         return;
@@ -307,7 +321,7 @@ export fn update() void {
                             // Whole run cleared: reveal the X Hard hint if
                             // earned, then back to mode select.
                             game_modes.maybeRevealXhard(s.story_tier, s.story_game_overs);
-                            s.menu_phase = .mode_select;
+                            setMenuPhase(.mode_select);
                             s.started = false;
                         } else {
                             s.cpu_character = game_modes.storyOpponentFor(s.story_stage);
@@ -328,7 +342,7 @@ export fn update() void {
                         s.player_points = 0;
                         s.cpu_points = 0;
                         s.set_winner = .none;
-                        s.menu_phase = .mode_select;
+                        setMenuPhase(.mode_select);
                         s.started = false;
                     } else {
                         board.beginCountdown();
