@@ -4,7 +4,9 @@ A Panel de Pon-style falling/rising block matching game for the [WASM-4](https:/
 
 ## Building
 
-Requires Zig 0.16+.
+Requires Zig 0.16+ and Node/npm (fetches [binaryen](https://github.com/WebAssembly/binaryen)'s
+`wasm-opt` via `npx` to shrink the release cart further than `-OReleaseSmall` alone -- see
+`build.zig`).
 
 ```sh
 zig build --release=small

@@ -24,6 +24,12 @@ jobs:
         with:
           version: 0.16.0
 
+      # Needed before the release build now, not just the bundle step below --
+      # build.zig shells out to `npx -p binaryen wasm-opt` for --release=small.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Lint file sizes
         run: zig build lint
 
@@ -32,10 +38,6 @@ jobs:
 
       - name: Build cart
         run: zig build --release=small
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
 
       - name: Bundle standalone web build
         run: |

@@ -23,7 +23,29 @@ pub fn build(b: *std.Build) void {
     exe.max_memory = 65536;
     exe.stack_size = 14752;
 
-    b.installArtifact(exe);
+    const install_exe = b.addInstallArtifact(exe, .{});
+    b.getInstallStep().dependOn(&install_exe.step);
+
+    if (optimize == .ReleaseSmall) {
+        // Zig/LLVM's own -OReleaseSmall leaves real slack on the table --
+        // binaryen's wasm-opt still shrinks the release cart by roughly
+        // another 10% (dead-code elimination and instruction-level packing
+        // across the whole module), verified to produce byte-identical
+        // game behavior. `npx -p binaryen` mirrors how the wasm4 CLI is
+        // already fetched elsewhere in this repo, so no new system dependency.
+        const cart_path = b.getInstallPath(.bin, "cart.wasm");
+        const wasm_opt = b.addSystemCommand(&.{
+            "npx",                               "--yes",
+            "-p",                                "binaryen",
+            "wasm-opt",                          "-Oz",
+            "--converge",                        "--enable-bulk-memory",
+            "--enable-nontrapping-float-to-int", "--enable-sign-ext",
+            "--enable-mutable-globals",          cart_path,
+            "-o",                                cart_path,
+        });
+        wasm_opt.step.dependOn(&install_exe.step);
+        b.getInstallStep().dependOn(&wasm_opt.step);
+    }
 
     // Unit tests run natively (not wasm32-freestanding) so `zig build test`
     // can actually execute them locally and in CI without a WASM4 host or a
