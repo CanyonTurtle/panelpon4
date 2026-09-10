@@ -109,16 +109,27 @@ fn rowOccupied(self: *s.Board, row: u8) bool {
     return false;
 }
 
-// The real loss condition: checked continuously (not just after a rise).
-// Ticks a forgiveness timer while idle and at the ceiling; resets otherwise.
+fn hasActivePop(self: *s.Board) bool {
+    for (0..c.ROWS) |lr| {
+        for (0..c.COLS) |col| {
+            const state = self.cellAt(@intCast(lr), @intCast(col)).state;
+            if (state == .popping or state == .recycling) return true;
+        }
+    }
+    return false;
+}
+
+// The real loss condition, checked continuously. Remembers its progress at
+// the ceiling; only .popping/.recycling pauses it -- only clearing resets it.
 pub fn updateDangerTimer(self: *s.Board) void {
     if (self.game_over) return;
-    if (!self.boardBusy() and rowOccupied(self, c.SPAWN_ROWS)) {
-        self.danger_timer += 1;
-        if (self.danger_timer >= c.DANGER_FORGIVENESS_FRAMES) self.game_over = true;
-    } else {
+    if (!rowOccupied(self, c.SPAWN_ROWS)) {
         self.danger_timer = 0;
+        return;
     }
+    if (hasActivePop(self)) return;
+    self.danger_timer += 1;
+    if (self.danger_timer >= c.DANGER_FORGIVENESS_FRAMES) self.game_over = true;
 }
 
 // Finishes the current row's remaining rise over a fixed MANUAL_RAISE_FRAMES
@@ -227,12 +238,13 @@ test "doRise no longer ends the game directly -- see updateDangerTimer's forgive
     try testing.expect(!b.game_over);
 }
 
-test "updateDangerTimer does nothing while the board is busy, even with a block at the ceiling" {
+test "updateDangerTimer keeps counting through an ordinary swap/fall at the ceiling, unlike a pop" {
     var b: s.Board = .{};
-    b.cellAt(c.SPAWN_ROWS, 0).state = .falling; // busy, and already at the ceiling
-    for (0..c.DANGER_FORGIVENESS_FRAMES * 2) |_| updateDangerTimer(&b);
-    try testing.expectEqual(@as(u32, 0), b.danger_timer);
+    b.cellAt(c.SPAWN_ROWS, 0).state = .falling; // busy, but not a pop/recycle -- still counts
+    for (0..c.DANGER_FORGIVENESS_FRAMES - 1) |_| updateDangerTimer(&b);
     try testing.expect(!b.game_over);
+    updateDangerTimer(&b);
+    try testing.expect(b.game_over);
 }
 
 test "updateDangerTimer does nothing while idle with no block at the ceiling" {
@@ -252,21 +264,21 @@ test "updateDangerTimer ends the game only after the forgiveness timer elapses w
     try testing.expect(b.game_over);
 }
 
-test "updateDangerTimer resets if the board goes busy before the forgiveness timer elapses" {
+test "updateDangerTimer pauses (without resetting) while a match/garbage is actively popping" {
     var b: s.Board = .{};
     b.cellAt(c.SPAWN_ROWS, 0).state = .normal;
     for (0..c.DANGER_FORGIVENESS_FRAMES - 1) |_| updateDangerTimer(&b);
     try testing.expectEqual(c.DANGER_FORGIVENESS_FRAMES - 1, b.danger_timer);
 
-    b.cellAt(5, 1).state = .falling; // becomes busy for one frame
-    updateDangerTimer(&b);
-    try testing.expectEqual(@as(u32, 0), b.danger_timer);
-
-    // Idle again, still at the ceiling -- needs the FULL duration again, not
-    // a continuation from where it left off.
-    b.cellAt(5, 1).state = .empty;
-    for (0..c.DANGER_FORGIVENESS_FRAMES - 1) |_| updateDangerTimer(&b);
+    // A match starts resolving elsewhere on the board -- paused, not reset,
+    // however long it takes (never counted as a swap-spam exploit).
+    b.cellAt(5, 1).state = .popping;
+    for (0..c.DANGER_FORGIVENESS_FRAMES * 3) |_| updateDangerTimer(&b);
+    try testing.expectEqual(c.DANGER_FORGIVENESS_FRAMES - 1, b.danger_timer);
     try testing.expect(!b.game_over);
+
+    // Once the pop finishes, it resumes from exactly where it left off.
+    b.cellAt(5, 1).state = .empty;
     updateDangerTimer(&b);
     try testing.expect(b.game_over);
 }

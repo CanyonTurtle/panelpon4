@@ -89,10 +89,12 @@ export fn update() void {
     // Tutorial runs its own scripted loop entirely, bypassing the win/lose,
     // versus, and story branches below (see tutorial.zig).
     if (s.started and s.game_mode == .tutorial) {
+        const finished = tutorial.update(gp, s.prev_gamepad);
         render.render();
-        const lines = tutorial.captionLines();
+        var caption_buf: [24]u8 = undefined;
+        const lines = tutorial.captionLines(&caption_buf);
         render.drawTutorialCaption(lines.line1, lines.line2, tutorial.stepNumber(), tutorial.STEP_COUNT);
-        if (tutorial.update(gp, s.prev_gamepad)) {
+        if (finished) {
             s.started = false;
             s.menu_phase = .mode_select;
         }
