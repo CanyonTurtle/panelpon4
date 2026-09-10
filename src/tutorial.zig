@@ -40,22 +40,24 @@ fn progressWord(step: s.TutorialStep) []const u8 {
     };
 }
 
+// line1 shares its row with the top-right "N/8" counter, so it must stay
+// well under ~15 chars -- line2 has the full-width row to itself.
 pub fn captionLines(buf: []u8) Lines {
     const step = s.tutorial_step;
     const line1: []const u8 = switch (step) {
-        .intro => "WELCOME TO PANELPON4",
-        .move => "ARROWS MOVE CURSOR",
-        .swap => "X SWAPS TWO BLOCKS",
-        .match => "MATCH 3 IN A ROW",
-        .chain => "CHAIN MATCHES FOR",
-        .garbage => "GARBAGE BLOCKS ARE",
-        .raise => "Z RAISES YOUR STACK",
-        .outro => "YOU'RE READY TO PLAY",
+        .intro => "LET'S LEARN!",
+        .move => "USE ARROW KEYS",
+        .swap => "X SWAPS BLOCKS",
+        .match => "MATCH 3 BLOCKS",
+        .chain => "SETUP A CHAIN",
+        .garbage => "CLEAR GARBAGE",
+        .raise => "Z RAISES STACK",
+        .outro => "YOU'RE READY!",
     };
     const line2: []const u8 = switch (step) {
         .intro => "PRESS X TO BEGIN",
         .outro => "PRESS X TO FINISH",
-        .chain => "BONUS POINTS! TRY X",
+        .chain => "TRIGGER IT! (X)",
         else => std.fmt.bufPrint(buf, "{d} / {d} {s}", .{ progress, target(step), progressWord(step) }) catch "",
     };
     return .{ .line1 = line1, .line2 = line2 };

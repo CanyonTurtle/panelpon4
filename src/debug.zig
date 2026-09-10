@@ -70,7 +70,7 @@ pub fn getScrollPx(board: u32) callconv(.c) u32 {
 }
 
 // Lets a script confirm the title screen's difficulty adjustment took effect
-// without reading rendered text (the harness doesn't render real glyphs).
+// without reading it back out of rendered pixels.
 pub fn getDifficulty() callconv(.c) u32 {
     return s.difficulty;
 }

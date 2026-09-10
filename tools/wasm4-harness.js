@@ -1,10 +1,12 @@
 // Shared harness for driving a compiled WASM-4 cart headlessly from Node, for
 // scripted test scenarios, screenshots, and fuzzing. Faithfully reimplements
 // just enough of the WASM4 host API to make rendering (rect/blit/text) and
-// input (gamepad/mouse) behave the same as a real WASM4 runtime -- blit in
-// particular is a direct port of WASM4's own reference implementation
-// (runtimes/native/src/framebuffer.c), so 1BPP/2BPP sprites and DRAW_COLORS
-// indirection work exactly as they would in-browser.
+// input (gamepad/mouse) behave the same as a real WASM4 runtime -- blit and
+// text are direct ports of WASM4's own reference implementation (runtimes/
+// native/src/framebuffer.c, including its actual font, see FONT below), so
+// 1BPP/2BPP sprites, real glyphs, and DRAW_COLORS indirection all work
+// exactly as they would in-browser -- screenshots show real, readable text,
+// so text layout bugs (overflow, overlap) are visible here too.
 //
 // Usage:
 //   const { loadCart, BUTTON_1 } = require('./tools/wasm4-harness.js');
@@ -32,6 +34,40 @@ const MOUSE_BUTTONS_ADDR = 0x1e;
 
 const BUTTON_1 = 1, BUTTON_2 = 2, BUTTON_LEFT = 16, BUTTON_RIGHT = 32, BUTTON_UP = 64, BUTTON_DOWN = 128;
 const MOUSE_LEFT = 1, MOUSE_RIGHT = 2, MOUSE_MIDDLE = 4;
+
+// WASM4's actual 8x8 1BPP system font, vendored byte-for-byte from
+// runtimes/native/src/framebuffer.c (aduros/wasm4, as of commit 82e4dcd6,
+// 2024-05-13) -- 224 glyphs (char codes 32-255), 8 bytes each, one row per
+// byte MSB-first. Lets screenshots show real, readable menu text instead of
+// a tick-per-character placeholder, so text layout bugs (overflow, overlap)
+// are actually visible here instead of only in a real WASM4 host.
+const FONT = Buffer.from(
+  '///////////Hx8fPz//P/5OTk///////kwGTk5MBk//vgy+D6QPv/51bN+/ZtXP/jycnjyUzgf/Pz8////////Pnz8/P5/P/n8/n' +
+  '5+fPn///k8cBx5P////n54Hn5//////////Pz5////+B////////////z8///fv379+/f//Hszk5OZvH/+fH5+fn54H/gznxw4cf' +
+  'Af+B8+fD+TmD/+PDkzMB8/P/Az8D+fk5g//Dnz8DOTmD/wE58+fPz8//hzsbh2F5g/+DOTmB+fOH///Pz//Pz////8/P/8/Pn//z' +
+  '58+fz+fz////Af8B////n8/n8+fPn/+DATnzx//H/4N9RVVBf4P/x5M5OQE5Of8DOTkDOTkD/8OZPz8/mcP/BzM5OTkzB/8BPz8D' +
+  'Pz8B/wE/PwM/Pz//wZ8/MTmZwf85OTkBOTk5/4Hn5+fn54H/+fn5+fk5g/85MycPByMx/5+fn5+fn4H/OREBASk5Of85GQkBITE5' +
+  '/4M5OTk5OYP/Azk5OQM/P/+DOTk5ITOF/wM5OTEHIzH/hzM/g/k5g/+B5+fn5+fn/zk5OTk5OYP/OTk5EYPH7/85OSkBARE5/zkR' +
+  'g8eDETn/mZmZw+fn5/8B8ePHjx8B/8PPz8/Pz8P/f7/f7/f7/f+H5+fn5+eH/8eT/////////////////wHv9///////////g/mB' +
+  'OYH/Pz8DOTk5g////4E/Pz+B//n5gTk5OYH///+DOQE/g//x54Hn5+fn////gTk5gfmDPz8DOTk5Of/n/8fn5+eB//P/4/Pz8/OH' +
+  'Pz8xAwcjMf/H5+fn5+eB////A0lJSUn///8DOTk5Of///4M5OTmD////Azk5Az8///+BOTmB+fn//5GPn5+f////gz+D+QP/5+eB' +
+  '5+fn5////zk5OTmB////mZmZw+f///9JSUlJgf///zkBxwE5////OTk5gfmD//8B48ePAf/z5+fP5+fz/+fn5+fn5+f/n8/P58/P' +
+  'n////49F4///////////k5P/gykpESkpg/+DOQkRITmD//////////////////////+DESF9IRGD/4MRCX0JEYP/gxE5VRERg/+D' +
+  'ERFVORGD////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////////////////////////////' +
+  '////////////////////////////////////////////////////////////////////////////5//n58fHx//vgykvKYPv/8OZ' +
+  'nwOfnwH//6Xb29ul//+ZmcOB54Hn/+fn5//n5+f/w5mH2+GZw/+T/////////8O9Zl5eZr3Dh8OTw///////yZMnk8n/////gfn5' +
+  '///////////////DvUZaRlq9w4P/////////79fv///////n54Hn5/+B/8fz58P/////w+fzx//////37///////////MzMzMwk/' +
+  'wZW1lcH19f/////Pz/////////////fP58fnw//////Hk5PH//////8nk8mTJ///vTu3rdmxff+9O7ep3btx/x271y3ZsX3/x//H' +
+  'nzkBg//f78eTOQE5//fvx5M5ATn/x5PHkzkBOf/Lp8eTOQE5/5P/x5M5ATn/79fHkzkBOf/BhychBych/8OZPz+Zw/fP3+8BPwM/' +
+  'Af/37wE/Az8B/8eTAT8DPwH/k/8BPwM/Af/v94Hn5+eB//fvgefn54H/58OB5+fngf+Z/4Hn5+eB/4eTmQmZk4f/y6cZCQEhMf/f' +
+  '74M5OTmD//fvgzk5OYP/x5ODOTk5g//Lp4M5OTmD/5P/gzk5OYP//7vX79e7//+DOTEpGTmD/9/vOTk5OYP/9+85OTk5g//Hk/85' +
+  'OTmD/5P/OTk5OYP/9++ZmcPn5/8/Azk5OQM//8OZmZOZiZP/3++D+YE5gf/374P5gTmB/8eTg/mBOYH/y6eD+YE5gf+T/4P5gTmB' +
+  '/+/Xg/mBOYH///+D6YEvg////4E/P4H3z9/vgzkBP4P/9++DOQE/g//Hk4M5AT+D/5P/gzkBP4P/3+//x+fngf/37//H5+eB/8eT' +
+  '/8fn54H/k//H5+fngf+bh2eDOTmD/8unAzk5OTn/3++DOTk5g//374M5OTmD/8eTgzk5OYP/y6eDOTk5g/+T/4M5OTmD///n/4H/' +
+  '5/////+DMSkZg//f7zk5OTmB//fvOTk5OYH/x5P/OTk5gf+T/zk5OTmB//fvOTk5gfmDPz8DOTkDPz+T/zk5OYH5gw==',
+  'base64'
+);
 
 // ---- Minimal PNG encoder (no dependencies) --------------------------------
 
@@ -165,14 +201,42 @@ async function loadCart(wasmPath) {
     }
   }
 
-  // Approximate: draws a dim tick per character so text position/extent is
-  // visible in a screenshot, rather than rendering WASM4's actual font
-  // glyphs (not worth porting for a test harness -- string *content* is
-  // better verified with a Zig unit test than a screenshot anyway).
-  function doText(x, y, len, color1) {
-    if (color1 === 0) return;
+  // Draws one 8x8 1BPP glyph from FONT, byte-for-byte the same unpacking as
+  // doBlit's 1BPP branch (bit 0 -> DRAW_COLORS low nibble, bit 1 -> high
+  // nibble -- 0 in either means transparent), just reading FONT instead of
+  // wasm memory since the font isn't part of the cart's own linear memory.
+  function blitGlyph(code, dstX, dstY, colors) {
+    const srcY = (code - 32) * 8;
+    for (let row = 0; row < 8; row++) {
+      const ty = dstY + row;
+      if (ty < 0 || ty >= SCREEN) continue;
+      const byte = FONT[srcY + row];
+      for (let col = 0; col < 8; col++) {
+        const tx = dstX + col;
+        if (tx < 0 || tx >= SCREEN) continue;
+        const bit = (byte >> (7 - col)) & 1;
+        const paletteDc = (colors >> (bit << 2)) & 0xf;
+        if (paletteDc !== 0) setPixel(tx, ty, (paletteDc - 1) & 0x3);
+      }
+    }
+  }
+
+  // Faithful port of WASM4's framebufferTextUtf8 (runtimes/native/src/
+  // framebuffer.c): despite the name, it walks raw bytes (32-255 -> a glyph,
+  // 10 -> newline, anything else just advances the cursor), not a real UTF-8
+  // decode -- multi-byte sequences render as individual mis-glyphed bytes in
+  // the real runtime too, so this matches rather than "fixes" that.
+  function doText(ptr, len, x, y, colors) {
+    let currentX = x;
     for (let i = 0; i < len; i++) {
-      for (let yy = 0; yy < 8; yy += 3) setPixel(x + i * 8 + 1, y + yy, color1 - 1);
+      const code = mem8[ptr + i];
+      if (code === 10) {
+        y += 8;
+        currentX = x;
+        continue;
+      }
+      if (code >= 32 && code <= 255) blitGlyph(code, currentX, y, colors);
+      currentX += 8;
     }
   }
 
@@ -185,7 +249,7 @@ async function loadCart(wasmPath) {
     vline: (x, y, len) => doRect(x, y, 1, len),
     oval: (x, y, w, h) => doRect(x, y, w, h),
     rect: (x, y, w, h) => doRect(x, y, w, h),
-    textUtf8: (ptr, len, x, y) => doText(x, y, len, view.getUint16(DRAW_COLORS_ADDR, true) & 0xf),
+    textUtf8: (ptr, len, x, y) => doText(ptr, len, x, y, view.getUint16(DRAW_COLORS_ADDR, true)),
     tone() {},
     diskr: () => 0,
     diskw: () => 0,

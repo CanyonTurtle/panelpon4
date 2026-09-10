@@ -64,14 +64,16 @@ pub fn drawModeSelectScreen() void {
     w4.DRAW_COLORS.* = 0x0003;
     w4.Text("SELECT MODE", 34, y + 10);
 
+    // 22/116 wraps the longest label ("1P QUICK MATCH", 14 chars) with a
+    // couple px of padding, staying inside the panel (x 20..140).
     const cur = gameModeIndex(s.game_mode);
     for (GAME_MODE_LABELS, 0..) |label, i| {
         const line_y = y + 30 + @as(i32, @intCast(i)) * MODE_LIST_STEP;
         if (i == cur) {
-            cells.drawDitheredRectOutline(24, line_y - 2, 92, 10, badge.WARM_DITHER_HUES);
+            cells.drawDitheredRectOutline(22, line_y - 2, 116, 10, badge.WARM_DITHER_HUES);
         }
         w4.DRAW_COLORS.* = if (i == cur) 0x0004 else 0x0002;
-        w4.Text(label, 30, line_y);
+        w4.Text(label, 24, line_y);
     }
     w4.DRAW_COLORS.* = 0x0002;
     w4.Text("UP / DOWN", 44, y + 86);
@@ -197,7 +199,7 @@ pub fn drawSetupCpuRevealScreen() void {
     w4.DRAW_COLORS.* = 0x0003;
     w4.Text("SETUP", 58, y + 6);
     w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("CPU IS CHOOSING", 26, y + 18);
+    w4.Text("CPU CHOOSING", 32, y + 18);
 
     const frame = rchar.currentFrame();
     const row_y = y + 34;

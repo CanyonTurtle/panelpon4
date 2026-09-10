@@ -10,6 +10,12 @@ const game_modes = @import("game_modes.zig");
 const screens = @import("render_screens.zig");
 const render = @import("render.zig");
 
+// x that centers `str` within [box_x, box_x+box_w) -- avoids hardcoded
+// eyeballed positions that only fit one specific string's length.
+fn centeredX(box_x: i32, box_w: i32, str: []const u8) i32 {
+    return box_x + @divTrunc(box_w - @as(i32, @intCast(str.len)) * 8, 2);
+}
+
 // Winner celebrates, loser winces (idle on a draw). `won` is from the main
 // side's rendering perspective, not always state.player.
 fn drawGameOverPortraits(x: i32, y: i32, w: i32, won: ?bool) void {
@@ -45,23 +51,24 @@ pub fn drawGameOver() void {
     drawGameOverPortraits(x, y, w, won);
 
     w4.DRAW_COLORS.* = 0x0004;
-    w4.Text("MATCH OVER", 40, 58);
-    w4.Text(text, 32, 74);
+    w4.Text("MATCH OVER", centeredX(x, w, "MATCH OVER"), 58);
+    w4.Text(text, centeredX(x, w, text), 74);
 
     var buf: [16]u8 = undefined;
     const pts = std.fmt.bufPrint(&buf, "{d} - {d}", .{ s.player_points, s.cpu_points }) catch "";
     w4.DRAW_COLORS.* = 0x0002;
-    w4.Text(pts, 64, 84);
+    w4.Text(pts, centeredX(x, w, pts), 84);
 
     if (s.set_winner != .none) {
-        const set_text: []const u8 = if (s.set_winner == main_side) "YOU WIN THE SET!" else "OPPONENT WINS THE SET!";
+        // Both must stay well under 15 chars (120px) to fit this box.
+        const set_text: []const u8 = if (s.set_winner == main_side) "SET WON!" else "SET LOST!";
         w4.DRAW_COLORS.* = 0x0004;
-        w4.Text(set_text, 8, 96);
+        w4.Text(set_text, centeredX(x, w, set_text), 96);
         w4.DRAW_COLORS.* = 0x0002;
-        w4.Text("PRESS X", 40, 106);
+        w4.Text("PRESS X", centeredX(x, w, "PRESS X"), 106);
     } else {
         w4.DRAW_COLORS.* = 0x0002;
-        w4.Text("PRESS X", 40, 98);
+        w4.Text("PRESS X", centeredX(x, w, "PRESS X"), 98);
     }
 }
 
@@ -82,27 +89,28 @@ fn drawStoryGameOver() void {
 
     w4.DRAW_COLORS.* = 0x0004;
     const headline: []const u8 = if (!won) "GAME OVER" else if (cleared_run) "STORY CLEAR!" else "STAGE CLEAR";
-    w4.Text(headline, 40, 58);
+    w4.Text(headline, centeredX(x, w, headline), 58);
 
     w4.DRAW_COLORS.* = 0x0002;
     var buf: [24]u8 = undefined;
     if (!won) {
         const go = std.fmt.bufPrint(&buf, "GAME OVERS: {d}", .{s.story_game_overs}) catch "";
-        w4.Text(go, 34, 76);
-        w4.Text("PRESS X TO RETRY", 22, 96);
+        w4.Text(go, centeredX(x, w, go), 76);
+        w4.Text("PRESS X", centeredX(x, w, "PRESS X"), 96);
     } else if (cleared_run) {
         const stage_str = std.fmt.bufPrint(&buf, "ALL {d} CLEARED!", .{game_modes.STORY_STAGES}) catch "";
-        w4.Text(stage_str, 30, 76);
+        w4.Text(stage_str, centeredX(x, w, stage_str), 76);
         if (s.story_game_overs == 0 and s.story_tier == .hard) {
+            const unlocked = "X HARD OPEN!";
             w4.DRAW_COLORS.* = 0x0004;
-            w4.Text("X HARD UNLOCKED!", 22, 88);
+            w4.Text(unlocked, centeredX(x, w, unlocked), 88);
             w4.DRAW_COLORS.* = 0x0002;
         }
-        w4.Text("PRESS X", 52, 100);
+        w4.Text("PRESS X", centeredX(x, w, "PRESS X"), 100);
     } else {
         const stage_str = std.fmt.bufPrint(&buf, "STAGE {d}/{d} DONE", .{ s.story_stage + 1, game_modes.STORY_STAGES }) catch "";
-        w4.Text(stage_str, 26, 76);
-        w4.Text("PRESS X", 52, 96);
+        w4.Text(stage_str, centeredX(x, w, stage_str), 76);
+        w4.Text("PRESS X", centeredX(x, w, "PRESS X"), 96);
     }
 }
 
