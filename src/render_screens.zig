@@ -70,10 +70,14 @@ fn drawLogo(x0: i32, y0: i32) void {
     }
 }
 
-// A slow, gentle bob so the logo feels alive rather than static.
+// A slow +-2px bob, integer triangle wave -- std.math.sin alone cost ~6.5KB
+// of soft-float trig code here, blowing past WASM-4's 64KB cart limit.
 fn titleLogoBob() i32 {
-    const t = @as(f32, @floatFromInt(s.frame_count)) * 0.05;
-    return @intFromFloat(@round(std.math.sin(t) * 2.0));
+    const period: i32 = 96;
+    const half = @divExact(period, 2);
+    const phase: i32 = @intCast(@mod(s.frame_count, @as(u32, @intCast(period))));
+    const dist = if (phase < half) phase else period - phase; // 0..half..0
+    return @divTrunc(dist, 12) - 2;
 }
 
 pub fn drawTitleScreen() void {
