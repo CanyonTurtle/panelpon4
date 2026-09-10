@@ -320,6 +320,7 @@ async function loadCart(wasmPath) {
       const v = e.debugGetCursorPos(board);
       return { col: v & 0xff, row: (v >> 8) & 0xff };
     },
+    setGameOver: (board, over) => e.debugSetGameOver(board, over ? 1 : 0),
   } : undefined;
 
   return { e, mem8, view, memory, setGamepad, setMouse, step, pressButton1, screenshot, debug };

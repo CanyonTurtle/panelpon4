@@ -11,7 +11,9 @@ const s = @import("state.zig");
 // state, rather than splitting a field from its own type across modules.
 pub const StoryTier = s.StoryTier;
 
-pub const STORY_STAGES: u8 = characters.COUNT;
+// One stage per character except Mermaid herself -- she's the fixed player
+// character in story mode (characters.MERMAID_INDEX), never an opponent.
+pub const STORY_STAGES: u8 = characters.COUNT - 1;
 
 // Story mode's difficulty-profile knobs, applied onto the mutable runtime
 // constants in constants.zig (see its own doc comment).
@@ -77,10 +79,38 @@ pub fn storyDifficultyFor(tier: StoryTier, stage: u8) u8 {
     return @intCast(lo + step);
 }
 
-// Every character in fixed order, mirror matches included -- simpler than
-// filtering the player's own pick out of the roster.
+// Every character except Mermaid, in fixed order -- she's excluded from her
+// own opponent cycle (see STORY_STAGES above).
 pub fn storyOpponentFor(stage: u8) u8 {
-    return stage % characters.COUNT;
+    const idx = stage % STORY_STAGES;
+    return if (idx < characters.MERMAID_INDEX) idx else idx + 1;
+}
+
+// How many of the traveling party's slots are currently filled.
+pub fn unlockedCount(party: [characters.COUNT]bool) u8 {
+    var n: u8 = 0;
+    for (party) |p| {
+        if (p) n += 1;
+    }
+    return n;
+}
+
+// Cycle to the next/previous unlocked party member, wrapping around --
+// always terminates since Mermaid is never unset (main.zig's beginStoryFlow).
+pub fn nextUnlocked(party: [characters.COUNT]bool, current: u8) u8 {
+    var i = current;
+    while (true) {
+        i = (i + 1) % characters.COUNT;
+        if (party[i]) return i;
+    }
+}
+
+pub fn prevUnlocked(party: [characters.COUNT]bool, current: u8) u8 {
+    var i = current;
+    while (true) {
+        i = (i + characters.COUNT - 1) % characters.COUNT;
+        if (party[i]) return i;
+    }
 }
 
 // Persisted via WASM-4's disk API: whether the X Hard hint has been shown
@@ -130,10 +160,33 @@ test "storyDifficultyFor ramps from lo to hi across the story stages, xhard flat
     try testing.expectEqual(@as(u8, 10), storyDifficultyFor(.xhard, STORY_STAGES - 1));
 }
 
-test "storyOpponentFor cycles through every character in order" {
+test "storyOpponentFor cycles through every character except Mermaid, in order" {
+    var seen = [_]bool{false} ** characters.COUNT;
     for (0..STORY_STAGES) |stage| {
-        try testing.expectEqual(@as(u8, @intCast(stage)), storyOpponentFor(@intCast(stage)));
+        const opp = storyOpponentFor(@intCast(stage));
+        try testing.expect(opp != characters.MERMAID_INDEX);
+        seen[opp] = true;
     }
+    for (0..characters.COUNT) |i| {
+        try testing.expectEqual(i != characters.MERMAID_INDEX, seen[i]);
+    }
+}
+
+test "unlockedCount counts true entries; next/prevUnlocked cycle and skip locked slots" {
+    var party = [_]bool{false} ** characters.COUNT;
+    party[characters.MERMAID_INDEX] = true;
+    try testing.expectEqual(@as(u8, 1), unlockedCount(party));
+    try testing.expectEqual(characters.MERMAID_INDEX, nextUnlocked(party, characters.MERMAID_INDEX));
+    try testing.expectEqual(characters.MERMAID_INDEX, prevUnlocked(party, characters.MERMAID_INDEX));
+
+    party[0] = true;
+    party[3] = true;
+    try testing.expectEqual(@as(u8, 3), unlockedCount(party));
+    try testing.expectEqual(@as(u8, 3), nextUnlocked(party, characters.MERMAID_INDEX));
+    try testing.expectEqual(@as(u8, 0), nextUnlocked(party, 3));
+    try testing.expectEqual(characters.MERMAID_INDEX, nextUnlocked(party, 0));
+    try testing.expectEqual(@as(u8, 0), prevUnlocked(party, characters.MERMAID_INDEX));
+    try testing.expectEqual(@as(u8, 3), prevUnlocked(party, 0));
 }
 
 test "applyDefaultProfile and applyStoryProfile actually retune the shared constants, restoring cleanly" {

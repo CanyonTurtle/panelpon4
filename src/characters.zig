@@ -125,20 +125,27 @@ pub const Character = struct {
     hues: [2]u8, // index into HUE_DRAWCOLOR (0=red,1=teal,2=yellow); equal = solid fill, different = dithered
     border_style: BorderStyle,
     base_hue: f32, // degrees; see triadicPalette -- this character's own console palette
+    // Story mode's walk-up transition line, spoken as cursed opponent or
+    // party member alike (render_screens.drawStoryWalkTransition); keep under 16 chars.
+    dialogue: []const u8,
 };
 
 pub const COUNT = 7;
 
+// Story mode locks the player to her (state.player_character) and excludes
+// her from the opponent cycle (game_modes.storyOpponentFor) -- she frees everyone else, not cursed herself.
+pub const MERMAID_INDEX: u8 = 1;
+
 // Only 3 hues exist, so robot deliberately reuses mermaid's solid teal
 // (the garbage block's own accent color) and border_style cycles a second time.
 pub const ALL = [COUNT]Character{
-    .{ .name = "LIZARD", .sprite = &SPRITE_LIZARD, .face = .{ 9, 3 }, .hues = .{ 0, 0 }, .border_style = .solid, .base_hue = 0 },
-    .{ .name = "MERMAID", .sprite = &SPRITE_MERMAID, .face = .{ 7, 2 }, .hues = .{ 1, 1 }, .border_style = .checkered, .base_hue = 51 },
-    .{ .name = "BUG", .sprite = &SPRITE_BUG, .face = .{ 7, 3 }, .hues = .{ 2, 2 }, .border_style = .dashed, .base_hue = 103 },
-    .{ .name = "CLOUD", .sprite = &SPRITE_CLOUD, .face = .{ 7, 3 }, .hues = .{ 0, 2 }, .border_style = .double, .base_hue = 154 },
-    .{ .name = "SLIME", .sprite = &SPRITE_SLIME, .face = .{ 7, 3 }, .hues = .{ 1, 2 }, .border_style = .solid, .base_hue = 206 },
-    .{ .name = "CROW", .sprite = &SPRITE_CROW, .face = .{ 8, 2 }, .hues = .{ 0, 1 }, .border_style = .checkered, .base_hue = 257 },
-    .{ .name = "ROBOT", .sprite = &SPRITE_ROBOT, .face = .{ 7, 4 }, .hues = .{ 1, 1 }, .border_style = .dashed, .base_hue = 309 },
+    .{ .name = "LIZARD", .sprite = &SPRITE_LIZARD, .face = .{ 9, 3 }, .hues = .{ 0, 0 }, .border_style = .solid, .base_hue = 0, .dialogue = "STILL CURSED..." },
+    .{ .name = "MERMAID", .sprite = &SPRITE_MERMAID, .face = .{ 7, 2 }, .hues = .{ 1, 1 }, .border_style = .checkered, .base_hue = 51, .dialogue = "LET'S FREE THEM!" },
+    .{ .name = "BUG", .sprite = &SPRITE_BUG, .face = .{ 7, 3 }, .hues = .{ 2, 2 }, .border_style = .dashed, .base_hue = 103, .dialogue = "IT BITES AT ME" },
+    .{ .name = "CLOUD", .sprite = &SPRITE_CLOUD, .face = .{ 7, 3 }, .hues = .{ 0, 2 }, .border_style = .double, .base_hue = 154, .dialogue = "SO FOGGY..." },
+    .{ .name = "SLIME", .sprite = &SPRITE_SLIME, .face = .{ 7, 3 }, .hues = .{ 1, 2 }, .border_style = .solid, .base_hue = 206, .dialogue = "CAN'T STOP IT" },
+    .{ .name = "CROW", .sprite = &SPRITE_CROW, .face = .{ 8, 2 }, .hues = .{ 0, 1 }, .border_style = .checkered, .base_hue = 257, .dialogue = "SOMETHING PULLS" },
+    .{ .name = "ROBOT", .sprite = &SPRITE_ROBOT, .face = .{ 7, 4 }, .hues = .{ 1, 1 }, .border_style = .dashed, .base_hue = 309, .dialogue = "SYSTEM CORRUPTED" },
 };
 
 // Always differs from player_pick; `roll` mod (COUNT - 1) picks uniformly

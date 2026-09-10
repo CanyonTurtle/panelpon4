@@ -88,3 +88,9 @@ pub fn getManualRaiseElapsed(board: u32) callconv(.c) u32 {
 pub fn getDangerTimer(board: u32) callconv(.c) u32 {
     return boardFor(board).danger_timer;
 }
+
+// Lets a script force a win/loss through the real update() branch (audio,
+// closing wipe, story-flow transitions and all) instead of playing it out.
+pub fn setGameOver(board: u32, over: u32) callconv(.c) void {
+    boardFor(board).game_over = over != 0;
+}

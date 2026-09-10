@@ -165,15 +165,17 @@ const CHARS_PER_ROW: u8 = 4;
 const CHAR_SLOT_GAP: i32 = 8;
 const CHAR_ROW_GAP: i32 = 8;
 
-fn charRowCount(row: u8) u8 {
+fn charRowCount(row: u8, total: u8) u8 {
     const start = row * CHARS_PER_ROW;
-    return @intCast(@min(CHARS_PER_ROW, characters.COUNT - start));
+    return @intCast(@min(CHARS_PER_ROW, total - start));
 }
 
-fn charSlotPos(index: u8) struct { x: i32, y: i32, row: u8 } {
+// `total` is how many portraits are actually laid out -- the full roster
+// for setup_character, or just the unlocked party for drawStoryCharacterSelect.
+fn charSlotPos(index: u8, total: u8) struct { x: i32, y: i32, row: u8 } {
     const row = index / CHARS_PER_ROW;
     const col = index % CHARS_PER_ROW;
-    const row_w = @as(i32, charRowCount(row)) * rchar.W + (@as(i32, charRowCount(row)) - 1) * CHAR_SLOT_GAP;
+    const row_w = @as(i32, charRowCount(row, total)) * rchar.W + (@as(i32, charRowCount(row, total)) - 1) * CHAR_SLOT_GAP;
     const start_x = MENU_PANEL_X + @divTrunc(MENU_PANEL_W - row_w, 2);
     const x = start_x + @as(i32, col) * (rchar.W + CHAR_SLOT_GAP);
     const y = @as(i32, row) * (rchar.H + CHAR_ROW_GAP);
@@ -202,7 +204,7 @@ pub fn drawSetupCharacterScreen() void {
     const flash_on = !flashing or blinkOn(c.SETUP_FLASH_TOTAL_FRAMES - s.setup_flash_timer, c.SETUP_FLASH_TOGGLE_FRAMES);
     var last_row: u8 = 0;
     for (0..characters.COUNT) |i| {
-        const pos = charSlotPos(@intCast(i));
+        const pos = charSlotPos(@intCast(i), characters.COUNT);
         const cy = grid_y + pos.y;
         last_row = pos.row;
         rchar.draw(pos.x, cy, @intCast(i), .normal, frame);
@@ -327,6 +329,91 @@ pub fn drawStoryTierScreen() void {
 
     if (game_modes.xhard_revealed and s.story_tier == .hard) {
         w4.Text("HOLD <- + Z ...", 22, y + 96);
+    }
+}
+
+// Shown between stages whenever the party has more than one member to pick
+// from (main.zig's beginStoryFlow) -- only ever offers already-freed characters.
+pub fn drawStoryCharacterSelect() void {
+    const y = drawMenuPanelFill(SETUP_BASE_Y, 120);
+    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 120, characters.ALL[s.story_select_cursor]);
+
+    w4.DRAW_COLORS.* = 0x0003;
+    w4.Text("CHOOSE YOUR", 34, y + 6);
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text("FIGHTER", 52, y + 18);
+
+    var unlocked: [characters.COUNT]u8 = undefined;
+    var n: u8 = 0;
+    for (0..characters.COUNT) |i| {
+        if (s.story_party[i]) {
+            unlocked[n] = @intCast(i);
+            n += 1;
+        }
+    }
+
+    const frame = rchar.currentFrame();
+    const grid_y = y + 34;
+    var last_row: u8 = 0;
+    for (0..n) |k| {
+        const idx = unlocked[k];
+        const pos = charSlotPos(@intCast(k), n);
+        const cy = grid_y + pos.y;
+        last_row = pos.row;
+        rchar.draw(pos.x, cy, idx, .normal, frame);
+        if (idx == s.story_select_cursor) {
+            cells.drawDitheredRectOutline(pos.x - 2, cy - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
+        }
+    }
+    const grid_bottom = grid_y + @as(i32, last_row) * (rchar.H + CHAR_ROW_GAP) + rchar.H;
+
+    w4.DRAW_COLORS.* = 0x0002;
+    const you_label = characters.ALL[s.story_select_cursor].name;
+    w4.Text(you_label, MENU_PANEL_X + @divTrunc(MENU_PANEL_W - @as(i32, @intCast(you_label.len)) * 8, 2), grid_bottom + 6);
+    if (n > 1) w4.Text("<-      ->", 40, grid_bottom + 18);
+    w4.Text("PRESS X", 52, grid_bottom + 30);
+}
+
+const WALK_SLIDE_START_PX: i32 = 40;
+
+// How far the hero portrait still has to slide in, easing to 0 by
+// STORY_WALK_TRANSITION_FRAMES -- plain integer math, no trig (see titleLogoBob's own note).
+fn walkSlideOffset() i32 {
+    if (s.story_flow_timer >= c.STORY_WALK_TRANSITION_FRAMES) return 0;
+    const remaining = c.STORY_WALK_TRANSITION_FRAMES - s.story_flow_timer;
+    return @intCast(remaining * @as(u32, @intCast(WALK_SLIDE_START_PX)) / c.STORY_WALK_TRANSITION_FRAMES);
+}
+
+// The walk-up-to-the-next-opponent scene: the active party member slides in
+// to face the next cursed character, each speaking their own dialogue line.
+pub fn drawStoryWalkTransition() void {
+    const y = drawMenuPanelFill(SETUP_BASE_Y, 120);
+    drawThemedPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 120, characters.ALL[s.player_character]);
+
+    w4.DRAW_COLORS.* = 0x0003;
+    w4.Text("FREE THEM FROM", 24, y + 8);
+    w4.Text("THE CURSE!", 44, y + 20);
+
+    const frame = rchar.currentFrame();
+    const row_y = y + 38;
+    const hero_x = revealSlotX(0) - walkSlideOffset();
+    const foe_x = revealSlotX(1);
+    rchar.draw(hero_x, row_y, s.player_character, .normal, frame);
+    rchar.draw(foe_x, row_y, s.cpu_character, .normal, frame);
+    cells.drawDitheredRectOutline(foe_x - 2, row_y - 2, rchar.W + 4, rchar.H + 4, badge.WARM_DITHER_HUES);
+
+    // Each speaker gets 2 lines (name, then their dialogue) -- name+dialogue
+    // combined can run past the 20-char screen width, so they never share a line.
+    const text_y = row_y + rchar.H + 8;
+    w4.DRAW_COLORS.* = 0x0004;
+    w4.Text(characters.ALL[s.cpu_character].name, 4, text_y);
+    w4.Text(characters.ALL[s.cpu_character].dialogue, 4, text_y + 9);
+
+    if (s.story_flow_timer >= c.STORY_WALK_TRANSITION_FRAMES) {
+        w4.DRAW_COLORS.* = 0x0002;
+        w4.Text(characters.ALL[s.player_character].name, 4, text_y + 22);
+        w4.Text(characters.ALL[s.player_character].dialogue, 4, text_y + 31);
+        w4.Text("PRESS X", 52, y + 108);
     }
 }
 

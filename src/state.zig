@@ -4,6 +4,7 @@
 const std = @import("std");
 const c = @import("constants.zig");
 const fx = @import("state_fx.zig");
+const characters = @import("characters.zig");
 
 // `recycling` is garbage's own analog of `popping` (see Cell.is_garbage),
 // kept distinct so a real matched block never gets confused with an inert garbage block converting in place.
@@ -181,6 +182,21 @@ pub var story_game_overs: u32 = 0;
 // Decision window for a left-press on Hard: ordinary tap vs. the secret
 // hold-left-then-Z combo into X Hard (constants.STORY_SECRET_GRACE_FRAMES).
 pub var story_left_grace_timer: u16 = 0;
+
+// Who's joined the traveling party (freed by defeat, plus Mermaid from the
+// start) -- main.zig's beginStoryFlow. Drops back to false on a stage loss.
+pub var story_party: [characters.COUNT]bool = [_]bool{false} ** characters.COUNT;
+
+// Mid-run sub-screens shown while s.started stays true -- MenuPhase only
+// renders while !s.started, so these get their own switch in main.zig.
+pub const StoryFlowStep = enum { none, character_select, walk_transition };
+pub var story_flow_step: StoryFlowStep = .none;
+// True when advancing to a new stage after a win (character_select leads
+// into walk_transition); false when retrying after a loss (leads straight back into the countdown).
+pub var story_flow_advancing: bool = false;
+pub var story_flow_timer: u32 = 0;
+// Highlighted pick while story_flow_step == .character_select.
+pub var story_select_cursor: u8 = 0;
 
 // Nonzero blocks input while the confirm outline blinks; at 0, main.zig
 // rolls the CPU's pick and moves to `.setup_cpu_reveal`.

@@ -44,6 +44,22 @@ fn setMenuPhase(new: s.MenuPhase) void {
     s.menu_transition_flash = MENU_FLASH_FRAMES;
 }
 
+// Enters whichever mid-run screen (or none) fits after a stage resolves --
+// character_select only with an actual choice, walk_transition only when moving to a new opponent.
+fn beginStoryFlow() void {
+    s.story_select_cursor = s.player_character;
+    if (game_modes.unlockedCount(s.story_party) > 1) {
+        s.story_flow_step = .character_select;
+    } else if (s.story_flow_advancing) {
+        s.story_flow_step = .walk_transition;
+    } else {
+        s.story_flow_step = .none;
+        board.beginCountdown();
+        return;
+    }
+    s.story_flow_timer = 0;
+}
+
 // Debug-only WASM exports (see debug.zig) for the JS test harness to drive;
 // only compiled into Debug builds, so a release build stays minimal.
 comptime {
@@ -62,6 +78,7 @@ comptime {
         @export(&debug.setDifficulty, .{ .name = "debugSetDifficulty" });
         @export(&debug.getManualRaiseElapsed, .{ .name = "debugGetManualRaiseElapsed" });
         @export(&debug.getDangerTimer, .{ .name = "debugGetDangerTimer" });
+        @export(&debug.setGameOver, .{ .name = "debugSetGameOver" });
     }
 }
 
@@ -114,6 +131,45 @@ export fn update() void {
         return;
     }
 
+    // Mid-run story screens (see beginStoryFlow) -- still s.started, but
+    // neither real gameplay nor a MenuPhase, so they get their own branch.
+    if (s.started and s.game_mode == .story and s.story_flow_step != .none) {
+        s.story_flow_timer += 1;
+        switch (s.story_flow_step) {
+            .character_select => {
+                render.drawStoryCharacterSelect();
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_LEFT)) {
+                    s.story_select_cursor = game_modes.prevUnlocked(s.story_party, s.story_select_cursor);
+                }
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_RIGHT)) {
+                    s.story_select_cursor = game_modes.nextUnlocked(s.story_party, s.story_select_cursor);
+                }
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
+                    s.player_character = s.story_select_cursor;
+                    if (s.story_flow_advancing) {
+                        s.story_flow_step = .walk_transition;
+                        s.story_flow_timer = 0;
+                    } else {
+                        s.story_flow_step = .none;
+                        board.beginCountdown();
+                    }
+                }
+            },
+            .walk_transition => {
+                render.drawStoryWalkTransition();
+                // Let the walk-up animation finish before X can skip ahead.
+                if (s.story_flow_timer >= c.STORY_WALK_TRANSITION_FRAMES and input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
+                    s.story_flow_step = .none;
+                    board.beginCountdown();
+                }
+            },
+            .none => unreachable,
+        }
+        s.prev_gamepad = gp;
+        s.cpu_prev_gamepad = gp2;
+        return;
+    }
+
     if (!s.started) {
         _ = s.player.rngNext();
         board.perturbSharedRng();
@@ -130,7 +186,18 @@ export fn update() void {
                 if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_DOWN)) s.game_mode = nextMode(s.game_mode);
                 if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
                     switch (s.game_mode) {
-                        .quick, .story => setMenuPhase(.setup_character),
+                        .quick => setMenuPhase(.setup_character),
+                        // Story always starts as Mermaid, straight to tier
+                        // select -- everyone else joins the party as they're freed.
+                        .story => {
+                            s.player_character = characters.MERMAID_INDEX;
+                            s.story_party = [_]bool{false} ** characters.COUNT;
+                            s.story_party[characters.MERMAID_INDEX] = true;
+                            s.story_stage = 0;
+                            s.story_game_overs = 0;
+                            s.cpu_character = game_modes.storyOpponentFor(0);
+                            setMenuPhase(.story_tier_select);
+                        },
                         // Versus skips character/difficulty picking; confirm
                         // screen comes first since netplay handshakes outside the cart.
                         .versus => setMenuPhase(.versus_confirm),
@@ -169,14 +236,9 @@ export fn update() void {
                                 s.cpu_reveal_timer = c.CPU_REVEAL_HOLD_BASE;
                                 setMenuPhase(.setup_cpu_reveal);
                             },
-                            .story => {
-                                s.story_stage = 0;
-                                s.story_game_overs = 0;
-                                s.cpu_character = game_modes.storyOpponentFor(0);
-                                setMenuPhase(.story_tier_select);
-                            },
-                            // Neither ever reaches setup_character (see mode_select above).
-                            .tutorial, .versus => unreachable,
+                            // None of these ever reach setup_character (story
+                            // locks to Mermaid from mode_select; see above).
+                            .story, .tutorial, .versus => unreachable,
                         }
                     }
                 } else {
@@ -316,6 +378,9 @@ export fn update() void {
             switch (s.game_mode) {
                 .story => {
                     if (s.winner == .player) {
+                        // The defeated opponent is freed from the curse and
+                        // joins the traveling party.
+                        s.story_party[s.cpu_character] = true;
                         s.story_stage += 1;
                         if (s.story_stage >= game_modes.STORY_STAGES) {
                             // Whole run cleared: reveal the X Hard hint if
@@ -326,13 +391,19 @@ export fn update() void {
                         } else {
                             s.cpu_character = game_modes.storyOpponentFor(s.story_stage);
                             s.difficulty = game_modes.storyDifficultyFor(s.story_tier, s.story_stage);
-                            board.beginCountdown();
+                            s.story_flow_advancing = true;
+                            beginStoryFlow();
                         }
                     } else {
-                        // Lost/drew the stage: tally game_overs and retry
-                        // the SAME stage, never restarting the whole run.
+                        // Lost/drew: retry the SAME stage. Whoever was
+                        // piloting leaves the party, unless it was Mermaid herself.
+                        if (s.player_character != characters.MERMAID_INDEX) {
+                            s.story_party[s.player_character] = false;
+                            s.player_character = characters.MERMAID_INDEX;
+                        }
                         s.story_game_overs += 1;
-                        board.beginCountdown();
+                        s.story_flow_advancing = false;
+                        beginStoryFlow();
                     }
                 },
                 .quick, .versus => {

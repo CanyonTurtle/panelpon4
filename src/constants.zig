@@ -46,6 +46,10 @@ pub const CHARACTER_ANIM_FRAME_TICKS: u32 = 20; // frames each of a character's 
 // secret X Hard combo commits to an ordinary Medium tap (see main.zig).
 pub const STORY_SECRET_GRACE_FRAMES: u16 = 20;
 
+// How long the walk-up-to-the-next-opponent scene's slide-in animation
+// takes (render_screens.drawStoryWalkTransition) before X can skip ahead.
+pub const STORY_WALK_TRANSITION_FRAMES: u32 = 20;
+
 // The character screen's confirm flash (see state.setup_flash_timer):
 // blinks the selection outline every TOGGLE frames, 3 full on/off cycles.
 pub const SETUP_FLASH_TOTAL_FRAMES: u16 = 24;

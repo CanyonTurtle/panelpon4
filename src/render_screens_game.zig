@@ -88,7 +88,7 @@ fn drawStoryGameOver() void {
     drawGameOverPortraits(x, y, w, won);
 
     w4.DRAW_COLORS.* = 0x0004;
-    const headline: []const u8 = if (!won) "GAME OVER" else if (cleared_run) "STORY CLEAR!" else "STAGE CLEAR";
+    const headline: []const u8 = if (!won) "GAME OVER" else if (cleared_run) "CURSE BROKEN!" else "FREED!";
     w4.Text(headline, centeredX(x, w, headline), 58);
 
     w4.DRAW_COLORS.* = 0x0002;
