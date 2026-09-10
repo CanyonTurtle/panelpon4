@@ -45,31 +45,37 @@ pub fn drawTitleScreen() void {
 }
 
 // Uses the title screen's plain bezel, not a character-themed one. Order
-// must match state.GameMode's left/right cycling order (main.zig).
-const GAME_MODE_LABELS = [3][]const u8{ "1P STORY", "1P QUICK MATCH", "2P VERSUS" };
+// must match state.GameMode's up/down cycling order (main.zig) top to bottom.
+const GAME_MODE_LABELS = [4][]const u8{ "1P QUICK MATCH", "1P STORY", "TUTORIAL", "2P VERSUS" };
+const MODE_SELECT_PANEL_H: i32 = 114;
+const MODE_LIST_STEP: i32 = 12;
 fn gameModeIndex(m: s.GameMode) u8 {
     return switch (m) {
-        .story => 0,
-        .quick => 1,
-        .versus => 2,
+        .quick => 0,
+        .story => 1,
+        .tutorial => 2,
+        .versus => 3,
     };
 }
 
 pub fn drawModeSelectScreen() void {
-    const y = drawMenuPanelFill(30, 100);
-    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, 100);
+    const y = drawMenuPanelFill(30, MODE_SELECT_PANEL_H);
+    drawPanelBorder(MENU_PANEL_X, y, MENU_PANEL_W, MODE_SELECT_PANEL_H);
     w4.DRAW_COLORS.* = 0x0003;
-    w4.Text("SELECT MODE", 34, y + 12);
+    w4.Text("SELECT MODE", 34, y + 10);
 
     const cur = gameModeIndex(s.game_mode);
     for (GAME_MODE_LABELS, 0..) |label, i| {
-        const line_y = y + 34 + @as(i32, @intCast(i)) * 14;
+        const line_y = y + 30 + @as(i32, @intCast(i)) * MODE_LIST_STEP;
+        if (i == cur) {
+            cells.drawDitheredRectOutline(24, line_y - 2, 92, 10, badge.WARM_DITHER_HUES);
+        }
         w4.DRAW_COLORS.* = if (i == cur) 0x0004 else 0x0002;
         w4.Text(label, 30, line_y);
     }
     w4.DRAW_COLORS.* = 0x0002;
-    w4.Text("<-      ->", 40, y + 80);
-    w4.Text("PRESS X", 52, y + 92);
+    w4.Text("UP / DOWN", 44, y + 86);
+    w4.Text("PRESS X", 52, y + 98);
 }
 
 // A manual gate ensuring the second player has actually joined before

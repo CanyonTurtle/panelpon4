@@ -157,3 +157,19 @@ pub fn drawCountdown() void {
     w4.DRAW_COLORS.* = 0x0004;
     w4.Text(label, cx - @divTrunc(text_w, 2), y);
 }
+
+const TUTORIAL_CAPTION_Y: i32 = 144; // the 16px strip below the board (BOARD_BOTTOM), never drawn into by drawBoard
+
+// Drawn last, over the rendered frame -- same pattern as drawCountdown/
+// drawGameOver above. step/total show a small progress counter.
+pub fn drawTutorialCaption(line1: []const u8, line2: []const u8, step: u8, total: u8) void {
+    w4.DRAW_COLORS.* = 0x0001;
+    w4.Rect(0, TUTORIAL_CAPTION_Y, w4.SCREEN_SIZE, @intCast(@as(i32, @intCast(w4.SCREEN_SIZE)) - TUTORIAL_CAPTION_Y));
+    w4.DRAW_COLORS.* = 0x0004;
+    w4.Text(line1, 4, TUTORIAL_CAPTION_Y);
+    var buf: [8]u8 = undefined;
+    const progress = std.fmt.bufPrint(&buf, "{d}/{d}", .{ step, total }) catch "";
+    w4.Text(progress, @as(i32, @intCast(w4.SCREEN_SIZE)) - @as(i32, @intCast(progress.len * 8)) - 4, TUTORIAL_CAPTION_Y);
+    w4.DRAW_COLORS.* = 0x0002;
+    w4.Text(line2, 4, TUTORIAL_CAPTION_Y + 8);
+}

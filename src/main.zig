@@ -13,20 +13,23 @@ const audio = @import("audio.zig");
 const debug = @import("debug.zig");
 const characters = @import("characters.zig");
 const game_modes = @import("game_modes.zig");
+const tutorial = @import("tutorial.zig");
 
-// mode_select's own left/right cycling order (quick -> story -> versus ->
-// wraps back to quick).
+// mode_select's own up/down cycling order, top to bottom: quick -> story ->
+// tutorial -> versus -> wraps back to quick (must match its displayed order).
 fn prevMode(m: s.GameMode) s.GameMode {
     return switch (m) {
         .quick => .versus,
         .story => .quick,
-        .versus => .story,
+        .tutorial => .story,
+        .versus => .tutorial,
     };
 }
 fn nextMode(m: s.GameMode) s.GameMode {
     return switch (m) {
         .quick => .story,
-        .story => .versus,
+        .story => .tutorial,
+        .tutorial => .versus,
         .versus => .quick,
     };
 }
@@ -83,6 +86,21 @@ export fn update() void {
         return;
     }
 
+    // Tutorial runs its own scripted loop entirely, bypassing the win/lose,
+    // versus, and story branches below (see tutorial.zig).
+    if (s.started and s.game_mode == .tutorial) {
+        render.render();
+        const lines = tutorial.captionLines();
+        render.drawTutorialCaption(lines.line1, lines.line2, tutorial.stepNumber(), tutorial.STEP_COUNT);
+        if (tutorial.update(gp, s.prev_gamepad)) {
+            s.started = false;
+            s.menu_phase = .mode_select;
+        }
+        s.prev_gamepad = gp;
+        s.cpu_prev_gamepad = gp2;
+        return;
+    }
+
     if (!s.started) {
         _ = s.player.rngNext();
         board.perturbSharedRng();
@@ -93,14 +111,20 @@ export fn update() void {
             },
             .mode_select => {
                 render.drawModeSelectScreen();
-                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_LEFT)) s.game_mode = prevMode(s.game_mode);
-                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_RIGHT)) s.game_mode = nextMode(s.game_mode);
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_UP)) s.game_mode = prevMode(s.game_mode);
+                if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_DOWN)) s.game_mode = nextMode(s.game_mode);
                 if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
                     switch (s.game_mode) {
                         .quick, .story => s.menu_phase = .setup_character,
                         // Versus skips character/difficulty picking; confirm
                         // screen comes first since netplay handshakes outside the cart.
                         .versus => s.menu_phase = .versus_confirm,
+                        // Tutorial skips setup and the countdown entirely --
+                        // it seeds its own scripted board state directly.
+                        .tutorial => {
+                            tutorial.begin();
+                            s.started = true;
+                        },
                     }
                 }
             },
@@ -136,7 +160,8 @@ export fn update() void {
                                 s.cpu_character = game_modes.storyOpponentFor(0);
                                 s.menu_phase = .story_tier_select;
                             },
-                            .versus => unreachable, // versus never reaches setup_character (see mode_select above)
+                            // Neither ever reaches setup_character (see mode_select above).
+                            .tutorial, .versus => unreachable,
                         }
                     }
                 } else {
@@ -307,6 +332,9 @@ export fn update() void {
                         board.beginCountdown();
                     }
                 },
+                // Tutorial never sets s.winner -- it exits via its own
+                // early-return branch in update(), never reaching here.
+                .tutorial => unreachable,
             }
             s.winner = .none;
         }

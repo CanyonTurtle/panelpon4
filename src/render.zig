@@ -26,6 +26,7 @@ pub const drawSetupDifficultyScreen = screens.drawSetupDifficultyScreen;
 pub const drawStoryTierScreen = screens.drawStoryTierScreen;
 pub const drawGameOver = screens_game.drawGameOver;
 pub const drawCountdown = screens_game.drawCountdown;
+pub const drawTutorialCaption = screens_game.drawTutorialCaption;
 
 pub const FRAME_THICKNESS: i32 = 2;
 const FRAME_RADIUS: i32 = 2;
@@ -270,7 +271,8 @@ fn drawPanel(board: *s.Board, character: u8, points: u8) void {
         var buf2: [12]u8 = undefined;
         const stage_str = std.fmt.bufPrint(&buf2, "{d}/{d}", .{ s.story_stage + 1, game_modes.STORY_STAGES }) catch "";
         w4.Text(stage_str, CHAR_TEXT_X, 10);
-    } else {
+    } else if (s.game_mode != .tutorial) {
+        // No series/stage score is meaningful during the tutorial.
         badge.drawPoints(CHAR_TEXT_X, 10, points);
     }
 }

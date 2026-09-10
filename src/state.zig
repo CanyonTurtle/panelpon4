@@ -153,10 +153,18 @@ pub var started: bool = false;
 pub const MenuPhase = enum { title, mode_select, setup_character, setup_cpu_reveal, setup_difficulty, story_tier_select, versus_confirm };
 pub var menu_phase: MenuPhase = .title;
 
-// story: progressively harder CPU per character; quick: the original vs-CPU
-// flow; versus: a second real player on GAMEPAD2 drives `cpu`, not cpu_ai.
-pub const GameMode = enum { quick, story, versus };
+// story/quick/versus as before; tutorial is a scripted single-board
+// walkthrough (see tutorial.zig) with GAMEPAD2 driving `cpu` in versus only.
+pub const GameMode = enum { quick, story, tutorial, versus };
 pub var game_mode: GameMode = .quick;
+
+// The tutorial's fixed lesson sequence (see tutorial.zig for content/logic).
+pub const TutorialStep = enum { intro, move, swap, match, chain, garbage, raise, outro };
+pub var tutorial_step: TutorialStep = .intro;
+// Cursor position captured when the current tutorial step began, so
+// tutorial.zig can detect real cursor movement for the "move" step.
+pub var tutorial_step_start_col: u8 = 0;
+pub var tutorial_step_start_row: u8 = 0;
 
 // Only easy/medium/hard cycle ordinarily -- `xhard` is only reachable via
 // hold-left+swap-button on hard (game_modes.xhard_revealed is just a hint).

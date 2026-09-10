@@ -274,9 +274,9 @@ pub fn draw(board: *s.Board, character: u8, points: u8) void {
     var buf: [12]u8 = undefined;
     const score_str = std.fmt.bufPrint(&buf, "{d}", .{board.score}) catch "0";
     w4.Text(score_str, TEXT_X, LABEL_Y + 2);
-    // Story mode has no best-of-N series (render.drawPanel's identical
+    // Story/tutorial have no best-of-N series (render.drawPanel's identical
     // guard) -- points are meaningless there, so left blank.
-    if (s.game_mode != .story) badge.drawPoints(TEXT_X, LABEL_Y + 10, points);
+    if (s.game_mode != .story and s.game_mode != .tutorial) badge.drawPoints(TEXT_X, LABEL_Y + 10, points);
     // Only when `board` is really `&s.cpu`: a swapped peer's popups were
     // spawned in the full-scale coordinate system, so skip them here.
     if (board == &s.cpu) badge.drawMatchPopups(&board.match_popups, TEXT_X, LABEL_Y + 10);
