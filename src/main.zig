@@ -46,11 +46,12 @@ fn setMenuPhase(new: s.MenuPhase) void {
 
 // Enters whichever mid-run screen (or none) fits after a stage resolves --
 // character_select only with an actual choice, walk_transition only when moving to a new opponent.
-fn beginStoryFlow() void {
+fn beginStoryFlow(advancing: bool) void {
+    s.story_flow_advancing = advancing;
     s.story_select_cursor = s.player_character;
     if (game_modes.unlockedCount(s.story_party) > 1) {
         s.story_flow_step = .character_select;
-    } else if (s.story_flow_advancing) {
+    } else if (advancing) {
         s.story_flow_step = .walk_transition;
     } else {
         s.story_flow_step = .none;
@@ -324,7 +325,10 @@ export fn update() void {
                 if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
                     game_modes.applyStoryProfile(s.story_tier);
                     s.difficulty = game_modes.storyDifficultyFor(s.story_tier, s.story_stage);
-                    board.beginCountdown();
+                    // First stage gets the same walk-up scene later ones do --
+                    // beginStoryFlow lives in the s.started branch, so flip that on first.
+                    s.started = true;
+                    beginStoryFlow(true);
                 }
             },
         }
@@ -403,8 +407,7 @@ export fn update() void {
                         } else {
                             s.cpu_character = game_modes.storyOpponentFor(s.story_stage);
                             s.difficulty = game_modes.storyDifficultyFor(s.story_tier, s.story_stage);
-                            s.story_flow_advancing = true;
-                            beginStoryFlow();
+                            beginStoryFlow(true);
                         }
                     } else {
                         // Lost/drew: retry the SAME stage. Whoever was
@@ -414,8 +417,7 @@ export fn update() void {
                             s.player_character = characters.MERMAID_INDEX;
                         }
                         s.story_game_overs += 1;
-                        s.story_flow_advancing = false;
-                        beginStoryFlow();
+                        beginStoryFlow(false);
                     }
                 },
                 .quick, .versus => {
