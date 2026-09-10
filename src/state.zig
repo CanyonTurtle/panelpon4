@@ -168,7 +168,7 @@ pub const GameMode = enum { quick, story, tutorial, versus };
 pub var game_mode: GameMode = .tutorial;
 
 // The tutorial's fixed lesson sequence (see tutorial.zig for content/logic).
-pub const TutorialStep = enum { intro, move, swap, match, chain, garbage, raise, outro };
+pub const TutorialStep = enum { intro, move, swap, match, combo, chain, garbage, raise, outro };
 pub var tutorial_step: TutorialStep = .intro;
 
 // Only easy/medium/hard cycle ordinarily -- `xhard` is only reachable via
