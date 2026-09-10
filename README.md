@@ -38,6 +38,26 @@ To produce a single self-contained HTML file (playable offline, no server needed
 npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm --html web/panelpon4.html --title "panelpon4"
 ```
 
+## Releasing
+
+Every push to `main` auto-deploys the standalone web build to GitHub Pages
+(`.github/workflows/pages.yml`). A tagged **release** is a separate, manual
+step, meant for publishing elsewhere (itch.io, [wasm4.org](https://wasm4.org/docs/guides/distribution/#publish-on-wasm4org)):
+
+1. Bump `.version` in `build.zig.zon` and commit.
+2. `git tag vX.Y.Z && git push origin vX.Y.Z` (must match the version you
+   just committed -- `.github/workflows/release.yml` checks this and fails
+   fast if they don't match).
+
+That workflow (`release.yml`) builds and tests the cart, then creates a
+GitHub Release for the tag with 4 attached files: `panelpon4.wasm` (the
+cart), `panelpon4.html` (the standalone web bundle), and `panelpon4.png`/
+`panelpon4.md` -- a screenshot and manual, captured/generated automatically
+(see `tools/capture-wasm4-screenshot.js` and `wasm4/manual.md`), in exactly
+the form [wasm4.org's distribution guide](https://wasm4.org/docs/guides/distribution/#publish-on-wasm4org)
+expects for a PR adding a cart to `/site/static/carts` in a fork of
+`aduros/wasm4` -- download the 3 files from the release and drop them in.
+
 ## How to play
 
 Each board is the traditional Panel de Pon size, 6 columns by 12 rows. You play against an opponent, each

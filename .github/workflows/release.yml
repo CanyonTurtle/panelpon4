@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify build.zig.zon version matches the tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          ZON_VERSION=$(grep -oP '(?<=\.version = ")[^"]+' build.zig.zon)
+          if [ "$ZON_VERSION" != "$TAG" ]; then
+            echo "build.zig.zon version ($ZON_VERSION) does not match tag (v$TAG)"
+            exit 1
+          fi
+
+      - name: Lint file sizes
+        run: zig build lint
+
+      - name: Run unit tests
+        run: zig build test
+
+      - name: Build debug cart (for the wasm4.org screenshot only)
+        run: zig build
+
+      - name: Capture wasm4.org submission screenshot
+        run: |
+          mkdir -p dist
+          node tools/capture-wasm4-screenshot.js zig-out/bin/cart.wasm dist/panelpon4.png
+
+      - name: Build release cart
+        run: zig build --release=small
+
+      - name: Copy release cart for the wasm4.org submission
+        run: cp zig-out/bin/cart.wasm dist/panelpon4.wasm
+
+      - name: Bundle standalone web build
+        run: |
+          npx --yes -p wasm4 w4 bundle zig-out/bin/cart.wasm \
+            --html dist/panelpon4.html \
+            --title "panelpon4" \
+            --description "A Panel de Pon-style match-3 for WASM-4"
+
+      - name: Stamp today's date into the wasm4.org manual
+        run: sed "s/{{DATE}}/$(date +%Y-%m-%d)/" wasm4/manual.md > dist/panelpon4.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: panelpon4 ${{ github.ref_name }}
+          body: |
+            See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)
+            for how to play.
+
+            `panelpon4.wasm`/`panelpon4.png`/`panelpon4.md` are the 3 files
+            [wasm4.org's distribution guide](https://wasm4.org/docs/guides/distribution/#publish-on-wasm4org)
+            expects in a fork's `/site/static/carts` -- copy them there
+            (renaming to your chosen game id) to submit.
+          files: |
+            dist/panelpon4.wasm
+            dist/panelpon4.png
+            dist/panelpon4.md
+            dist/panelpon4.html
