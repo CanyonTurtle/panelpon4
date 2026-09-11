@@ -176,7 +176,9 @@ fn maskBelowBoard() void {
     const screen: i32 = @intCast(w4.SCREEN_SIZE);
     if (BOARD_BOTTOM >= screen) return; // nothing below the board to mask
     w4.DRAW_COLORS.* = cells.DC_BG;
-    w4.Rect(0, BOARD_BOTTOM, @intCast(c.PANEL_X), @intCast(screen - BOARD_BOTTOM));
+    // Full screen width, not just up to PANEL_X -- BOARD_X varies by mode
+    // (marathon recenters it past PANEL_X), and nothing else has drawn here yet.
+    w4.Rect(0, BOARD_BOTTOM, @intCast(screen), @intCast(screen - BOARD_BOTTOM));
 }
 
 // Fills one edge band per the character's own border style (see characters.BorderStyle);
