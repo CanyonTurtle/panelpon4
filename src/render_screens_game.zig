@@ -114,6 +114,47 @@ fn drawStoryGameOver() void {
     }
 }
 
+// Marathon has no opponent, so just one (always losing-wince) portrait --
+// left-aligned like drawGameOverPortraits' own left slot, clear of the headline.
+fn drawMarathonPortrait(x: i32, y: i32) void {
+    const frame = rchar.currentFrame();
+    rchar.draw(x + 4, y + 4, s.player_character, .punish, frame);
+}
+
+// Final score/chain for this run, plus a "NEW BEST!" callout when
+// state.marathon_new_best was set (main.zig, before the record updates).
+pub fn drawMarathonGameOver() void {
+    const x = 20;
+    const y = 52;
+    const w = 120;
+    const h = 68;
+    w4.DRAW_COLORS.* = 0x0001;
+    w4.Rect(x, y, w, h);
+    screens.drawPanelBorder(x, y, w, h);
+    drawMarathonPortrait(x, y);
+
+    w4.DRAW_COLORS.* = 0x0004;
+    w4.Text("GAME OVER", centeredX(x, w, "GAME OVER"), 58);
+
+    w4.DRAW_COLORS.* = 0x0002;
+    var buf: [24]u8 = undefined;
+    const score_str = std.fmt.bufPrint(&buf, "SCORE {d}", .{s.player.score}) catch "";
+    w4.Text(score_str, centeredX(x, w, score_str), 76);
+
+    var chain_buf: [24]u8 = undefined;
+    const chain_str = std.fmt.bufPrint(&chain_buf, "BEST CHAIN x{d}", .{s.marathon_run_best_chain}) catch "";
+    w4.Text(chain_str, centeredX(x, w, chain_str), 86);
+
+    if (s.marathon_new_best) {
+        w4.DRAW_COLORS.* = 0x0004;
+        w4.Text("NEW BEST!", centeredX(x, w, "NEW BEST!"), 96);
+        w4.DRAW_COLORS.* = 0x0002;
+        w4.Text("PRESS X", centeredX(x, w, "PRESS X"), 106);
+    } else {
+        w4.Text("PRESS X", centeredX(x, w, "PRESS X"), 100);
+    }
+}
+
 // "3 2 1 START" shown once per match (see state.countdown_timer,
 // board.beginCountdown). Numbers rise then hold; START rises then blinks.
 pub fn drawCountdown() void {

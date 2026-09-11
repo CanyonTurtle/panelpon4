@@ -8,6 +8,7 @@ const fx = @import("state_fx.zig");
 const audio = @import("audio.zig");
 const garbage = @import("sim_garbage.zig");
 const matches = @import("sim_matches.zig");
+const board = @import("board.zig");
 
 // `settled_color` is read by wouldCompleteRun and also written here as each converting garbage cell's color is picked;
 // `settled_chainable` and `matched` are only ever read.
@@ -191,9 +192,11 @@ pub fn resolveMatchGroups(
                 const edge_y = cy - fx.MATCH_POPUP_RISE_PX;
                 fx.spawnMatchPopup(self, label, cx, cy, edge_y, group_end);
 
-                // A big enough combo or chain queues garbage onto the opponent (never self-inflicted) via sim_garbage.zig's
-                // queueing lifecycle rather than spawning it immediately; a growing chain overwrites its own pending attack until it concludes, while a combo queues its already-final size right away. Chain wins when a match is both, mirroring the badge label above.
-                if (is_chain) {
+                // A big enough combo or chain queues garbage onto the opponent via sim_garbage.zig's queueing lifecycle
+                // (a growing chain overwrites its pending size until it concludes); marathon has no opponent, so it banks rise-freeze time on `self` instead (board.freezeFramesForMatch).
+                if (s.game_mode == .marathon) {
+                    self.rise_freeze = @min(self.rise_freeze + board.freezeFramesForMatch(is_chain, multiplier, real_count), board.MARATHON_MAX_RISE_FREEZE);
+                } else if (is_chain) {
                     const garbage_rows: u8 = multiplier - 1;
                     garbage.queueChainGarbage(self, garbage_rows, c.COLS, 0);
                 } else if (real_count >= 6) {

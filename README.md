@@ -90,8 +90,9 @@ scale in the side panel -- running the exact same rules and physics.
 - Each board's floor rises over time, faster as score climbs; topping out loses (with a short
   forgiveness window to recover).
 - Three modes, picked from the title screen: **1P story** (fixed run through every character, with
-  a difficulty tier), **1P quick match** (single best-of-3 against one CPU opponent, numeric
-  difficulty 1-10), and **2P versus** (second controller or WASM-4 netplay).
+  a difficulty tier), **marathon** (solo, no opponent -- chains/combos freeze the rise for a bit
+  instead of sending garbage, chasing a high score and a best-chain record), and **2P versus**
+  (second controller or WASM-4 netplay).
 
 The exact rules for matching, chaining, garbage, CPU difficulty, and scoring live in the simulation
 code and its tests (see below) -- this section is deliberately just an orientation, not a spec.

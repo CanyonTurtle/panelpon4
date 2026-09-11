@@ -107,17 +107,25 @@ pub fn drawTitleScreen() void {
     drawLogo(logo_x, logo_y);
     w4.DRAW_COLORS.* = 0x0004;
     w4.Text("PRESS X", 52, 40);
+
+    // Only once a real marathon run has actually set a record.
+    if (game_modes.marathon_best_chain > 0) {
+        var buf: [16]u8 = undefined;
+        const label = std.fmt.bufPrint(&buf, "BEST CHAIN x{d}", .{game_modes.marathon_best_chain}) catch "";
+        w4.DRAW_COLORS.* = 0x0002;
+        w4.Text(label, @divTrunc(160 - @as(i32, @intCast(label.len)) * 8, 2), 48);
+    }
 }
 
 // Uses the title screen's plain bezel, not a character-themed one. Order
 // must match state.GameMode's up/down cycling order (main.zig) top to bottom.
-const GAME_MODE_LABELS = [4][]const u8{ "TUTORIAL", "1P QUICK MATCH", "1P STORY", "2P VERSUS" };
+const GAME_MODE_LABELS = [4][]const u8{ "TUTORIAL", "MARATHON", "1P STORY", "2P VERSUS" };
 const MODE_SELECT_PANEL_H: i32 = 114;
 const MODE_LIST_STEP: i32 = 12;
 fn gameModeIndex(m: s.GameMode) u8 {
     return switch (m) {
         .tutorial => 0,
-        .quick => 1,
+        .marathon => 1,
         .story => 2,
         .versus => 3,
     };
@@ -129,7 +137,7 @@ pub fn drawModeSelectScreen() void {
     w4.DRAW_COLORS.* = 0x0003;
     w4.Text("SELECT MODE", 34, y + 10);
 
-    // 22/116 wraps the longest label ("1P QUICK MATCH", 14 chars) with a
+    // 22/116 wraps the longest label ("2P VERSUS", 9 chars) with a
     // couple px of padding, staying inside the panel (x 20..140).
     const cur = gameModeIndex(s.game_mode);
     for (GAME_MODE_LABELS, 0..) |label, i| {

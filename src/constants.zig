@@ -13,9 +13,12 @@ pub const ROWS: u8 = SPAWN_ROWS + RING_SIZE; // spawn buffer + the rotating wind
 pub const TILE: i32 = 12;
 pub const NUM_COLORS: u8 = 5; // 3 solid hues + 2 dithered blends of adjacent hues
 
-// Content width is COLS*TILE (72px), centered in the space left of the
-// panel (0..PANEL_X, i.e. (108-72)/2 = 18).
-pub const BOARD_X: i32 = 18;
+// Content width is COLS*TILE (72px). `var`, not `const`: marathon mode
+// recenters the board (main.zig), having no side panel to leave room for.
+pub var BOARD_X: i32 = 18;
+pub const DEFAULT_BOARD_X: i32 = 18;
+// Centers the 72px-wide board across the full 160px screen.
+pub const MARATHON_BOARD_X: i32 = 44;
 pub const BOARD_Y: i32 = 0;
 pub const PANEL_X: i32 = 108;
 
@@ -92,7 +95,7 @@ pub const MANUAL_RAISE_COOLDOWN: u32 = 40;
 pub var DANGER_FORGIVENESS_FRAMES: u32 = 60;
 
 // Percentage multiplier on board.riseSpeedFramesPerPixel (100 = unchanged);
-// story mode's "stack rise speed" knob. Quick match and versus stay at 100.
+// story mode's "stack rise speed" knob. Marathon and versus stay at 100.
 pub var RISE_SPEED_SCALE_PCT: u32 = 100;
 
 const testing = @import("std").testing;

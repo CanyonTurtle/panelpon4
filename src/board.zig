@@ -142,7 +142,13 @@ pub fn tryManualRaise(self: *s.Board) void {
     self.manual_raise_cooldown = c.MANUAL_RAISE_COOLDOWN;
 }
 
+// Marathon-only: a chain/combo bank frames here (see freezeFramesForMatch)
+// instead of queuing garbage -- pauses the rise entirely while draining.
 pub fn updateRise(self: *s.Board) void {
+    if (self.rise_freeze > 0) {
+        self.rise_freeze -= 1;
+        return;
+    }
     // Cooldown ticks every frame regardless of board state, unlike the
     // raise it gates, which pauses while busy like the automatic rise.
     if (self.manual_raise_cooldown > 0) self.manual_raise_cooldown -= 1;
@@ -175,6 +181,19 @@ pub fn updateRise(self: *s.Board) void {
             doRise(self);
         }
     }
+}
+
+// Caps banked freeze so chaining forever can't stall the rise permanently --
+// tunable starting balance, isolated here for easy retuning after playtesting.
+pub const MARATHON_MAX_RISE_FREEZE: u32 = 300; // 5s at 60fps
+
+// Mirrors sim_matches_resolve's garbage-sizing tiers (chain rows / combo
+// width) but produces a freeze duration instead, for marathon mode.
+pub fn freezeFramesForMatch(is_chain: bool, multiplier: u8, real_count: usize) u32 {
+    if (is_chain) return (@as(u32, multiplier) - 1) * 60; // 1s per chain step beyond the first
+    if (real_count >= 6) return 120;
+    if (real_count == 5) return 75;
+    return 45; // real_count == 4, the only case left under is_combo
 }
 
 // Resets all state except rng_state (preserved so a restart doesn't repeat
@@ -446,4 +465,14 @@ test "awardMatchPoint tallies points and declares a set winner at POINTS_TO_WIN"
     awardMatchPoint(.player);
     try testing.expectEqual(@as(u8, 2), s.player_points);
     try testing.expectEqual(s.Winner.player, s.set_winner);
+}
+
+test "freezeFramesForMatch tiers combos by size and chains by step, chain taking priority" {
+    try testing.expectEqual(@as(u32, 45), freezeFramesForMatch(false, 1, 4));
+    try testing.expectEqual(@as(u32, 75), freezeFramesForMatch(false, 1, 5));
+    try testing.expectEqual(@as(u32, 120), freezeFramesForMatch(false, 1, 6));
+    try testing.expectEqual(@as(u32, 120), freezeFramesForMatch(false, 1, 9)); // still just the >=6 tier
+    try testing.expectEqual(@as(u32, 0), freezeFramesForMatch(true, 1, 4)); // chain step 1: no bonus yet
+    try testing.expectEqual(@as(u32, 60), freezeFramesForMatch(true, 2, 4));
+    try testing.expectEqual(@as(u32, 180), freezeFramesForMatch(true, 4, 6)); // chain wins over combo size
 }

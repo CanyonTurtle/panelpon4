@@ -14,21 +14,22 @@ const debug = @import("debug.zig");
 const characters = @import("characters.zig");
 const game_modes = @import("game_modes.zig");
 const tutorial = @import("tutorial.zig");
+const marathon = @import("marathon.zig");
 
-// mode_select's own up/down cycling order, top to bottom: tutorial -> quick ->
+// mode_select's own up/down cycling order, top to bottom: tutorial -> marathon ->
 // story -> versus -> wraps back to tutorial (must match its displayed order).
 fn prevMode(m: s.GameMode) s.GameMode {
     return switch (m) {
         .tutorial => .versus,
-        .quick => .tutorial,
-        .story => .quick,
+        .marathon => .tutorial,
+        .story => .marathon,
         .versus => .story,
     };
 }
 fn nextMode(m: s.GameMode) s.GameMode {
     return switch (m) {
-        .tutorial => .quick,
-        .quick => .story,
+        .tutorial => .marathon,
+        .marathon => .story,
         .story => .versus,
         .versus => .tutorial,
     };
@@ -163,6 +164,21 @@ export fn update() void {
         return;
     }
 
+    // Marathon runs its own scripted loop entirely (see marathon.zig), same
+    // shape as tutorial's own branch just above -- no cpu_ai, no s.winner.
+    if (s.started and s.game_mode == .marathon) {
+        const finished = marathon.update(gp, s.prev_gamepad);
+        render.render();
+        if (s.marathon_over and s.closing_timer <= 0) render.drawMarathonGameOver();
+        if (finished) {
+            s.started = false;
+            setMenuPhase(.mode_select);
+        }
+        s.prev_gamepad = gp;
+        s.cpu_prev_gamepad = gp2;
+        return;
+    }
+
     // Mid-run story screens (see beginStoryFlow) -- still s.started, but
     // neither real gameplay nor a MenuPhase, so they get their own branch.
     if (s.started and s.game_mode == .story and s.story_flow_step != .none) {
@@ -221,7 +237,7 @@ export fn update() void {
                 if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_DOWN)) s.game_mode = nextMode(s.game_mode);
                 if (input.justPressed(gp, s.prev_gamepad, w4.BUTTON_1)) {
                     switch (s.game_mode) {
-                        .quick => setMenuPhase(.setup_character),
+                        .marathon => setMenuPhase(.setup_character),
                         // Story always starts as Mermaid, straight to tier
                         // select -- everyone else joins the party as they're freed.
                         .story => {
@@ -260,17 +276,12 @@ export fn update() void {
             .setup_character => {
                 render.drawSetupCharacterScreen();
                 if (s.setup_flash_timer > 0) {
-                    // Confirmed -- let the flash play out, then: quick mode
-                    // reveals a rolled CPU pick; story skips to tier select.
+                    // Confirmed -- let the flash play out, then: marathon has
+                    // no CPU to roll/reveal, straight to the countdown.
                     s.setup_flash_timer -= 1;
                     if (s.setup_flash_timer == 0) {
                         switch (s.game_mode) {
-                            .quick => {
-                                s.cpu_character = characters.cpuPickFor(s.player_character, s.player.rngNext());
-                                s.cpu_reveal_tick = 0;
-                                s.cpu_reveal_timer = c.CPU_REVEAL_HOLD_BASE;
-                                setMenuPhase(.setup_cpu_reveal);
-                            },
+                            .marathon => marathon.begin(),
                             // None of these ever reach setup_character (story
                             // locks to Mermaid from mode_select; see above).
                             .story, .tutorial, .versus => unreachable,
@@ -412,11 +423,11 @@ export fn update() void {
             const main_side: s.Winner = if (s.versus_render_swapped) .cpu else .player;
             if (s.winner == main_side) audio.playWinJingle() else audio.playLoseJingle();
             board.beginClosing();
-            // Quick match's "big combo" unlock (GAMEPAD1 always drives s.player).
+            // Versus's "big combo" unlock (GAMEPAD1 always drives s.player).
             game_modes.maybeUnlockForCombo(s.player.combo_display);
-            // Story mode plays single-game stages, not a best-of-N series;
-            // awarding a point here would spuriously trip set_winner.
-            if (s.game_mode != .story) board.awardMatchPoint(s.winner);
+            // Only versus plays a best-of-N series -- story is single-game
+            // stages, and marathon never reaches this shared branch at all.
+            if (s.game_mode == .versus) board.awardMatchPoint(s.winner);
         }
     } else if (s.closing_timer > 0) {
         // Ticked down before input handling so render.render() below can
@@ -433,7 +444,7 @@ export fn update() void {
                         s.story_stage += 1;
                         if (s.story_stage >= game_modes.STORY_STAGES) {
                             // Whole run cleared: reveal the X Hard hint,
-                            // unlock this tier's quick match character, then back to mode select.
+                            // unlock this tier's character, then back to mode select.
                             game_modes.maybeRevealXhard(s.story_tier, s.story_game_overs);
                             game_modes.maybeUnlockForStoryClear(s.story_tier);
                             setMenuPhase(.mode_select);
@@ -454,7 +465,7 @@ export fn update() void {
                         beginStoryFlow(false);
                     }
                 },
-                .quick, .versus => {
+                .versus => {
                     if (s.set_winner != .none) {
                         // Series decided: back to mode select instead of
                         // another countdown, with series state reset.
@@ -467,9 +478,9 @@ export fn update() void {
                         board.beginCountdown();
                     }
                 },
-                // Tutorial never sets s.winner -- it exits via its own
+                // Neither ever sets s.winner -- each exits via its own
                 // early-return branch in update(), never reaching here.
-                .tutorial => unreachable,
+                .tutorial, .marathon => unreachable,
             }
             s.winner = .none;
         }

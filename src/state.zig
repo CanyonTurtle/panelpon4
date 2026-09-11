@@ -76,6 +76,9 @@ pub const Board = struct {
     // Frames at the ceiling, paused only by an in-flight pop/recycle and
     // reset only once the ceiling clears entirely (board.updateDangerTimer).
     danger_timer: u32 = 0,
+    // Marathon-only: a chain/combo adds frames here instead of queuing
+    // garbage (board.freezeFramesForMatch); pauses the rise while positive.
+    rise_freeze: u32 = 0,
 
     // Next id sim_garbage.spawnGarbage hands out, wrapping as u8 -- plenty
     // of distinct ids for any garbage piece actually still around at once.
@@ -160,9 +163,9 @@ pub var menu_phase_timer: u32 = 0;
 // brief flash-and-dissolve overlay -- purely cosmetic, never gates input.
 pub var menu_transition_flash: u32 = 0;
 
-// story/quick/versus as before; tutorial is a scripted single-board
-// walkthrough (see tutorial.zig) with GAMEPAD2 driving `cpu` in versus only.
-pub const GameMode = enum { quick, story, tutorial, versus };
+// Marathon is solo (no `cpu` board involvement at all); tutorial is a
+// scripted single-board walkthrough, GAMEPAD2 drives `cpu` in versus only.
+pub const GameMode = enum { marathon, story, tutorial, versus };
 // Tutorial is first (main.zig's prevMode/nextMode, render_screens'
 // GAME_MODE_LABELS) so a new player's default highlight is the onboarding path.
 pub var game_mode: GameMode = .tutorial;
@@ -216,6 +219,16 @@ pub var countdown_timer: i32 = 0;
 // Purely cosmetic top-to-bottom wipe before drawGameOver -- never touches
 // either Board's actual grid, just skips drawing already-"popped" rows.
 pub var closing_timer: i32 = 0;
+
+// Marathon's own "the run just ended" flag -- its own update-loop branch
+// never sets `winner` (there's no opponent for it to mean anything against).
+pub var marathon_over: bool = false;
+// This run's peak chain so far -- compared against game_modes.marathon_best_chain
+// on game over; reset to 0 right before each run's beginCountdown.
+pub var marathon_run_best_chain: u8 = 0;
+// Set once at game-over, before the record itself updates -- lets the
+// game-over screen show "NEW BEST!" without racing the value it beat.
+pub var marathon_new_best: bool = false;
 
 // 1-10: levels 1-4 are cpu_ai's random flipper at increasing speed; 5-10
 // hand off to cpu_engine's real search instead (cpu_ai.configFor).

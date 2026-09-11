@@ -1,5 +1,5 @@
 // The 3 top-level game modes, plus story's difficulty-profile retuning
-// system (Profile/applyProfile) -- quick match/versus run the baseline.
+// system (Profile/applyProfile) -- marathon/versus run the baseline.
 
 const builtin = @import("builtin");
 const c = @import("constants.zig");
@@ -25,7 +25,7 @@ const Profile = struct {
     danger_forgiveness: u32,
 };
 
-// Today's baseline (see constants.zig's defaults) -- quick match/versus
+// Today's baseline (see constants.zig's defaults) -- marathon/versus
 // run this, so neither one's feel changes just because this system exists.
 const DEFAULT_PROFILE = Profile{
     .rise_scale_pct = 100,
@@ -55,7 +55,7 @@ fn applyProfile(p: Profile) void {
     c.DANGER_FORGIVENESS_FRAMES = p.danger_forgiveness;
 }
 
-// Called by quick match/versus on confirm, so an earlier story run's tier
+// Called by marathon/versus on confirm, so an earlier story run's tier
 // profile can never leak into a different mode.
 pub fn applyDefaultProfile() void {
     applyProfile(DEFAULT_PROFILE);
@@ -113,11 +113,12 @@ pub fn prevUnlocked(party: [characters.COUNT]bool, current: u8) u8 {
     }
 }
 
-// Persisted via WASM-4's disk API. Byte 0 is a version tag; byte 1 packs the
-// X Hard hint (top bit) and the character-unlock bitmask (bit i = ALL[i]) together.
-const SAVE_VERSION: u8 = 2;
+// Persisted via WASM-4's disk API: version tag, packed unlock byte (X Hard
+// hint + character bitmask), then the all-time best marathon chain.
+const SAVE_VERSION: u8 = 3;
 const XHARD_BIT: u8 = 0x80;
 pub var xhard_revealed: bool = false;
+pub var marathon_best_chain: u8 = 0;
 
 // Mermaid alone by default.
 const DEFAULT_UNLOCKED_MASK: u8 = 1 << characters.MERMAID_INDEX;
@@ -126,18 +127,19 @@ pub var unlocked_characters: u8 = DEFAULT_UNLOCKED_MASK;
 // Guarded on builtin.is_test -- see audio.zig's identical Diskr/Diskw reasoning.
 pub fn loadSave() void {
     if (builtin.is_test) return;
-    var buf: [2]u8 = .{ 0, 0 };
+    var buf: [3]u8 = .{ 0, 0, 0 };
     const n = w4.Diskr(&buf, buf.len);
-    if (n >= 2 and buf[0] == SAVE_VERSION) {
+    if (n >= 3 and buf[0] == SAVE_VERSION) {
         xhard_revealed = (buf[1] & XHARD_BIT) != 0;
         unlocked_characters = (buf[1] & ~XHARD_BIT) | DEFAULT_UNLOCKED_MASK;
+        marathon_best_chain = buf[2];
     }
 }
 
 fn saveGame() void {
     if (builtin.is_test) return;
     const packed_byte = unlocked_characters | (if (xhard_revealed) XHARD_BIT else 0);
-    const buf = [2]u8{ SAVE_VERSION, packed_byte };
+    const buf = [3]u8{ SAVE_VERSION, packed_byte, marathon_best_chain };
     _ = w4.Diskw(&buf, buf.len);
 }
 
@@ -191,6 +193,13 @@ fn earnsXhardReveal(tier: StoryTier, game_overs: u32) bool {
 pub fn maybeRevealXhard(tier: StoryTier, game_overs: u32) void {
     if (xhard_revealed or !earnsXhardReveal(tier, game_overs)) return;
     xhard_revealed = true;
+    saveGame();
+}
+
+// Idempotent: only writes when a marathon run actually beat the record.
+pub fn maybeUnlockMarathonBestChain(run_best: u8) void {
+    if (run_best <= marathon_best_chain) return;
+    marathon_best_chain = run_best;
     saveGame();
 }
 
@@ -274,6 +283,17 @@ test "maybeRevealXhard is idempotent and only reveals on a clean hard clear" {
     maybeRevealXhard(.hard, 0);
     try testing.expect(xhard_revealed);
     xhard_revealed = false; // restore so no other test sees a leftover reveal
+}
+
+test "maybeUnlockMarathonBestChain only writes on an actual improvement" {
+    marathon_best_chain = 0;
+    maybeUnlockMarathonBestChain(3);
+    try testing.expectEqual(@as(u8, 3), marathon_best_chain);
+    maybeUnlockMarathonBestChain(2); // worse -- ignored
+    try testing.expectEqual(@as(u8, 3), marathon_best_chain);
+    maybeUnlockMarathonBestChain(5);
+    try testing.expectEqual(@as(u8, 5), marathon_best_chain);
+    marathon_best_chain = 0; // restore
 }
 
 test "charUnlocked/unlockChar: Mermaid starts unlocked, everyone else doesn't" {

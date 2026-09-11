@@ -16,6 +16,7 @@ const game_modes = @import("game_modes.zig");
 const cells = @import("render_cells.zig");
 const screens = @import("render_screens.zig");
 const screens_game = @import("render_screens_game.zig");
+const render_marathon = @import("render_marathon.zig");
 
 pub const drawTitleScreen = screens.drawTitleScreen;
 pub const drawModeSelectScreen = screens.drawModeSelectScreen;
@@ -27,6 +28,7 @@ pub const drawStoryTierScreen = screens.drawStoryTierScreen;
 pub const drawStoryCharacterSelect = screens.drawStoryCharacterSelect;
 pub const drawStoryWalkTransition = screens.drawStoryWalkTransition;
 pub const drawGameOver = screens_game.drawGameOver;
+pub const drawMarathonGameOver = screens_game.drawMarathonGameOver;
 pub const drawCountdown = screens_game.drawCountdown;
 pub const drawTutorialCaption = screens_game.drawTutorialCaption;
 
@@ -370,6 +372,13 @@ pub fn render() void {
     maskBelowBoard();
     drawFrame(main_char);
     drawCursor(main_board, mainIdleFrames());
+    if (s.game_mode == .marathon) {
+        // No opponent/panel column -- marathon's own HUD fills the recentered
+        // board's freed side margins instead (render_marathon.zig).
+        render_marathon.drawHud(main_board, main_char);
+        drawParticles(&main_board.particles);
+        return;
+    }
     drawPanel(main_board, main_char, mainPoints());
     // Only drawn when main_board is really `&s.player`: its popups were spawned in this
     // full-scale coordinate system; a swapped `&s.cpu` board's popups use the micro-board system instead.
