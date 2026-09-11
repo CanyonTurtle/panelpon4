@@ -87,6 +87,12 @@ const TITLE_BOARD_Y: i32 = 58;
 const TITLE_BOARD_L_X: i32 = 20;
 const TITLE_BOARD_R_X: i32 = 98;
 
+// A flat bg-colored plate behind the wordmark (drawMenuPanelFill's trick) --
+// otherwise the parallax tiles show through the logo's own gaps and muddy it.
+const LOGO_PAD: i32 = 1;
+const LOGO_BACKING_W: i32 = logo.TOTAL_W + LOGO_PAD * 2;
+const LOGO_BACKING_H: i32 = @as(i32, @intCast(logo.LOGO_H)) + LOGO_PAD * 2;
+
 pub fn drawTitleScreen() void {
     bg.draw();
     rcpu.drawMicroBoard(&s.player, characters.LIZARD_INDEX, TITLE_BOARD_L_X, TITLE_BOARD_Y);
@@ -95,7 +101,10 @@ pub fn drawTitleScreen() void {
     rcpu.drawMicroCursor(&s.cpu, TITLE_BOARD_R_X, TITLE_BOARD_Y);
 
     const logo_x = @divTrunc(160 - logo.TOTAL_W, 2);
-    drawLogo(logo_x, 16 - panelSlideOffset() + titleLogoBob());
+    const logo_y = 16 - panelSlideOffset() + titleLogoBob();
+    w4.DRAW_COLORS.* = 0x0001;
+    w4.Rect(logo_x - LOGO_PAD, logo_y - LOGO_PAD, LOGO_BACKING_W, LOGO_BACKING_H);
+    drawLogo(logo_x, logo_y);
     w4.DRAW_COLORS.* = 0x0004;
     w4.Text("PRESS X", 52, 40);
 }

@@ -81,6 +81,8 @@ fn updateTitleDemo() void {
         board.resetSharedRows();
         board.resetGame(&s.player);
         board.resetGame(&s.cpu);
+        board.seedAttractDemo(&s.player, 0);
+        board.seedAttractDemo(&s.cpu, 1);
     }
 }
 
@@ -114,6 +116,8 @@ export fn start() void {
     board.resetSharedRows();
     board.resetGame(&s.player);
     board.resetGame(&s.cpu);
+    board.seedAttractDemo(&s.player, 0);
+    board.seedAttractDemo(&s.cpu, 1);
     game_modes.loadSave();
 }
 

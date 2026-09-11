@@ -4,6 +4,7 @@
 const c = @import("constants.zig");
 const s = @import("state.zig");
 const row_cache = @import("state_row_cache.zig");
+const garbage = @import("sim_garbage.zig");
 
 // Frames needed per pixel of rise -- larger is slower.
 const RISE_START_FRAMES_PER_PIXEL: u32 = 32;
@@ -188,6 +189,30 @@ pub fn resetGame(self: *s.Board) void {
     while (r < c.ROWS) : (r += 1) {
         writeNextRow(self, r);
     }
+}
+
+// Attract-mode-only flourish (main.zig's start()/updateTitleDemo): a taller,
+// non-uniform stack topped by a falling garbage slab, never a real match start.
+const ATTRACT_MAX_ROWS: u8 = 8;
+const ATTRACT_GARBAGE_ROWS: u8 = 2;
+// Per-column rows shaved off the uniform stack's top -- two arbitrary, fixed
+// silhouettes (comptime-shuffled particles trick, render_bg.zig, applies here too).
+const ATTRACT_CUTS = [2][c.COLS]u8{ .{ 0, 3, 1, 4, 2, 0 }, .{ 2, 0, 4, 1, 0, 3 } };
+
+pub fn seedAttractDemo(self: *s.Board, variant: u8) void {
+    const top_row = c.SPAWN_ROWS + c.VISIBLE_ROWS - ATTRACT_MAX_ROWS;
+    var r: u8 = top_row;
+    while (r < c.ROWS) : (r += 1) writeNextRow(self, r);
+
+    const cuts = ATTRACT_CUTS[variant % ATTRACT_CUTS.len];
+    for (0..c.COLS) |ci| {
+        var cleared: u8 = 0;
+        while (cleared < cuts[ci]) : (cleared += 1) {
+            self.cellAt(top_row + cleared, @intCast(ci)).* = s.Cell{};
+        }
+    }
+
+    _ = garbage.spawnGarbage(self, ATTRACT_GARBAGE_ROWS, c.COLS, 0);
 }
 
 // Resets the shared row cache and both boards, then starts the "3 2 1
