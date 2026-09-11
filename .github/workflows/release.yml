@@ -41,12 +41,12 @@ jobs:
         run: zig build --release=small
 
       - name: Copy release cart for the wasm4.org submission
-        run: cp zig-out/bin/cart.wasm dist/panelpon4.wasm
-
-      - name: Capture title-screen screenshot (the wasm4.org listing image)
         run: |
           mkdir -p dist
-          node tools/capture-wasm4-screenshot.js dist/panelpon4.wasm dist/panelpon4.png
+          cp zig-out/bin/cart.wasm dist/panelpon4.wasm
+
+      - name: Capture title-screen screenshot (the wasm4.org listing image)
+        run: node tools/capture-wasm4-screenshot.js dist/panelpon4.wasm dist/panelpon4.png
 
       - name: Bundle standalone web build
         run: |
