@@ -1,6 +1,6 @@
 .{
     .name = .panelpon4,
-    .version = "0.2.1",
+    .version = "0.3.0",
     .fingerprint = 0x27e7da5e8473ec94,
     .minimum_zig_version = "0.16.0",
     .dependencies = .{},
