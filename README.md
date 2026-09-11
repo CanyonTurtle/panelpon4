@@ -68,15 +68,14 @@ step, meant for publishing elsewhere (itch.io, [wasm4.org](https://wasm4.org/doc
    fast if they don't match).
 
 That workflow (`release.yml`) builds and tests the cart, then creates a
-GitHub Release for the tag with 5 attached files: `panelpon4.wasm` (the
-cart), `panelpon4.html` (the standalone web bundle), `panelpon4.png`/
-`panelpon4.md` -- a screenshot and manual, captured/generated automatically
-(see `tools/capture-wasm4-screenshot.js` and `wasm4/manual.md`), in exactly
-the form [wasm4.org's distribution guide](https://wasm4.org/docs/guides/distribution/#publish-on-wasm4org)
+GitHub Release for the tag with 4 attached files: `panelpon4.wasm` (the
+cart), `panelpon4.html` (the standalone web bundle), and `panelpon4.png`/
+`panelpon4.md` -- a title-screen screenshot and manual, captured/generated
+automatically (see `tools/capture-wasm4-screenshot.js` and
+`wasm4/manual.md`), in exactly the form [wasm4.org's distribution guide](https://wasm4.org/docs/guides/distribution/#publish-on-wasm4org)
 expects for a PR adding a cart to `/site/static/carts` in a fork of
-`aduros/wasm4` -- download those 3 files and drop them in -- and
-`panelpon4-title.png`, a title-screen screenshot embedded in the release
-notes for flavor, not part of that submission.
+`aduros/wasm4` -- download the 3 files from the release and drop them in.
+`panelpon4.png` is also embedded at the top of the release notes.
 
 ## How to play
 
