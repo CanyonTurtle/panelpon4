@@ -4,7 +4,16 @@
 // wasm4-harness.js's pure-Node WASM4 host (no browser needed) against a
 // *Debug* build of the cart, since the debugXxx exports it relies on
 // (see src/debug.zig) only exist there. This build is throwaway, used only
-// to render one frame; it never touches the shipped release cart.
+// to render two frames; it never touches the shipped release cart.
+//
+// If given a 3rd path, also captures the title screen first -- no debug
+// exports or button presses needed for that one, since main.zig's
+// updateTitleDemo plays both boards against each other via cpu_ai the moment
+// the cart boots. Stepping it forward a few seconds first just gives the
+// attract-mode boards (and the bubble-letter logo's bob, see
+// render_screens.zig's titleLogoBob) something more lively to show off than
+// an empty frame-0 board. This shot is release-notes flavor, not a
+// wasm4.org submission file, so it's scaled up rather than left at 160x160.
 //
 // Drives the cart from the title screen through the default quick-match
 // setup flow (game_mode=.quick, player_character=0, difficulty=1 are all
@@ -16,14 +25,14 @@
 // deterministic, good-looking, non-matching pattern of blocks directly via
 // the debug exports before taking the screenshot.
 //
-// Usage: node tools/capture-wasm4-screenshot.js <cart.wasm> <out.png>
+// Usage: node tools/capture-wasm4-screenshot.js <cart.wasm> <out.png> [title-out.png]
 
 const { loadCart } = require('./wasm4-harness.js');
 
 async function main() {
-  const [, , cartPath, outPath] = process.argv;
+  const [, , cartPath, outPath, titleOutPath] = process.argv;
   if (!cartPath || !outPath) {
-    console.error('Usage: node tools/capture-wasm4-screenshot.js <cart.wasm> <out.png>');
+    console.error('Usage: node tools/capture-wasm4-screenshot.js <cart.wasm> <out.png> [title-out.png]');
     process.exit(1);
   }
 
@@ -31,6 +40,14 @@ async function main() {
   if (!h.debug) {
     console.error(`${cartPath} has no debug exports -- build it without --release=small first.`);
     process.exit(1);
+  }
+
+  if (titleOutPath) {
+    // Let attract-mode play out a few seconds so both boards have pieces on
+    // them and a match or two has happened, rather than shooting frame 0.
+    h.step(260);
+    h.screenshot(titleOutPath, 3);
+    console.log(`Wrote ${titleOutPath}`);
   }
 
   // title -> mode_select (game_mode defaults to .quick)

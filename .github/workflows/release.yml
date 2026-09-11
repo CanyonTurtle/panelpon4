@@ -43,7 +43,7 @@ jobs:
       - name: Capture wasm4.org submission screenshot
         run: |
           mkdir -p dist
-          node tools/capture-wasm4-screenshot.js zig-out/bin/cart.wasm dist/panelpon4.png
+          node tools/capture-wasm4-screenshot.js zig-out/bin/cart.wasm dist/panelpon4.png dist/panelpon4-title.png
 
       - name: Build release cart
         run: zig build --release=small
@@ -66,15 +66,19 @@ jobs:
         with:
           name: panelpon4 ${{ github.ref_name }}
           body: |
+            ![title screen](https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/panelpon4-title.png)
+
             See the [README](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)
             for how to play.
 
             `panelpon4.wasm`/`panelpon4.png`/`panelpon4.md` are the 3 files
             [wasm4.org's distribution guide](https://wasm4.org/docs/guides/distribution/#publish-on-wasm4org)
             expects in a fork's `/site/static/carts` -- copy them there
-            (renaming to your chosen game id) to submit.
+            (renaming to your chosen game id) to submit. `panelpon4-title.png` is
+            just a release-notes screenshot, not part of that submission.
           files: |
             dist/panelpon4.wasm
             dist/panelpon4.png
             dist/panelpon4.md
             dist/panelpon4.html
+            dist/panelpon4-title.png
